@@ -17,3 +17,12 @@
     6. ✅ Parameter probes confirmed divergent semantics for `max_epochs=-1`, `limit_train_batches=0.0`, `deterministic=True`, invalid gradient-clipping configuration, negative reload cadence, and unsupported device counts.
     7. ✅ The repository contains no SyntheticMind test files; `python -m pytest -q --ignore=docs` collected no tests.
     8. No Trainer implementation change was made. The next action requires alignment on the severity-ordered hardening tranche before code is modified.
+
+| Progress Active | PyTorch Lightning Capability Parity Planning | Date: 19 August 2026 | Time: 05:19 AM | Name: Ghost |
+
+    1. ✅ The end-state requirement has been fixed as full user-facing capability parity with core PyTorch Lightning, excluding Fabric from the current boundary and deferring public documentation, release machinery, and upstream test-suite porting.
+    2. ✅ Exact machine-learning terminology, parameter semantics, variable meanings, method contracts, inherited hooks, and lifecycle behavior have been established as compatibility requirements wherever SyntheticMind represents the same concept.
+    3. ✅ `docs/architecture/` and `docs/issues/` exist as local planning surfaces and remain workstation-only under the complete `docs/` ignore policy.
+    4. The project remains in brainstorming and architecture-definition mode. No harness implementation change is authorized by this decision record.
+    5. The required work order is capability boundary, architecture inventory, evidence-backed issue catalogue, compatibility matrix, dependency ordering, foundational implementation, and layer-by-layer verification.
+    6. The next discussion must define the first ordered subsystem and its acceptance boundary before source code is changed.

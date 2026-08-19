@@ -2,7 +2,7 @@
 
     1. SyntheticMind is personal infrastructure rather than a public framework product. Its value is direct control over machine-learning execution for FAU work, research, experiments, and creative enjoyment.
     2. The codebase was built from the ground up so training behavior can be inspected, changed, and reasoned about end to end.
-    3. The present objective is reliability, not breadth for its own sake. A smaller harness with correct lifecycle and optimization semantics is superior to a large interface containing ceremonial or misleading parameters.
+    3. The end state requires PyTorch Lightning-scale user capability, but breadth must be added only through correct sequential components. A broad interface containing ceremonial or misleading parameters is not capability parity.
     4. The harness remains incomplete, and future assessments must distinguish implemented behavior from intended behavior or README claims.
     5. Documentation and release work remain subordinate to executable correctness, focused tests, and capabilities required by actual workloads.
 
@@ -11,7 +11,7 @@
     1. Machine-learning users carry established expectations for terms such as `model`, `max_steps`, `val_check_interval`, `ckpt_path`, `devices`, `precision`, and `global_step`.
     2. Reusing a standard term with different semantics is as dangerous as inventing a replacement term because both create silent operational confusion.
     3. Trainer comparisons must therefore inspect parameter names, accepted values, defaults, validation, lifecycle effects, and checkpoint behavior rather than comparing signatures mechanically.
-    4. SyntheticMind should adopt only the Lightning concepts that strengthen its private mission. Framework-specific compatibility baggage and public-product surface area must not be copied without a concrete workload.
+    4. Core PyTorch Lightning user capabilities are the target except for explicit exclusions such as Fabric in the current phase. Internal framework baggage, public-product ceremony, documentation machinery, and release infrastructure do not need to be copied merely to achieve functional parity.
     5. The generic Python guidelines at `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md` remain the implementation baseline for typing, boundaries, validation, composition, and maintainability.
 
 | Memory | Trainer Audit Evidence | Date: 19 August 2026 | Time: 04:48 AM | Name: Ghost |
@@ -24,3 +24,12 @@
     6. The distributed dataloader reconstruction path does not preserve custom batch samplers, loader subclasses, or every current PyTorch DataLoader constructor field.
     7. Several parameter names collide with established Lightning terminology while implementing different values or edge-case semantics. Hardening must correct existing semantics before adding more parameters.
     8. The preferred boundary is a small Trainer facade backed by immutable validated configuration and focused collaborators. Lightning is a semantic reference, not an architectural template to copy wholesale.
+
+| Memory | Compatibility Hierarchy | Date: 19 August 2026 | Time: 05:19 AM | Name: Ghost |
+
+    1. Compatibility begins with meaning. A familiar name is valid only when its accepted values, defaults, validation, runtime effect, state transitions, errors, and checkpoint consequences preserve the established contract.
+    2. Method names and hook contracts are especially important because machine-learning users commonly inherit framework classes and override lifecycle behavior. Signature shape, invocation order, frequency, and execution context must therefore be treated as public behavior.
+    3. End-to-end workflow parity is the controlling acceptance standard. Matching names without enabling the corresponding workflow is a false interface and must not be counted as implemented capability.
+    4. SyntheticMind's internal decomposition may differ from PyTorch Lightning when the result remains semantically compatible and conforms to the generic Python guidelines.
+    5. The comparison and reconstruction process must move sequentially through dependency layers. Mid-runtime feature insertion before foundational state and lifecycle contracts are stable creates compounding defects.
+    6. Existing source comments are temporarily grandfathered. The current phase neither cleans them nor introduces new source-code comments.
