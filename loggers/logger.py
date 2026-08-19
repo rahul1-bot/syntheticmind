@@ -19,7 +19,9 @@
 # Author: Rahul Sawhney
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from syntheticmind.utilities.types import HyperparameterDict
 
@@ -94,3 +96,40 @@ class Logger(ABC):
             f"name={self._name!r}, "
             f"version={self._version!r})"
         )
+
+
+class _NoOpExperiment:
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        return self._discard
+
+    def __getitem__(self, key: object) -> _NoOpExperiment:
+        return self
+
+    def _discard(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+class _NoOpLogger(Logger):
+    def __init__(self) -> None:
+        super().__init__(Path(), name="", version="")
+        self._experiment: _NoOpExperiment = _NoOpExperiment()
+
+    @property
+    def experiment(self) -> _NoOpExperiment:
+        return self._experiment
+
+    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
+        pass
+
+    def log_hyperparams(self, params: HyperparameterDict) -> None:
+        pass
+
+    def finalize(self) -> None:
+        pass
+
+    def __getitem__(self, key: object) -> _NoOpLogger:
+        return self
+
+    @property
+    def log_dir(self) -> Path:
+        return Path()

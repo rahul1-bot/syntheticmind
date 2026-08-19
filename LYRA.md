@@ -91,3 +91,10 @@
     4. Public timing queries retain the latest stage semantics expected by users, while separate internal measurements provide truthful epoch presentation without redefining the public contract.
     5. The terminal remains restrained: Trainer-installed timers do not emit raw logger chatter, and a completed fit records `max_time reached` in the existing compact summary.
     6. The next sequential Trainer boundary must be selected from source-backed capability dependencies rather than inserting an isolated convenience in the middle of the runtime.
+
+| Strategic Note | Standard Debugging Controls | Date: 19 August 2026 | Time: 01:26 PM | Name: Ghost |
+
+    1. ✅ `fast_dev_run` is now a real all-stage smoke-test contract rather than a decorative constructor flag: it bounds execution, removes sanity work, restores standard validation cadence, and suppresses persistence without removing ordinary user callbacks.
+    2. ✅ `overfit_batches` now selects a stable training and validation subset and disables shuffling across initial, reloaded, standalone, and distributed dataloader paths.
+    3. The implementation remains SyntheticMind-owned. Its private no-operation logger and centralized sampler reconstruction provide the required behavior without copying Lightning namespaces or connector architecture.
+    4. The next dependency-ordered boundary is hardware topology: `accelerator`, `strategy`, `devices`, and `num_nodes` must become one validated execution contract before precision and higher distributed capabilities are expanded.

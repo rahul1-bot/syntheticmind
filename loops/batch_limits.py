@@ -4,12 +4,25 @@ from syntheticmind.utilities.exceptions import MisconfigurationError
 
 __all__: list[str] = [
     "normalize_batch_limit",
+    "normalize_fast_dev_run",
     "normalize_sanity_steps",
     "resolve_batch_limit"
 ]
 
 type BatchLimit = int | float
 type BatchStage = Literal["train", "val", "test", "predict"]
+
+
+def normalize_fast_dev_run(value: int | bool) -> int | bool:
+    if not isinstance(value, (bool, int)):
+        raise TypeError(
+            f"`fast_dev_run` must be a bool or an int, got {value!r}."
+        )
+    if value < 0:
+        raise MisconfigurationError(
+            f"`fast_dev_run={value!r}` is invalid. Expected a non-negative integer or bool."
+        )
+    return True if value == 1 else value
 
 
 def normalize_batch_limit(

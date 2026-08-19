@@ -89,7 +89,7 @@ class EarlyStopping(Callback):
         # patience counter on improvement, and otherwise advances it; when the
         # counter reaches patience, the decision is synchronized across ranks
         # and the trainer's stop flag is raised with the outcome logged.
-        if trainer._sanity_checking:
+        if trainer.fast_dev_run or trainer._sanity_checking:
             return
         metrics: dict[str, float] = trainer.callback_metrics
         current_score: float | None = metrics.get(self.monitor)

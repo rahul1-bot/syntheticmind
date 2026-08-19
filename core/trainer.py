@@ -42,14 +42,20 @@
 import inspect
 import math
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sized
 from datetime import timedelta
 from pathlib import Path
-from typing import Never
+from typing import Never, cast
 
 import torch
 from loguru import logger as log
-from torch.utils.data import DistributedSampler, IterableDataset
+from torch.utils.data import (
+    BatchSampler,
+    DistributedSampler,
+    IterableDataset,
+    Sampler,
+    SequentialSampler,
+)
 
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.accelerators.cpu import CPUAccelerator
@@ -65,9 +71,10 @@ from syntheticmind.core.optimizer import (
     _SchedulerInstance,
     _init_optimizers_and_lr_schedulers,
 )
-from syntheticmind.loggers.logger import Logger
+from syntheticmind.loggers.logger import Logger, _NoOpLogger
 from syntheticmind.loops.batch_limits import (
     normalize_batch_limit,
+    normalize_fast_dev_run,
     normalize_sanity_steps,
 )
 from syntheticmind.loops.evaluation_loop import EvaluationLoop
@@ -220,6 +227,7 @@ class Trainer:
         devices: int = 1,
         callbacks: list[Callback] | None = None,
         logger: Logger | None = None,
+        fast_dev_run: int | bool = False,
         accumulate_grad_batches: int = 1,
         val_check_interval: int | float | str | timedelta | dict[str, int] | None = None,
         check_val_every_n_epoch: int | None = 1,
@@ -234,6 +242,7 @@ class Trainer:
         limit_val_batches: int | float | None = None,
         limit_test_batches: int | float | None = None,
         limit_predict_batches: int | float | None = None,
+        overfit_batches: int | float = 0.0,
         use_distributed_sampler: bool = True,
         sync_batchnorm: bool = False,
         resume_from_checkpoint: str | Path | None = None,
@@ -357,12 +366,24 @@ class Trainer:
         #         scope is invalid, the ``"global_step"`` scope receives a
         #         non-integer interval, or log_every_n_steps is below one.
         #     ValueError: If the accelerator or strategy name is unknown.
-        resolved_min_epochs: int
-        resolved_max_epochs: int
+        resolved_fast_dev_run: int | bool = normalize_fast_dev_run(fast_dev_run)
+        resolved_overfit_batches: int | float = normalize_batch_limit(
+            overfit_batches,
+            "overfit_batches"
+        )
+        fast_dev_run_enabled: bool = bool(resolved_fast_dev_run)
+        overfit_batches_enabled: bool = resolved_overfit_batches > 0
+        effective_max_epochs: int | None = max_epochs
+        effective_max_steps: int = max_steps
+        effective_val_check_interval: int | float | str | timedelta | dict[str, int] | None = (
+            val_check_interval
+        )
+        effective_check_val_every_n_epoch: int | None = check_val_every_n_epoch
+        effective_logger: Logger | None = logger
         resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
-            max_epochs,
+            effective_max_epochs,
             min_epochs,
-            max_steps,
+            effective_max_steps,
             min_steps
         )
         resolved_num_sanity_val_steps: int | float = normalize_sanity_steps(
@@ -384,6 +405,29 @@ class Trainer:
             limit_predict_batches,
             "limit_predict_batches"
         )
+        if overfit_batches_enabled:
+            self.limit_train_batches = resolved_overfit_batches
+            self.limit_val_batches = resolved_overfit_batches
+        if fast_dev_run_enabled:
+            num_batches: int = int(resolved_fast_dev_run)
+            if not overfit_batches_enabled:
+                self.limit_train_batches = num_batches
+                self.limit_val_batches = num_batches
+            self.limit_test_batches = num_batches
+            self.limit_predict_batches = num_batches
+            effective_max_epochs = 1
+            effective_max_steps = num_batches
+            resolved_num_sanity_val_steps = 0
+            effective_val_check_interval = 1.0
+            effective_check_val_every_n_epoch = 1
+            if effective_logger is not None:
+                effective_logger = _NoOpLogger()
+            resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
+                effective_max_epochs,
+                min_epochs,
+                effective_max_steps,
+                min_steps
+            )
         if gradient_clip_val is not None and not isinstance(gradient_clip_val, (int, float)):
             raise TypeError(
                 f"`gradient_clip_val` should be an int or a float. Got {gradient_clip_val}."
@@ -406,6 +450,8 @@ class Trainer:
         self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
         self.num_sanity_val_steps: int | float = resolved_num_sanity_val_steps
+        self.fast_dev_run: int | bool = resolved_fast_dev_run
+        self.overfit_batches: int | float = resolved_overfit_batches
         self.use_distributed_sampler: bool = use_distributed_sampler
         self.sync_batchnorm: bool = sync_batchnorm
         self.deterministic: bool = deterministic
@@ -478,13 +524,13 @@ class Trainer:
             if not progress_callbacks:
                 self.callbacks.append(ProgressBarCallback())
 
-        self.logger: Logger | None = logger
+        self.logger: Logger | None = effective_logger
         self.state: TrainerState = TrainerState()
         self._sanity_checking: bool = False
         self._is_mid_epoch_validation: bool = False
         self._validation_schedule: ValidationSchedule = ValidationSchedule(
-            val_check_interval,
-            check_val_every_n_epoch
+            effective_val_check_interval,
+            effective_check_val_every_n_epoch
         )
         self.val_check_interval: int | float | str | timedelta | dict[str, int] = (
             self._validation_schedule.val_check_interval
@@ -500,7 +546,7 @@ class Trainer:
         )
         self.fit_loop.epoch_loop: TrainingEpochLoop | None = TrainingEpochLoop(
             min_steps=min_steps,
-            max_steps=max_steps,
+            max_steps=effective_max_steps,
             accumulate_grad_batches=accumulate_grad_batches,
             precision=precision,
             gradient_clip_val=self.gradient_clip_val,
@@ -638,13 +684,27 @@ class Trainer:
                     "Multiple val dataloaders are not supported. val_dataloader() must return a single DataLoader."
                 )
 
+            if self.overfit_batches:
+                self.train_dataloader = self._prepare_overfit_dataloader(
+                    self.train_dataloader,
+                    "train"
+                )
+                if self.val_dataloader is not None:
+                    self.val_dataloader = self._prepare_overfit_dataloader(
+                        self.val_dataloader,
+                        "val"
+                    )
+
             # Under a distributed strategy, map-style datasets are re-wrapped
             # with rank-aware samplers so every process sees a disjoint shard;
             # iterable datasets own their sharding and pass through with a
             # warning.
             if self.use_distributed_sampler and self.strategy.is_distributed:
                 if not isinstance(self.train_dataloader.dataset, IterableDataset):
-                    self.train_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.train_dataloader, shuffle=True)
+                    self.train_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(
+                        self.train_dataloader,
+                        shuffle=not bool(self.overfit_batches)
+                    )
                 else:
                     log.warning("Skipping DistributedSampler for train dataloader: IterableDataset detected.")
                 if self.val_dataloader is not None:
@@ -887,6 +947,12 @@ class Trainer:
                     "Multiple val dataloaders are not supported. val_dataloader() must return a single DataLoader."
                 )
 
+            if self.overfit_batches:
+                self.val_dataloader = self._prepare_overfit_dataloader(
+                    self.val_dataloader,
+                    "val"
+                )
+
             if self.use_distributed_sampler and self.strategy.is_distributed:
                 if not isinstance(self.val_dataloader.dataset, IterableDataset):
                     self.val_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.val_dataloader, shuffle=False)
@@ -967,6 +1033,12 @@ class Trainer:
             if isinstance(self.test_dataloader, (list, tuple, dict)):
                 raise MisconfigurationError(
                     "Multiple test dataloaders are not supported. test_dataloader() must return a single DataLoader."
+                )
+
+            if self.overfit_batches:
+                self.test_dataloader = self._prepare_overfit_dataloader(
+                    self.test_dataloader,
+                    "test"
                 )
 
             if self.use_distributed_sampler and self.strategy.is_distributed:
@@ -1056,6 +1128,12 @@ class Trainer:
             if isinstance(self.predict_dataloader, (list, tuple, dict)):
                 raise MisconfigurationError(
                     "Multiple predict dataloaders are not supported. predict_dataloader() must return a single DataLoader."
+                )
+
+            if self.overfit_batches:
+                self.predict_dataloader = self._prepare_overfit_dataloader(
+                    self.predict_dataloader,
+                    "predict"
                 )
 
             if self.use_distributed_sampler and self.strategy.is_distributed:
@@ -1291,21 +1369,7 @@ class Trainer:
         sampler: DistributedSampler = DistributedSampler(
             dataloader.dataset, shuffle=shuffle
         )
-        return torch.utils.data.DataLoader(
-            dataset=dataloader.dataset,
-            batch_size=dataloader.batch_size,
-            sampler=sampler,
-            num_workers=dataloader.num_workers,
-            pin_memory=dataloader.pin_memory,
-            collate_fn=dataloader.collate_fn,
-            drop_last=dataloader.drop_last,
-            timeout=dataloader.timeout,
-            worker_init_fn=dataloader.worker_init_fn,
-            persistent_workers=dataloader.persistent_workers,
-            prefetch_factor=dataloader.prefetch_factor,
-            generator=getattr(dataloader, "generator", None),
-            multiprocessing_context=getattr(dataloader, "multiprocessing_context", None)
-        )
+        return self._replace_dataloader_sampler(dataloader, sampler)
 
     def _wrap_with_unrepeated_sampler(
         self,
@@ -1317,20 +1381,86 @@ class Trainer:
         sampler: _UnrepeatedDistributedSampler = _UnrepeatedDistributedSampler(
             dataloader.dataset, shuffle=False
         )
+        return self._replace_dataloader_sampler(dataloader, sampler)
+
+    def _prepare_overfit_dataloader(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        stage: str
+    ) -> torch.utils.data.DataLoader:
+        if isinstance(dataloader.dataset, IterableDataset):
+            return dataloader
+        active_sampler: object = dataloader.sampler
+        if dataloader.batch_size is None and dataloader.batch_sampler is not None:
+            active_sampler = getattr(dataloader.batch_sampler, "sampler", dataloader.batch_sampler)
+        if isinstance(active_sampler, SequentialSampler):
+            return dataloader
+        warnings.warn(
+            f"`overfit_batches` requires deterministic {stage} batches; "
+            f"disabling {stage} dataloader shuffling.",
+            UserWarning,
+            stacklevel=3
+        )
+        sampler: SequentialSampler = SequentialSampler(
+            cast(Sized, dataloader.dataset)
+        )
+        return self._replace_dataloader_sampler(dataloader, sampler)
+
+    def _replace_dataloader_sampler(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        sampler: Sampler
+    ) -> torch.utils.data.DataLoader:
+        if dataloader.batch_size is None and dataloader.batch_sampler is not None:
+            batch_sampler: object = dataloader.batch_sampler
+            if not isinstance(batch_sampler, BatchSampler):
+                raise MisconfigurationError(
+                    "SyntheticMind cannot inject a sampler into a custom batch sampler that "
+                    "does not subclass torch.utils.data.BatchSampler."
+                )
+            try:
+                replaced_batch_sampler: BatchSampler = type(batch_sampler)(
+                    sampler,
+                    batch_sampler.batch_size,
+                    batch_sampler.drop_last
+                )
+            except TypeError as exception:
+                raise MisconfigurationError(
+                    f"SyntheticMind cannot reconstruct custom batch sampler "
+                    f"{type(batch_sampler).__qualname__}. Its constructor must accept "
+                    "sampler, batch_size, and drop_last."
+                ) from exception
+            return torch.utils.data.DataLoader(
+                dataset=dataloader.dataset,
+                batch_sampler=replaced_batch_sampler,
+                num_workers=dataloader.num_workers,
+                collate_fn=dataloader.collate_fn,
+                pin_memory=dataloader.pin_memory,
+                timeout=dataloader.timeout,
+                worker_init_fn=dataloader.worker_init_fn,
+                multiprocessing_context=getattr(dataloader, "multiprocessing_context", None),
+                generator=getattr(dataloader, "generator", None),
+                prefetch_factor=dataloader.prefetch_factor,
+                persistent_workers=dataloader.persistent_workers,
+                pin_memory_device=getattr(dataloader, "pin_memory_device", ""),
+                in_order=getattr(dataloader, "in_order", True)
+            )
         return torch.utils.data.DataLoader(
             dataset=dataloader.dataset,
             batch_size=dataloader.batch_size,
             sampler=sampler,
-            num_workers=dataloader.num_workers,
-            pin_memory=dataloader.pin_memory,
-            collate_fn=dataloader.collate_fn,
             drop_last=dataloader.drop_last,
+            num_workers=dataloader.num_workers,
+            collate_fn=dataloader.collate_fn,
+            pin_memory=dataloader.pin_memory,
             timeout=dataloader.timeout,
             worker_init_fn=dataloader.worker_init_fn,
-            persistent_workers=dataloader.persistent_workers,
-            prefetch_factor=dataloader.prefetch_factor,
+            multiprocessing_context=getattr(dataloader, "multiprocessing_context", None),
             generator=getattr(dataloader, "generator", None),
-            multiprocessing_context=getattr(dataloader, "multiprocessing_context", None)
+            prefetch_factor=dataloader.prefetch_factor,
+            persistent_workers=dataloader.persistent_workers,
+            pin_memory_device=getattr(dataloader, "pin_memory_device", ""),
+            in_order=getattr(dataloader, "in_order", True)
         )
 
     def _sanity_check_validation(self, module: Module) -> None:

@@ -128,3 +128,12 @@
     4. Step intervals check after each training batch and epoch intervals check after each training epoch. A zero duration therefore prevents training when no minimum is configured, while configured minima intentionally permit an overrun.
     5. Distributed expiration is a collective control decision with logical-OR semantics. Requiring every rank to expire independently could deadlock when rank timing differs around validation, data loading, or callback work.
     6. The public `start_time`, `end_time`, `time_elapsed`, and `time_remaining` methods report standard stage values. Multiple validation passes replace the public validation start and end pair rather than silently converting the query into an aggregate.
+
+| Memory | Debugging and Overfit Semantics | Date: 19 August 2026 | Time: 01:26 PM | Name: Ghost |
+
+    1. `fast_dev_run=1` normalizes to `True` for standard public inspection, while larger integers retain their exact batch count and zero remains disabled. Negative integers and non-integral values are configuration errors.
+    2. Fast development mode overrides ordinary stage limits because its purpose is a predictable end-to-end smoke test. `overfit_batches` is the deliberate exception: when enabled concurrently, it retains the training and validation subset budgets while fast development mode still bounds the other stages and runtime controls.
+    3. Disabling a configured experiment logger by assigning `None` is behaviorally incomplete because inherited module code may access `self.logger.experiment`. A private no-operation logger preserves that execution surface while guaranteeing that metrics, hyperparameters, experiment calls, and finalization produce no user persistence.
+    4. Overfitting a fixed subset requires sampler control in addition to a batch ceiling. Random training or validation samplers would otherwise select a different subset each epoch and make the feature semantically false.
+    5. A custom `BatchSampler` can hide its active sampler behind `batch_sampler.sampler` while `DataLoader.sampler` appears sequential. Shuffle detection and replacement must inspect the batching path that iteration actually consumes.
+    6. Distributed overfit execution must use `DistributedSampler(shuffle=False)`. Sequentializing before distributed wrapping is insufficient if the later wrapper silently restores shuffling.

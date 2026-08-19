@@ -111,15 +111,27 @@ class FitLoop(Loop):
                     assert trainer.datamodule is not None
                     trainer.train_dataloader: DataLoader | None = trainer.datamodule.train_dataloader()
 
+                    if trainer.overfit_batches:
+                        trainer.train_dataloader = trainer._prepare_overfit_dataloader(
+                            trainer.train_dataloader,
+                            "train"
+                        )
+
                     if trainer.use_distributed_sampler and trainer.strategy.is_distributed:
                         if not isinstance(trainer.train_dataloader.dataset, IterableDataset):
                             trainer.train_dataloader: DataLoader | None = trainer._wrap_with_distributed_sampler(
-                                trainer.train_dataloader, shuffle=True
+                                trainer.train_dataloader,
+                                shuffle=not bool(trainer.overfit_batches)
                             )
                     trainer._total_train_batches: int | None = trainer._safe_len(trainer.train_dataloader)
 
                     if trainer.val_dataloader is not None:
                         trainer.val_dataloader: DataLoader | None = trainer.datamodule.val_dataloader()
+                        if trainer.overfit_batches:
+                            trainer.val_dataloader = trainer._prepare_overfit_dataloader(
+                                trainer.val_dataloader,
+                                "val"
+                            )
                         if trainer.use_distributed_sampler and trainer.strategy.is_distributed:
                             if not isinstance(trainer.val_dataloader.dataset, IterableDataset):
                                 trainer.val_dataloader: DataLoader | None = trainer._wrap_with_distributed_sampler(

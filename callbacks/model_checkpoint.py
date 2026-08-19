@@ -135,7 +135,7 @@ class ModelCheckpoint(Callback):
     def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
         # Creates the checkpoint directory on rank zero before the stage
         # begins, so later saves never race on directory creation.
-        if is_rank_zero():
+        if not trainer.fast_dev_run and is_rank_zero():
             self.dirpath.mkdir(parents=True, exist_ok=True)
 
     @override
@@ -145,7 +145,7 @@ class ModelCheckpoint(Callback):
         # first when enabled; the monitored path then requires the monitor
         # key to be present, saves on improvement (or unconditionally with
         # save_top_k=-1), and updates the retention set.
-        if trainer.state.stage != "fit":
+        if trainer.fast_dev_run or trainer.state.stage != "fit":
             return
         if trainer._sanity_checking:
             return
@@ -356,7 +356,7 @@ class ModelCheckpoint(Callback):
         # exists; otherwise the partial weights-only form is written. A
         # failure while saving is logged and suppressed so the original
         # exception continues to propagate.
-        if not self.save_on_exception:
+        if trainer.fast_dev_run or not self.save_on_exception:
             return
         if not is_rank_zero():
             return
