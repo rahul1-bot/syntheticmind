@@ -30,6 +30,7 @@ from torch.utils.data import DataLoader
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import Module
+from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
@@ -46,10 +47,9 @@ class PredictionLoop(Loop):
     # Loop that executes one inference pass over the prediction dataloader each
     # time run() is invoked, returning the collected predict-step outputs in
     # batch order when retention is enabled.
-    def __init__(self, limit_batches: int | float | None = None, return_predictions: bool = True) -> None:
+    def __init__(self, return_predictions: bool = True) -> None:
         # Binds the optional batch ceiling and the output-retention policy.
         super().__init__()
-        self.limit_batches: int | float | None = limit_batches
         self.return_predictions: bool = return_predictions
 
     def run(self) -> list[ModelOutput]:
@@ -177,18 +177,8 @@ class PredictionLoop(Loop):
         # batch) and an integer limit is capped at the total. Without a known
         # total, an integer limit is used directly, a fractional float limit is
         # rejected as a configuration error, and no limit means unbounded.
-        if total is None:
-            if isinstance(self.limit_batches, int):
-                return self.limit_batches
-            if isinstance(self.limit_batches, float) and self.limit_batches != 1.0:
-                from syntheticmind.utilities.exceptions import MisconfigurationError
-                raise MisconfigurationError(
-                    f"limit_batches={self.limit_batches} (float) is not supported "
-                    f"with iterable datasets that have no length. Use an integer limit or set to 1.0."
-                )
-            return None
-        if self.limit_batches is None:
-            return total
-        if isinstance(self.limit_batches, float):
-            return max(1, int(total * self.limit_batches))
-        return min(int(self.limit_batches), total)
+        return resolve_batch_limit(
+            total,
+            self.trainer.limit_predict_batches,
+            "predict"
+        )

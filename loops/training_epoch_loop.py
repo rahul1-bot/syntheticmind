@@ -58,6 +58,7 @@ from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.core.optimizer import SyntheticOptimizer
 from syntheticmind.loggers.logger import Logger
+from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
@@ -161,8 +162,7 @@ class TrainingEpochLoop(Loop):
         precision: str = "32-true",
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: ClipAlgorithm | None = None,
-        log_every_n_steps: int = 10,
-        limit_train_batches: int | float | None = None
+        log_every_n_steps: int = 10
     ) -> None:
         # Stores the epoch-execution configuration supplied by the trainer and
         # initializes the resume-tracking state: the count of completed batches
@@ -176,7 +176,6 @@ class TrainingEpochLoop(Loop):
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
-        self.limit_train_batches: int | float | None = limit_train_batches
         self.validation_ran_this_epoch: bool = False
         self._grad_scaler: GradScaler | None = None
         self._gradients_unscaled: bool = False
@@ -516,21 +515,11 @@ class TrainingEpochLoop(Loop):
         # batch) and an integer limit is capped at the total. Without a known
         # total, an integer limit is used directly, a fractional float limit is
         # rejected as a configuration error, and no limit means unbounded.
-        if total is None:
-            if isinstance(self.limit_train_batches, int):
-                return self.limit_train_batches
-            if isinstance(self.limit_train_batches, float) and self.limit_train_batches != 1.0:
-                from syntheticmind.utilities.exceptions import MisconfigurationError
-                raise MisconfigurationError(
-                    f"limit_train_batches={self.limit_train_batches} (float) is not supported "
-                    f"with iterable datasets that have no length. Use an integer limit or set to 1.0."
-                )
-            return None
-        if self.limit_train_batches is None:
-            return total
-        if isinstance(self.limit_train_batches, float):
-            return max(1, int(total * self.limit_train_batches))
-        return min(int(self.limit_train_batches), total)
+        return resolve_batch_limit(
+            total,
+            self.trainer.limit_train_batches,
+            "train"
+        )
 
     def _clip_gradients(self, optimizer: torch.optim.Optimizer) -> None:
         # Applies the configured clipping algorithm to every parameter in the

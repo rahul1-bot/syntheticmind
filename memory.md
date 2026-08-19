@@ -110,3 +110,12 @@
     4. Float cadence requires a knowable effective training horizon. An unsized loader supports `1.0` at exhaustion, an integer interval, or monotonic time; any other fraction would claim a position that cannot be computed.
     5. Time cadence is not converted into batches. Its clock resets after sanity and real validation, elapsed time carries through epochs excluded by `check_val_every_n_epoch`, and duration representations normalize once at construction.
     6. Cooperative stopping may require validation before exit so monitoring state is coherent, but hard limits do not imply an extra validation pass. These termination causes must remain distinct.
+
+| Memory | Batch Limit Semantics | Date: 19 August 2026 | Time: 01:02 PM | Name: Ghost |
+
+    1. Integer and float batch limits are intentionally not interchangeable at one: `1` selects one batch, while `1.0` selects the complete sized dataloader or unbounded consumption of an unsized loader.
+    2. Zero is a genuine opt-out and must be checked before sized-versus-unsized resolution. Coercing a zero fraction through `max(1, ...)` silently enables work the user explicitly disabled.
+    3. A positive fraction that floors to zero is a configuration error rather than permission to round up. The minimum valid fraction is `1 / number_of_batches`, while an actually empty loader resolves cleanly to zero.
+    4. `None` is an API-level default sentinel and normalizes to `1.0`; the normalized Trainer attributes are the runtime source of truth. This preserves introspection defaults without forcing every loop to understand optional values.
+    5. An unsized dataloader supports a finite integer budget or the complete `1.0` stream. Fractional sampling has no truthful denominator and must fail before iteration; zero remains a valid no-work exception.
+    6. Sanity validation is bounded by both `num_sanity_val_steps` and the resolved validation limit. A restored fit skips sanity entirely so loaded callback, metric, random, and progress state cannot be perturbed before continuation.

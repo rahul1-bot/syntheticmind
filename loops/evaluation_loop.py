@@ -44,6 +44,7 @@ from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loggers.logger import Logger
+from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
@@ -66,15 +67,13 @@ class EvaluationLoop(Loop):
     # values consumed by checkpointing and early stopping.
     def __init__(
         self,
-        stage: Literal["validate", "test"] = "validate",
-        limit_batches: int | float | None = None
+        stage: Literal["validate", "test"] = "validate"
     ) -> None:
         # Binds the evaluation stage and the optional batch ceiling, and
         # initializes the epoch-metric mapping that run() repopulates on every
         # invocation.
         super().__init__()
         self.stage: Literal["validate", "test"] = stage
-        self.limit_batches: int | float | None = limit_batches
         self.epoch_metrics: dict[str, float] = {}
 
     def run(self) -> dict[str, float]:
@@ -113,6 +112,13 @@ class EvaluationLoop(Loop):
         dataloader: DataLoader = self._get_dataloader()  # type: ignore[type-arg]
         total_batches: int | None = self._safe_len(dataloader)
         max_batches: int | None = self._resolve_limit_batches(total_batches)
+        if trainer._sanity_checking and trainer.num_sanity_val_steps != float("inf"):
+            sanity_steps: int = int(trainer.num_sanity_val_steps)
+            max_batches = (
+                sanity_steps
+                if max_batches is None
+                else min(max_batches, sanity_steps)
+            )
         if max_batches == 0:
             module._reset_logged_metrics()
             return self.epoch_metrics
@@ -312,21 +318,10 @@ class EvaluationLoop(Loop):
         # batch) and an integer limit is capped at the total. Without a known
         # total, an integer limit is used directly, a fractional float limit is
         # rejected as a configuration error, and no limit means unbounded.
-        if total is None:
-            if isinstance(self.limit_batches, int):
-                return self.limit_batches
-            if isinstance(self.limit_batches, float) and self.limit_batches != 1.0:
-                from syntheticmind.utilities.exceptions import MisconfigurationError
-                raise MisconfigurationError(
-                    f"limit_batches={self.limit_batches} (float) is not supported "
-                    f"with iterable datasets that have no length. Use an integer limit or set to 1.0."
-                )
-            return None
-        if self.limit_batches is None:
-            return total
-        if isinstance(self.limit_batches, float):
-            return max(1, int(total * self.limit_batches))
-        return min(int(self.limit_batches), total)
+        trainer: Trainer = self.trainer
+        if self.stage == "validate":
+            return resolve_batch_limit(total, trainer.limit_val_batches, "val")
+        return resolve_batch_limit(total, trainer.limit_test_batches, "test")
 
     def _accumulate_metrics(
         self,

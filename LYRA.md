@@ -74,3 +74,11 @@
     3. Epoch eligibility, sanity checks, cooperative stopping, unsized dataloaders, dataloader reloads, and disabled validation share one normalized scheduling authority.
     4. Cumulative raw-batch checkpoint state preserves cross-epoch integer cadence during exact mid-epoch restoration, while final-batch checkpoints remain true epoch boundaries.
     5. The next sequential boundary is the standard `limit_train_batches`, `limit_val_batches`, `limit_test_batches`, `limit_predict_batches`, and sanity-step semantics on which later Trainer capabilities depend.
+
+| Strategic Note | Standard Data-Pass Limits | Date: 19 August 2026 | Time: 01:02 PM | Name: Ghost |
+
+    1. ✅ Every stage now resolves its batch budget through one standard contract owned by the Trainer rather than a separate loop-local interpretation.
+    2. Integer counts, fractional counts, full-loader values, zero disabling, empty loaders, unsized loaders, and impossible sub-batch fractions now retain distinct and verified meanings.
+    3. Sanity validation defaults to two batches, clips to the real validation budget, supports all-batch execution through `-1`, and never replays during checkpoint continuation.
+    4. Effective training, validation, sanity, testing, and prediction batch counts are available through the established public Trainer inspection properties.
+    5. The next foundational termination capability is the standard `max_time` contract, which must stop safely at batch boundaries without confusing hard elapsed-time termination with cooperative stopping.

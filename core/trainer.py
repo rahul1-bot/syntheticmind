@@ -66,6 +66,10 @@ from syntheticmind.core.optimizer import (
     _init_optimizers_and_lr_schedulers,
 )
 from syntheticmind.loggers.logger import Logger
+from syntheticmind.loops.batch_limits import (
+    normalize_batch_limit,
+    normalize_sanity_steps,
+)
 from syntheticmind.loops.evaluation_loop import EvaluationLoop
 from syntheticmind.loops.fit_loop import FitLoop
 from syntheticmind.loops.prediction_loop import PredictionLoop
@@ -224,7 +228,7 @@ class Trainer:
         log_every_n_steps: int = 10,
         enable_progress_bar: bool = True,
         deterministic: bool = False,
-        num_sanity_val_steps: int = 2,
+        num_sanity_val_steps: int | None = None,
         limit_train_batches: int | float | None = None,
         limit_val_batches: int | float | None = None,
         limit_test_batches: int | float | None = None,
@@ -360,6 +364,25 @@ class Trainer:
             max_steps,
             min_steps
         )
+        resolved_num_sanity_val_steps: int | float = normalize_sanity_steps(
+            num_sanity_val_steps
+        )
+        self.limit_train_batches: int | float = normalize_batch_limit(
+            limit_train_batches,
+            "limit_train_batches"
+        )
+        self.limit_val_batches: int | float = normalize_batch_limit(
+            limit_val_batches,
+            "limit_val_batches"
+        )
+        self.limit_test_batches: int | float = normalize_batch_limit(
+            limit_test_batches,
+            "limit_test_batches"
+        )
+        self.limit_predict_batches: int | float = normalize_batch_limit(
+            limit_predict_batches,
+            "limit_predict_batches"
+        )
         if gradient_clip_val is not None and not isinstance(gradient_clip_val, (int, float)):
             raise TypeError(
                 f"`gradient_clip_val` should be an int or a float. Got {gradient_clip_val}."
@@ -381,7 +404,7 @@ class Trainer:
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
-        self.num_sanity_val_steps: int = num_sanity_val_steps
+        self.num_sanity_val_steps: int | float = resolved_num_sanity_val_steps
         self.use_distributed_sampler: bool = use_distributed_sampler
         self.sync_batchnorm: bool = sync_batchnorm
         self.deterministic: bool = deterministic
@@ -465,18 +488,11 @@ class Trainer:
             precision=precision,
             gradient_clip_val=self.gradient_clip_val,
             gradient_clip_algorithm=self.gradient_clip_algorithm,
-            log_every_n_steps=log_every_n_steps,
-            limit_train_batches=limit_train_batches
+            log_every_n_steps=log_every_n_steps
         )
-        self.validate_loop: EvaluationLoop = EvaluationLoop(
-            stage="validate", limit_batches=limit_val_batches
-        )
-        self.test_loop: EvaluationLoop = EvaluationLoop(
-            stage="test", limit_batches=limit_test_batches
-        )
-        self.predict_loop: PredictionLoop = PredictionLoop(
-            limit_batches=limit_predict_batches
-        )
+        self.validate_loop: EvaluationLoop = EvaluationLoop(stage="validate")
+        self.test_loop: EvaluationLoop = EvaluationLoop(stage="test")
+        self.predict_loop: PredictionLoop = PredictionLoop()
 
         self._connect_loops()
 
@@ -763,6 +779,7 @@ class Trainer:
                 self.enable_validation
                 and self.num_sanity_val_steps > 0
                 and self._validation_schedule.is_epoch_eligible(self.current_epoch)
+                and resume_path is None
             ):
                 self._sanity_check_validation(module)
 
@@ -1082,8 +1099,7 @@ class Trainer:
         )
         validation_enabled: bool = self.val_dataloader is not None
         if validation_enabled:
-            limit_batches: int | float | None = self.validate_loop.limit_batches
-            if limit_batches == 0:
+            if self.limit_val_batches == 0:
                 validation_enabled = False
             else:
                 validation_enabled = (
@@ -1315,13 +1331,10 @@ class Trainer:
         module._running_stage: str | None = "sanity_checking"
         self._sanity_checking: bool = True
 
-        original_limit: int | float | None = self.validate_loop.limit_batches
-        self.validate_loop.limit_batches: int | float | None = self.num_sanity_val_steps
         try:
             self.validate_loop.run()
         finally:
             self._sanity_checking: bool = False
-            self.validate_loop.limit_batches: int | float | None = original_limit
 
         self._validation_schedule.mark_validation_end()
 
@@ -1651,6 +1664,48 @@ class Trainer:
     @property
     def enable_validation(self) -> bool:
         return self._validation_schedule.enabled
+
+    @property
+    def num_training_batches(self) -> int | float:
+        assert self.fit_loop.epoch_loop is not None
+        resolved: int | None = self.fit_loop.epoch_loop._resolve_limit_batches(
+            self._total_train_batches
+        )
+        return float("inf") if resolved is None else resolved
+
+    @property
+    def num_val_batches(self) -> list[int | float]:
+        if self.val_dataloader is None:
+            return []
+        resolved: int | None = self.validate_loop._resolve_limit_batches(
+            self._total_val_batches
+        )
+        return [float("inf") if resolved is None else resolved]
+
+    @property
+    def num_sanity_val_batches(self) -> list[int | float]:
+        return [
+            min(self.num_sanity_val_steps, batches)
+            for batches in self.num_val_batches
+        ]
+
+    @property
+    def num_test_batches(self) -> list[int | float]:
+        if self.test_dataloader is None:
+            return []
+        resolved: int | None = self.test_loop._resolve_limit_batches(
+            self._total_test_batches
+        )
+        return [float("inf") if resolved is None else resolved]
+
+    @property
+    def num_predict_batches(self) -> list[int | float]:
+        if self.predict_dataloader is None:
+            return []
+        resolved: int | None = self.predict_loop._resolve_limit_batches(
+            self._total_predict_batches
+        )
+        return [float("inf") if resolved is None else resolved]
 
     @property
     def estimated_stepping_batches(self) -> int | float:
