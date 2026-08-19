@@ -66,3 +66,11 @@
     4. `Trainer.should_stop` is the public stop contract; loop state, EarlyStopping, and downstream callbacks no longer require a project-specific state access path.
     5. Unlimited execution is represented honestly in step estimates and terminal epoch labels, while checkpoint operations remain quiet and atomic-save interruption leaves no temporary artifact.
     6. The next parameter correction is validation scheduling: replace project-specific scope and end-validation controls with the established `val_check_interval` and `check_val_every_n_epoch` contract before expanding further.
+
+| Strategic Note | Standard Validation Cadence | Date: 19 August 2026 | Time: 12:55 PM | Name: Ghost |
+
+    1. ✅ Validation cadence is now expressed exclusively through the standard `val_check_interval` and `check_val_every_n_epoch` contract rather than SyntheticMind-specific scope and epoch-end switches.
+    2. Batch cadence follows raw training progress, float cadence follows the effective epoch horizon, and duration cadence follows monotonic elapsed time. Optimizer accumulation cannot distort any of these meanings.
+    3. Epoch eligibility, sanity checks, cooperative stopping, unsized dataloaders, dataloader reloads, and disabled validation share one normalized scheduling authority.
+    4. Cumulative raw-batch checkpoint state preserves cross-epoch integer cadence during exact mid-epoch restoration, while final-batch checkpoints remain true epoch boundaries.
+    5. The next sequential boundary is the standard `limit_train_batches`, `limit_val_batches`, `limit_test_batches`, `limit_predict_batches`, and sanity-step semantics on which later Trainer capabilities depend.

@@ -45,7 +45,7 @@ import warnings
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -158,9 +158,6 @@ class TrainingEpochLoop(Loop):
         min_steps: int | None = None,
         max_steps: int = -1,
         accumulate_grad_batches: int = 1,
-        val_check_interval: int | float = 1.0,
-        val_check_interval_scope: Literal["epoch", "global_step"] = "epoch",
-        validate_at_epoch_end: bool = True,
         precision: str = "32-true",
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: ClipAlgorithm | None = None,
@@ -175,9 +172,6 @@ class TrainingEpochLoop(Loop):
         self.min_steps: int | None = min_steps
         self.max_steps: int = max_steps
         self.accumulate_grad_batches: int = accumulate_grad_batches
-        self.val_check_interval: int | float = val_check_interval
-        self.val_check_interval_scope: Literal["epoch", "global_step"] = val_check_interval_scope
-        self.validate_at_epoch_end: bool = validate_at_epoch_end
         self.precision: str = precision
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = gradient_clip_algorithm
@@ -187,6 +181,7 @@ class TrainingEpochLoop(Loop):
         self._grad_scaler: GradScaler | None = None
         self._gradients_unscaled: bool = False
         self._completed_batches: int = 0
+        self._total_batches_processed: int = 0
         self._has_entered_batch_loop: bool = False
         self._epoch_start_rng_state: CheckpointDict | None = None
         self._resume_rng_state: CheckpointDict | None = None
@@ -195,6 +190,7 @@ class TrainingEpochLoop(Loop):
         # Clears the mid-epoch resume markers at the start of a new run so a
         # fresh run never replays batch positions recorded by a previous one.
         self._completed_batches: int = 0
+        self._total_batches_processed: int = 0
         self._has_entered_batch_loop: bool = False
 
     def run(self) -> None:
@@ -255,6 +251,7 @@ class TrainingEpochLoop(Loop):
             time.perf_counter() - dataloader_iterator_start_time
         )
         batch_idx: int = -1
+        dataloader_exhausted: bool = False
         while True:
             if self._max_steps_reached(state):
                 break
@@ -264,6 +261,7 @@ class TrainingEpochLoop(Loop):
             try:
                 batch: Batch = next(train_iterator)
             except StopIteration:
+                dataloader_exhausted = True
                 break
             trainer._record_dataloader_fetch_time(
                 "training",
@@ -284,8 +282,6 @@ class TrainingEpochLoop(Loop):
                 hook_response: int | None = module.on_train_batch_start(batch, batch_idx)
             if hook_response == -1:
                 break
-
-            global_step_before_batch: int = state.global_step
 
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
@@ -355,29 +351,27 @@ class TrainingEpochLoop(Loop):
             )
 
             self._completed_batches: int = batch_idx + 1
+            self._total_batches_processed += 1
             tail_is_accumulating: bool = is_accumulating
 
-            val_dataloader: DataLoader | None = trainer.val_dataloader  # type: ignore[type-arg]
-            if (
-                val_dataloader is not None
-                and max_batches is not None
-                and self._should_validate_mid_epoch(
-                    batch_idx,
-                    max_batches,
-                    state,
-                    state.global_step > global_step_before_batch
-                )
+            is_last_batch: bool = (
+                max_batches is not None and batch_idx + 1 >= max_batches
+            )
+            if trainer._validation_schedule.should_validate(
+                state.current_epoch,
+                batch_idx,
+                self._total_batches_processed - 1,
+                is_last_batch,
+                trainer.should_stop,
+                trainer.fit_loop._can_stop_early(state)
             ):
-                if module.automatic_optimization and not is_accumulating:
-                    trainer._call_on_validation_model_zero_grad(module)
-                trainer._is_mid_epoch_validation: bool = True
-                try:
-                    trainer.validate_loop.run()
-                finally:
-                    trainer._is_mid_epoch_validation: bool = False
-                self.validation_ran_this_epoch: bool = True
-                state.set_running_stage("training")
-                module._running_stage: str | None = "training"
+                self._run_scheduled_validation(
+                    trainer,
+                    module,
+                    state,
+                    is_accumulating,
+                    is_last_batch
+                )
 
             if module.automatic_optimization and not is_accumulating:
                 self.update_lr_schedulers(
@@ -426,6 +420,19 @@ class TrainingEpochLoop(Loop):
             epoch_logger_names,
             epoch_progress_bar_names
         )
+        if (
+            dataloader_exhausted
+            and batch_idx >= 0
+            and trainer._validation_schedule.requires_unsized_epoch_end
+            and trainer._validation_schedule.is_epoch_eligible(state.current_epoch)
+        ):
+            self._run_scheduled_validation(
+                trainer,
+                module,
+                state,
+                False,
+                True
+            )
 
     def _make_autocast_context(self, device: torch.device) -> autocast | nullcontext[None]:
         # Returns the autocast context matching the configured precision policy:
@@ -808,31 +815,29 @@ class TrainingEpochLoop(Loop):
         state.increment_global_step()
         module._global_step: int = state.global_step
 
-    def _should_validate_mid_epoch(
+    def _run_scheduled_validation(
         self,
-        batch_idx: int,
-        total_batches: int,
+        trainer: Trainer,
+        module: Module,
         state: TrainerState,
-        optimizer_step_performed: bool
-    ) -> bool:
+        is_accumulating: bool,
+        is_last_batch: bool
+    ) -> None:
         # Decides whether validation runs after the current batch. An integer
         # interval counts either optimizer steps (global_step scope) or batches
         # within the epoch (epoch scope); a float below one selects evenly
         # spaced positions as a fraction of the epoch. The final batch position
         # is excluded in batch-scoped modes because epoch-end validation is
         # scheduled separately by the fit loop.
-        if isinstance(self.val_check_interval, int):
-            if self.val_check_interval_scope == "global_step":
-                return (
-                    optimizer_step_performed
-                    and state.global_step > 0
-                    and state.global_step % self.val_check_interval == 0
-                )
-            return (batch_idx + 1) % self.val_check_interval == 0 and (batch_idx + 1) < total_batches
-        if self.val_check_interval >= 1.0:
-            return False
-        check_every: int = max(1, int(total_batches * self.val_check_interval))
-        return (batch_idx + 1) % check_every == 0 and (batch_idx + 1) < total_batches
+        if module.automatic_optimization and not is_accumulating:
+            trainer._call_on_validation_model_zero_grad(module)
+        trainer._is_mid_epoch_validation = not is_last_batch
+        trainer.validate_loop.run()
+        trainer._is_mid_epoch_validation = False
+        self.validation_ran_this_epoch = True
+        trainer._validation_schedule.mark_validation_end()
+        state.set_running_stage("training")
+        module._running_stage = "training"
 
     def _max_steps_reached(self, state: TrainerState) -> bool:
         return self.max_steps != -1 and state.global_step >= self.max_steps

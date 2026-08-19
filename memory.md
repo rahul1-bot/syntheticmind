@@ -101,3 +101,12 @@
     6. A closure may execute `training_step` several times while one optimizer invocation still represents one global step. LBFGS verification must therefore assert optimizer progress independently from closure-call count.
     7. Unlimited training requires honest presentation and estimation. A negative epoch denominator is not a user-facing horizon, and an unknown horizon remains infinity unless a finite step cap supplies the bound.
     8. Checkpoint persistence is part of termination safety. Interruption during atomic save must remove the temporary file, and normal save or restore must remain silent unless an actionable problem occurs.
+
+| Memory | Validation Cadence Semantics | Date: 19 August 2026 | Time: 12:55 PM | Name: Ghost |
+
+    1. Validation cadence counts raw batches, not optimizer steps. Gradient accumulation, manual optimization, skipped optimizer transitions, and closure repetition must not alter an integer `val_check_interval`.
+    2. `check_val_every_n_epoch=None` changes the integer counter from epoch-local to run-global. Exact checkpoint restoration therefore requires cumulative raw-batch state in addition to `global_step` and within-epoch replay coordinates.
+    3. A final-batch validation is an epoch-boundary checkpoint even though it executes inside the training epoch loop. A mid-epoch validation or validation failure remains a replayable mid-epoch checkpoint.
+    4. Float cadence requires a knowable effective training horizon. An unsized loader supports `1.0` at exhaustion, an integer interval, or monotonic time; any other fraction would claim a position that cannot be computed.
+    5. Time cadence is not converted into batches. Its clock resets after sanity and real validation, elapsed time carries through epochs excluded by `check_val_every_n_epoch`, and duration representations normalize once at construction.
+    6. Cooperative stopping may require validation before exit so monitoring state is coherent, but hard limits do not imply an extra validation pass. These termination causes must remain distinct.

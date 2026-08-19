@@ -243,10 +243,19 @@ class ModelCheckpoint(Callback):
             if completed_batches > 0 or has_entered_batch_loop:
                 epoch_rng_state: CheckpointDict | None = epoch_loop._epoch_start_rng_state
 
-        is_mid_epoch: bool = completed_batches > 0 or has_entered_batch_loop
+        has_batch_progress: bool = completed_batches > 0 or has_entered_batch_loop
+        is_validation_checkpoint: bool = trainer.state.running_stage == "validating"
+        is_mid_epoch: bool = has_batch_progress and (
+            trainer._is_mid_epoch_validation or not is_validation_checkpoint
+        )
         epoch_to_save: int = (
             trainer.state.current_epoch if is_mid_epoch
             else trainer.state.current_epoch + 1
+        )
+        total_batch_idx: int = (
+            epoch_loop._total_batches_processed - 1
+            if epoch_loop is not None
+            else -1
         )
         checkpoint: CheckpointDict = CheckpointState.build(
             model=module,
@@ -257,8 +266,9 @@ class ModelCheckpoint(Callback):
             global_step=trainer.state.global_step,
             callbacks=trainer.callbacks,
             datamodule=trainer.datamodule,
-            completed_batches=completed_batches,
-            epoch_rng_state=epoch_rng_state,
+            completed_batches=completed_batches if is_mid_epoch else 0,
+            total_batch_idx=total_batch_idx,
+            epoch_rng_state=epoch_rng_state if is_mid_epoch else None,
             strategy_name=type(trainer.strategy).__name__,
             world_size=getattr(trainer.strategy, "world_size", 1)
         )

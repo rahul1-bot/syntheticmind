@@ -39,7 +39,6 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.loops.evaluation_loop import EvaluationLoop
 from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.state.trainer_state import TrainerState
@@ -127,6 +126,7 @@ class FitLoop(Loop):
                                     trainer.val_dataloader, shuffle=False
                                 )
                         trainer._total_val_batches: int | None = trainer._safe_len(trainer.val_dataloader)
+                    trainer._configure_validation_schedule(reset_time=False)
 
             # DistributedSampler derives its shuffle permutation from the
             # epoch number; seeding it every epoch prevents repeating the
@@ -147,14 +147,6 @@ class FitLoop(Loop):
                 module.on_train_epoch_start()
 
             self.epoch_loop.run()
-
-            val_dataloader: DataLoader | None = trainer.val_dataloader  # type: ignore[type-arg]
-            if val_dataloader is not None and self.epoch_loop.validate_at_epoch_end:
-                trainer._call_on_validation_model_zero_grad(module)
-                validate_loop: EvaluationLoop = trainer.validate_loop
-                validate_loop.run()
-                state.set_running_stage("training")
-                module._running_stage: str | None = "training"
 
             with module._hook_context("on_train_epoch_end"):
                 for callback in non_monitoring_callbacks:

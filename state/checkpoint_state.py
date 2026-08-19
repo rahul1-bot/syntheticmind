@@ -55,6 +55,7 @@ class CheckpointState:
         callbacks: list[Callback],
         datamodule: DataModule | None = None,
         completed_batches: int = 0,
+        total_batch_idx: int = -1,
         epoch_rng_state: CheckpointDict | None = None,
         strategy_name: str = "SingleDeviceStrategy",
         world_size: int = 1
@@ -74,6 +75,9 @@ class CheckpointState:
 
         if completed_batches > 0:
             checkpoint["completed_batches"] = completed_batches
+
+        if total_batch_idx >= 0:
+            checkpoint["total_batch_idx"] = total_batch_idx
 
         if epoch_rng_state is not None:
             checkpoint["epoch_rng_state"] = epoch_rng_state
@@ -119,7 +123,7 @@ class CheckpointState:
         schedulers: list[_SchedulerInstance] | None,
         callbacks: list[Callback],
         datamodule: DataModule | None = None
-    ) -> tuple[int, int, int, CheckpointDict | None]:
+    ) -> tuple[int, int, int, int, CheckpointDict | None]:
         # Rehydrates live objects from the payload and returns the resume
         # coordinates (epoch, global step, completed batches, epoch RNG state).
         # The list-form optimizer and scheduler keys are preferred; the legacy
@@ -174,14 +178,16 @@ class CheckpointState:
         epoch_value: CheckpointValue | None = checkpoint.get("epoch", 0)
         global_step_value: CheckpointValue | None = checkpoint.get("global_step", 0)
         completed_batches_value: CheckpointValue | None = checkpoint.get("completed_batches", 0)
+        total_batch_idx_value: CheckpointValue | None = checkpoint.get("total_batch_idx", -1)
         epoch: int = int(epoch_value if epoch_value is not None else 0)
         global_step: int = int(global_step_value if global_step_value is not None else 0)
         completed_batches: int = int(completed_batches_value if completed_batches_value is not None else 0)
+        total_batch_idx: int = int(total_batch_idx_value if total_batch_idx_value is not None else -1)
         epoch_rng_state_raw: CheckpointValue | None = checkpoint.get("epoch_rng_state")
         epoch_rng_state: CheckpointDict | None = (
             epoch_rng_state_raw if isinstance(epoch_rng_state_raw, dict) else None
         )
-        return epoch, global_step, completed_batches, epoch_rng_state
+        return epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state
 
     @classmethod
     def _collect_rng_states(cls) -> CheckpointDict:

@@ -43,8 +43,9 @@ import inspect
 import math
 import warnings
 from collections.abc import Callable, Iterator
+from datetime import timedelta
 from pathlib import Path
-from typing import Literal, Never
+from typing import Never
 
 import torch
 from loguru import logger as log
@@ -69,6 +70,7 @@ from syntheticmind.loops.evaluation_loop import EvaluationLoop
 from syntheticmind.loops.fit_loop import FitLoop
 from syntheticmind.loops.prediction_loop import PredictionLoop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
+from syntheticmind.loops.validation_schedule import ValidationSchedule
 from syntheticmind.state.checkpoint_state import CheckpointState
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
@@ -214,9 +216,8 @@ class Trainer:
         callbacks: list[Callback] | None = None,
         logger: Logger | None = None,
         accumulate_grad_batches: int = 1,
-        val_check_interval: int | float = 1.0,
-        val_check_interval_scope: Literal["epoch", "global_step"] = "epoch",
-        validate_at_epoch_end: bool = True,
+        val_check_interval: int | float | str | timedelta | dict[str, int] | None = None,
+        check_val_every_n_epoch: int | None = 1,
         precision: Precision = "32-true",
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None,
@@ -390,14 +391,6 @@ class Trainer:
 
         if accumulate_grad_batches < 1:
             raise MisconfigurationError("accumulate_grad_batches must be >= 1")
-        if isinstance(val_check_interval, int) and val_check_interval < 1:
-            raise MisconfigurationError("val_check_interval (int) must be >= 1")
-        if isinstance(val_check_interval, float) and not (0.0 < val_check_interval <= 1.0):
-            raise MisconfigurationError("val_check_interval (float) must be in (0.0, 1.0]")
-        if val_check_interval_scope not in {"epoch", "global_step"}:
-            raise MisconfigurationError("val_check_interval_scope must be 'epoch' or 'global_step'")
-        if val_check_interval_scope == "global_step" and not isinstance(val_check_interval, int):
-            raise MisconfigurationError("global_step validation intervals require integer val_check_interval")
         if log_every_n_steps < 1:
             raise MisconfigurationError("log_every_n_steps must be >= 1")
 
@@ -449,6 +442,17 @@ class Trainer:
         self.state: TrainerState = TrainerState()
         self._sanity_checking: bool = False
         self._is_mid_epoch_validation: bool = False
+        self._validation_schedule: ValidationSchedule = ValidationSchedule(
+            val_check_interval,
+            check_val_every_n_epoch
+        )
+        self.val_check_interval: int | float | str | timedelta | dict[str, int] = (
+            self._validation_schedule.val_check_interval
+        )
+        self.check_val_every_n_epoch: int | None = (
+            self._validation_schedule.check_val_every_n_epoch
+        )
+        self.val_check_batch: int | None = None
 
         self.fit_loop: FitLoop = FitLoop(
             min_epochs=resolved_min_epochs,
@@ -458,9 +462,6 @@ class Trainer:
             min_steps=min_steps,
             max_steps=max_steps,
             accumulate_grad_batches=accumulate_grad_batches,
-            val_check_interval=val_check_interval,
-            val_check_interval_scope=val_check_interval_scope,
-            validate_at_epoch_end=validate_at_epoch_end,
             precision=precision,
             gradient_clip_val=self.gradient_clip_val,
             gradient_clip_algorithm=self.gradient_clip_algorithm,
@@ -547,6 +548,7 @@ class Trainer:
         self.state.set_stage("fit")
         self._active_exception = None
         self.state.reset_on_run()
+        self._is_mid_epoch_validation = False
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics()
         self._total_train_batches: int | None = None
@@ -624,6 +626,7 @@ class Trainer:
             self._total_train_batches: int | None = self._safe_len(self.train_dataloader)
             if self.val_dataloader is not None:
                 self._total_val_batches: int | None = self._safe_len(self.val_dataloader)
+            self._configure_validation_schedule(reset_time=True)
 
             # Advisory only: single-process loading feeding a non-CPU
             # accelerator is a common throughput mistake worth one warning,
@@ -756,7 +759,11 @@ class Trainer:
                     callback.on_fit_start(self, module)
                 module.on_fit_start()
 
-            if self.val_dataloader is not None and self.num_sanity_val_steps > 0:
+            if (
+                self.enable_validation
+                and self.num_sanity_val_steps > 0
+                and self._validation_schedule.is_epoch_eligible(self.current_epoch)
+            ):
                 self._sanity_check_validation(module)
 
             # Enter the training running-stage and hand control to the fit
@@ -793,6 +800,7 @@ class Trainer:
             module._current_fx_name: str | None = None
             self.state.finish()
             self._active_exception = None
+            self._is_mid_epoch_validation = False
             if self.fit_loop.epoch_loop is not None:
                 self.fit_loop.epoch_loop.reset_on_run()
             if cleanup_exception is not None:
@@ -1067,6 +1075,27 @@ class Trainer:
         except TypeError:
             return None
 
+    def _configure_validation_schedule(self, reset_time: bool) -> None:
+        assert self.fit_loop.epoch_loop is not None
+        max_batches: int | None = self.fit_loop.epoch_loop._resolve_limit_batches(
+            self._total_train_batches
+        )
+        validation_enabled: bool = self.val_dataloader is not None
+        if validation_enabled:
+            limit_batches: int | float | None = self.validate_loop.limit_batches
+            if limit_batches == 0:
+                validation_enabled = False
+            else:
+                validation_enabled = (
+                    self.validate_loop._resolve_limit_batches(self._total_val_batches) != 0
+                )
+        self._validation_schedule.configure(
+            max_batches,
+            validation_enabled,
+            reset_time
+        )
+        self.val_check_batch: int | None = self._validation_schedule.batch_interval
+
     def _record_dataloader_fetch_time(self, running_stage: RunningStage, duration_seconds: float) -> None:
         # Records the most recent blocking dataloader fetch duration for the
         # stage; consumed by runtime diagnostics such as the profiler callback.
@@ -1294,6 +1323,8 @@ class Trainer:
             self._sanity_checking: bool = False
             self.validate_loop.limit_batches: int | float | None = original_limit
 
+        self._validation_schedule.mark_validation_end()
+
         self.validate_loop.epoch_metrics: dict[str, float] = {}
         module._reset_logged_metrics()
         self._callback_metrics.clear()
@@ -1317,8 +1348,9 @@ class Trainer:
         epoch: int
         global_step: int
         completed_batches: int
+        total_batch_idx: int
         epoch_rng_state: CheckpointDict | None
-        epoch, global_step, completed_batches, epoch_rng_state = CheckpointState.restore(
+        epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state = CheckpointState.restore(
             checkpoint=checkpoint,
             model=module,
             optimizers=self.optimizers,
@@ -1333,6 +1365,8 @@ class Trainer:
         if self.fit_loop.epoch_loop is not None:
             if completed_batches > 0:
                 self.fit_loop.epoch_loop._completed_batches: int = completed_batches
+            if total_batch_idx >= 0:
+                self.fit_loop.epoch_loop._total_batches_processed: int = total_batch_idx + 1
             if epoch_rng_state is not None:
                 self.fit_loop.epoch_loop._resume_rng_state: CheckpointDict | None = epoch_rng_state
         with module._hook_context("on_load_checkpoint"):
@@ -1613,6 +1647,10 @@ class Trainer:
     @should_stop.setter
     def should_stop(self, value: bool) -> None:
         self.state.should_stop = value
+
+    @property
+    def enable_validation(self) -> bool:
+        return self._validation_schedule.enabled
 
     @property
     def estimated_stepping_batches(self) -> int | float:
