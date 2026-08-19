@@ -79,7 +79,9 @@ from syntheticmind.core.optimizer import (
 )
 from syntheticmind.core.protocols import OptimizerTrainerProtocol
 from syntheticmind.loggers.configuration import resolve_loggers
+from syntheticmind.loggers.csv_logger import CSVLogger
 from syntheticmind.loggers.logger import Logger
+from syntheticmind.loggers.tensorboard import TensorBoardLogger
 from syntheticmind.loops.batch_limits import (
     normalize_batch_limit,
     normalize_fast_dev_run,
@@ -102,6 +104,13 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.utilities.filesystem import (
+    basename,
+    is_file,
+    list_directory,
+    modified_time,
+    normalize_path,
+)
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.optimizers import _optimizers_to_device
 from syntheticmind.utilities.seed import SeedManager
@@ -530,14 +539,17 @@ class Trainer:
         resolved_enable_model_summary: bool = (
             True if enable_model_summary is None else enable_model_summary
         )
-        self._default_root_dir: Path = (
-            Path.cwd()
-            if default_root_dir is None
-            else Path(default_root_dir).expanduser()
-        )
+        if default_root_dir is None:
+            self._default_root_dir: str = os.getcwd()
+        else:
+            configured_root_value: str | bytes = os.fspath(default_root_dir)
+            if not isinstance(configured_root_value, str):
+                raise TypeError("`default_root_dir` must resolve to a string path.")
+            configured_root_dir: str = configured_root_value
+            self._default_root_dir: str = configured_root_dir or os.getcwd()
         resolved_loggers: list[Logger] = resolve_loggers(
             logger,
-            self._default_root_dir,
+            self.default_root_dir,
             fast_dev_run_enabled
         )
         resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
@@ -622,8 +634,10 @@ class Trainer:
         self.deterministic: bool | Literal["warn"] | None = deterministic
         self.inference_mode: bool = inference_mode
         self._detect_anomaly: bool = detect_anomaly
-        self.resume_from_checkpoint: Path | None = (
-            Path(resume_from_checkpoint) if resume_from_checkpoint is not None else None
+        self.resume_from_checkpoint: str | Path | None = (
+            normalize_path(resume_from_checkpoint)
+            if resume_from_checkpoint is not None
+            else None
         )
         self._ckpt_path: str | Path | None = None
 
@@ -959,7 +973,7 @@ class Trainer:
 
         # An explicit per-call checkpoint path overrides the constructor-level
         # resume path; with both absent the run starts fresh.
-        resume_path: Path | None = self._select_checkpoint_path(
+        resume_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path if ckpt_path is not None else self.resume_from_checkpoint
         )
 
@@ -1279,7 +1293,7 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         metrics: dict[str, float] = {}
-        selected_checkpoint_path: Path | None = self._select_checkpoint_path(
+        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path
         )
         try:
@@ -1385,7 +1399,7 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         metrics: dict[str, float] = {}
-        selected_checkpoint_path: Path | None = self._select_checkpoint_path(
+        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path
         )
         try:
@@ -1525,7 +1539,7 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         predictions: list[ModelOutput] = []
-        selected_checkpoint_path: Path | None = self._select_checkpoint_path(
+        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path
         )
         try:
@@ -2277,7 +2291,7 @@ class Trainer:
 
     def _restore_checkpoint(
         self,
-        path: Path,
+        path: str | Path,
         module: Module,
         weights_only: bool | None = None,
         checkpoint: CheckpointDict | None = None,
@@ -2339,7 +2353,7 @@ class Trainer:
     def _select_checkpoint_path(
         self,
         ckpt_path: str | Path | None
-    ) -> Path | None:
+    ) -> str | Path | None:
         if ckpt_path is None:
             self.ckpt_path = None
             return None
@@ -2349,7 +2363,7 @@ class Trainer:
                     isinstance(callback, ModelCheckpoint)
                     and callback.best_model_path
                 ):
-                    path: Path = Path(callback.best_model_path)
+                    path: str = callback.best_model_path
                     self.ckpt_path = path
                     return path
             raise MisconfigurationError(
@@ -2357,26 +2371,32 @@ class Trainer:
                 "`best_model_path`."
             )
         if isinstance(ckpt_path, str) and ckpt_path == "last":
-            candidates: list[Path] = []
+            candidates: list[str] = []
             for callback in self.checkpoint_callbacks:
                 if not isinstance(callback, ModelCheckpoint):
                     continue
                 if callback.last_model_path:
-                    last_model_path: Path = Path(callback.last_model_path)
-                    if last_model_path.is_file():
+                    last_model_path: str = callback.last_model_path
+                    if is_file(last_model_path):
                         candidates.append(last_model_path)
-                directory: Path = callback._resolve_dirpath(self)
-                if directory.is_dir():
-                    candidates.extend(directory.glob("last*.ckpt"))
-            unique_candidates: set[Path] = set(candidates)
+                directory: str = callback._resolve_dirpath(self)
+                for candidate in list_directory(directory):
+                    candidate_name: str = basename(candidate)
+                    if (
+                        candidate_name.startswith("last")
+                        and candidate_name.endswith(".ckpt")
+                        and is_file(candidate)
+                    ):
+                        candidates.append(candidate)
+            unique_candidates: set[str] = set(candidates)
             if not unique_candidates:
                 raise MisconfigurationError(
                     "`ckpt_path='last'` could not find a last checkpoint. "
                     "Configure `ModelCheckpoint(save_last=True)` first."
                 )
-            path = max(
+            path: str = max(
                 unique_candidates,
-                key=lambda candidate: candidate.stat().st_mtime_ns
+                key=modified_time
             )
             self.ckpt_path = path
             return path
@@ -2384,8 +2404,8 @@ class Trainer:
             raise MisconfigurationError(
                 f"`ckpt_path={ckpt_path!r}` is unavailable without its corresponding integration."
             )
-        path = Path(ckpt_path).expanduser()
-        if not path.is_file():
+        path: str = normalize_path(ckpt_path)
+        if not is_file(path):
             raise FileNotFoundError(f"Checkpoint not found: {path}")
         self.ckpt_path = path
         return path
@@ -2393,8 +2413,9 @@ class Trainer:
     def _resolve_checkpoint_callback_directories(self) -> None:
         for callback in self.checkpoint_callbacks:
             if isinstance(callback, ModelCheckpoint):
+                resolved_dirpath: str = callback._resolve_dirpath(self)
                 dirpath: str | None = (
-                    str(callback._resolve_dirpath(self))
+                    resolved_dirpath
                     if self.is_global_zero
                     else None
                 )
@@ -2844,12 +2865,18 @@ class Trainer:
 
     @property
     def default_root_dir(self) -> str:
-        return str(self._default_root_dir)
+        return normalize_path(self._default_root_dir)
 
     @property
     def log_dir(self) -> str:
         logger: Logger | None = self.logger
-        return str(logger.log_dir if logger is not None else self._default_root_dir)
+        if isinstance(logger, CSVLogger | TensorBoardLogger):
+            dirpath: str = logger.log_dir
+        elif logger is not None:
+            dirpath: str = logger.save_dir
+        else:
+            dirpath: str = self.default_root_dir
+        return self.strategy.broadcast(dirpath)
 
     @property
     def current_epoch(self) -> int:

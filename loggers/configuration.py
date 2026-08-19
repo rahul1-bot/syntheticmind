@@ -5,13 +5,14 @@ from pathlib import Path
 from syntheticmind.loggers.csv_logger import CSVLogger
 from syntheticmind.loggers.logger import Logger, _NoOpLogger
 from syntheticmind.loggers.tensorboard import TensorBoardLogger
+from syntheticmind.utilities.filesystem import basename, is_directory, join_path, list_directory
 
 __all__: list[str] = ["resolve_loggers"]
 
 
 def resolve_loggers(
     logger: bool | Logger | Iterable[Logger] | None,
-    default_root_dir: Path,
+    default_root_dir: str | Path,
     fast_dev_run: bool
 ) -> list[Logger]:
     if logger is None or logger is True:
@@ -39,9 +40,9 @@ def resolve_loggers(
     return loggers
 
 
-def _default_logger(default_root_dir: Path) -> Logger:
+def _default_logger(default_root_dir: str | Path) -> Logger:
     name: str = "syntheticmind_logs"
-    version: str = _next_version(default_root_dir / name)
+    version: str = _next_version(join_path(default_root_dir, name))
     if find_spec("tensorboard") is not None:
         return TensorBoardLogger(
             save_dir=default_root_dir,
@@ -55,13 +56,13 @@ def _default_logger(default_root_dir: Path) -> Logger:
     )
 
 
-def _next_version(root_dir: Path) -> str:
+def _next_version(root_dir: str | Path) -> str:
     versions: list[int] = []
-    if root_dir.is_dir():
-        for path in root_dir.iterdir():
-            if not path.is_dir() or not path.name.startswith("version_"):
-                continue
-            suffix: str = path.name.removeprefix("version_")
-            if suffix.isdigit():
-                versions.append(int(suffix))
+    for path in list_directory(root_dir):
+        name: str = basename(path)
+        if not is_directory(path) or not name.startswith("version_"):
+            continue
+        suffix: str = name.removeprefix("version_")
+        if suffix.isdigit():
+            versions.append(int(suffix))
     return f"version_{max(versions, default=-1) + 1}"

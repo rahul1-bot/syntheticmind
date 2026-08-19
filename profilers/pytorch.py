@@ -15,6 +15,7 @@ from torch.utils.hooks import RemovableHandle
 
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.utilities.filesystem import join_path, local_artifact_path
 
 __all__: list[str] = ["PyTorchProfiler", "RegisterRecordFunction"]
 
@@ -207,14 +208,16 @@ class PyTorchProfiler(Profiler):
             return
         if not self._export_to_chrome or self.dirpath is None:
             return
-        directory: Path = Path(self.dirpath).expanduser()
-        directory.mkdir(parents=True, exist_ok=True)
-        path: Path = directory / self._prepare_filename(
-            action_name=f"{self._last_step_action or 'trace'}-{self._trace_index}",
-            extension=".json"
+        path: str = join_path(
+            self.dirpath,
+            self._prepare_filename(
+                action_name=f"{self._last_step_action or 'trace'}-{self._trace_index}",
+                extension=".json"
+            )
         )
-        self._trace_index += 1
-        profiler.export_chrome_trace(str(path))
+        self._trace_index: int = self._trace_index + 1
+        with local_artifact_path(path) as local_path:
+            profiler.export_chrome_trace(str(local_path))
 
     def _export_stacks(self, profiler: torch.profiler.profile) -> None:
         if not self._export_to_flame_graph:
@@ -226,13 +229,15 @@ class PyTorchProfiler(Profiler):
                 stacklevel=3
             )
             return
-        directory: Path = Path(self.dirpath).expanduser()
-        directory.mkdir(parents=True, exist_ok=True)
-        path: Path = directory / self._prepare_filename(
-            action_name=self._last_step_action or "stacks",
-            extension=".stack"
+        path: str = join_path(
+            self.dirpath,
+            self._prepare_filename(
+                action_name=self._last_step_action or "stacks",
+                extension=".stack"
+            )
         )
-        profiler.export_stacks(str(path), metric=self._metric)
+        with local_artifact_path(path) as local_path:
+            profiler.export_stacks(str(local_path), metric=self._metric)
 
     def _create_profiler(self) -> None:
         if self.profiler is not None or self._nvtx_context is not None:
@@ -348,9 +353,9 @@ class PyTorchProfiler(Profiler):
         log_dir: str | None = None
     ) -> None:
         super().setup(stage=stage, local_rank=local_rank, log_dir=log_dir)
-        self.function_events = None
-        self._trace_index = 0
-        self._last_step_action = None
+        self.function_events: EventList | None = None
+        self._trace_index: int = 0
+        self._last_step_action: str | None = None
 
     @override
     def teardown(self, stage: str | None) -> None:

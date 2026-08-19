@@ -250,3 +250,14 @@
     6. Every new loader must pass through the same validation, overfit sampling, distributed sampling, worker warning, rank synchronization, and effective-length path. Reloading through a smaller duplicate branch causes sampler and horizon drift.
     7. Disabled training and validation paths must not request their loaders. Lazy construction prevents unused hooks from raising or performing expensive work and aligns capability detection with overridden step and dataloader methods.
     8. Real execution matched the pinned infrequent and frequent validation matrices, relative checkpoint cadence, one-read custom checkpoint I/O, dynamic lengths, custom batch samplers, failure teardown, MPS, Gloo, and every supported local launch model.
+
+| Memory | Artifact Paths and Remote Filesystem Semantics | Date: 19 August 2026 | Time: 06:38 PM | Name: Ghost |
+
+    1. Converting a protocol URI through `Path` is data corruption rather than normalization because strings such as `memory://`, `s3://`, and `gs://` lose their protocol meaning. Local normalization and remote preservation require an explicit protocol boundary.
+    2. Logger version discovery must remain observational. Creating a run directory while constructing independently initialized distributed ranks allows later ranks to select a different version before process coordination begins.
+    3. `Trainer.log_dir` performs a strategy broadcast and is therefore an all-rank collective. A rank-zero guard may control filesystem mutation only after every rank has resolved the directory; reversing that order creates a deterministic distributed stall.
+    4. Generic object storage does not guarantee append mode. Durable CSV and line-oriented profiler output must rewrite preserved content or use a storage-specific transactional mechanism instead of assuming local-file semantics from a permissive in-memory test backend.
+    5. Native profilers that accept only local filenames require temporary local staging followed by protocol-aware upload. Passing a remote URI directly can create a malformed local directory or fail inside third-party code that knows nothing about fsspec.
+    6. Symbolic-link checkpoint aliases are meaningful only on local filesystems. Remote `save_last="link"` must fail explicitly, while ordinary remote last checkpoints remain regular persisted objects.
+    7. TensorBoard's current writer directly supports the exercised fsspec memory URI. Optional-backend behavior must still be executed after dependency installation because fallback CSV success does not prove the preferred backend.
+    8. Fast development suppression includes auxiliary runtime telemetry. Replacing the experiment logger with a no-operation logger is insufficient if a callback interprets that placeholder as permission to create its own artifact directory.

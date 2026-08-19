@@ -21,8 +21,8 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
+from syntheticmind.utilities.filesystem import join_path, normalize_path
 from syntheticmind.utilities.types import HyperparameterDict
 
 __all__: list[str] = ["Logger"]
@@ -32,7 +32,12 @@ class Logger(ABC):
     # Abstract base for experiment loggers. Subclasses implement the three
     # abstract members; directory resolution and identity handling live here so
     # every backend lays out its files the same way.
-    def __init__(self, save_dir: Path, name: str = "default", version: str | None = None) -> None:
+    def __init__(
+        self,
+        save_dir: str | Path,
+        name: str = "default",
+        version: str | None = None
+    ) -> None:
         # Binds the immutable logger identity: the root directory, the run name
         # used as a subdirectory, and an optional version subdirectory.
         #
@@ -44,7 +49,7 @@ class Logger(ABC):
         #     version: Optional version label used as the second
         #         subdirectory level; ``None`` omits the segment entirely.
         #         Default: ``None``.
-        self._save_dir: Path = save_dir
+        self._save_dir: str = normalize_path(save_dir)
         self._name: str = name
         self._version: str | None = version
 
@@ -64,7 +69,7 @@ class Logger(ABC):
         raise NotImplementedError
 
     @property
-    def save_dir(self) -> Path:
+    def save_dir(self) -> str:
         # Root directory under which this logger writes.
         return self._save_dir
 
@@ -79,17 +84,16 @@ class Logger(ABC):
         return self._version
 
     @property
-    def log_dir(self) -> Path:
+    def log_dir(self) -> str:
         # Fully resolved output directory (save_dir/name[/version]), created on
         # access so callers can immediately open files inside it.
-        directory: Path = self._log_directory()
-        directory.mkdir(parents=True, exist_ok=True)
+        directory: str = self._log_directory()
         return directory
 
-    def _log_directory(self) -> Path:
-        directory: Path = self._save_dir / self._name
+    def _log_directory(self) -> str:
+        directory: str = join_path(self._save_dir, self._name)
         if self._version is not None:
-            directory: Path = directory / self._version
+            directory: str = join_path(directory, self._version)
         return directory
 
     def __repr__(self) -> str:
@@ -109,7 +113,7 @@ class _NoOpExperiment:
     def __getitem__(self, key: object) -> _NoOpExperiment:
         return self
 
-    def _discard(self, *args: Any, **kwargs: Any) -> None:
+    def _discard(self, *args: object, **kwargs: object) -> None:
         pass
 
 
@@ -135,5 +139,5 @@ class _NoOpLogger(Logger):
         return self
 
     @property
-    def log_dir(self) -> Path:
-        return Path()
+    def log_dir(self) -> str:
+        return ""

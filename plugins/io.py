@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 from syntheticmind.utilities.checkpoint import load_checkpoint, save_checkpoint
+from syntheticmind.utilities.filesystem import remove_path
 from syntheticmind.utilities.types import CheckpointDict, CheckpointValue, MapLocation
 
 __all__: list[str] = [
@@ -56,7 +57,7 @@ class TorchCheckpointIO(CheckpointIO):
                 "storage_options are unsupported by TorchCheckpointIO. "
                 "Use a custom CheckpointIO implementation for storage-specific options."
             )
-        save_checkpoint(checkpoint, Path(path).expanduser())
+        save_checkpoint(checkpoint, path)
 
     @override
     def load_checkpoint(
@@ -66,16 +67,14 @@ class TorchCheckpointIO(CheckpointIO):
         weights_only: bool | None = None
     ) -> CheckpointDict:
         return load_checkpoint(
-            Path(path).expanduser(),
+            path,
             map_location="cpu" if map_location is None else map_location,
             weights_only=weights_only
         )
 
     @override
     def remove_checkpoint(self, path: CheckpointPath) -> None:
-        checkpoint_path: Path = Path(path).expanduser()
-        if checkpoint_path.is_symlink() or checkpoint_path.is_file():
-            checkpoint_path.unlink()
+        remove_path(path, recursive=True)
 
 
 class _WrappingCheckpointIO(CheckpointIO):

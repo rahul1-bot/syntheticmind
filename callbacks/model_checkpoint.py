@@ -52,6 +52,18 @@ from loguru import logger as log
 from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.distributed import is_rank_zero
+from syntheticmind.utilities.filesystem import (
+    exists,
+    file_size,
+    is_file,
+    is_local_path,
+    is_path_within,
+    join_path,
+    make_directory,
+    normalize_path,
+    same_path,
+    write_text,
+)
 from syntheticmind.utilities.types import (
     Batch,
     CheckpointDict,
@@ -197,11 +209,14 @@ class ModelCheckpoint(Checkpoint):
             resolved_every_n_train_steps = every_n_train_steps or 0
             resolved_every_n_epochs = every_n_epochs or 0
 
-        self.dirpath: str | None = (
-            os.path.realpath(os.path.expanduser(os.fspath(dirpath)))
-            if dirpath is not None
-            else None
-        )
+        self.dirpath: str | None = None
+        if dirpath is not None:
+            configured_dirpath: str = os.fspath(dirpath)
+            self.dirpath: str | None = (
+                os.path.realpath(normalize_path(configured_dirpath))
+                if is_local_path(configured_dirpath)
+                else configured_dirpath
+            )
         self.filename: str | None = filename
         self.monitor: str | None = monitor
         self.verbose: bool = verbose
@@ -236,18 +251,23 @@ class ModelCheckpoint(Checkpoint):
         # begins, so later saves never race on directory creation.
         self._resolve_dirpath(trainer)
         assert self.dirpath is not None
-        if stage == "fit" and not trainer.fast_dev_run and is_rank_zero():
-            Path(self.dirpath).mkdir(parents=True, exist_ok=True)
-
-    def _resolve_dirpath(self, trainer: Trainer) -> Path:
-        if self.dirpath is None:
-            root: Path = (
-                Path(trainer.log_dir)
-                if trainer.loggers and not trainer.fast_dev_run
-                else Path(trainer.default_root_dir)
+        if self.save_last == "link" and not is_local_path(self.dirpath):
+            raise ValueError(
+                "`ModelCheckpoint(save_last='link')` is only supported for "
+                f"local file paths, got `dirpath={self.dirpath}`."
             )
-            self.dirpath = str(root / "checkpoints")
-        return Path(self.dirpath)
+        if stage == "fit" and not trainer.fast_dev_run and is_rank_zero():
+            make_directory(self.dirpath)
+
+    def _resolve_dirpath(self, trainer: Trainer) -> str:
+        if self.dirpath is None:
+            root: str = (
+                trainer.log_dir
+                if trainer.loggers and not trainer.fast_dev_run
+                else trainer.default_root_dir
+            )
+            self.dirpath: str | None = join_path(root, "checkpoints")
+        return self.dirpath
 
     @override
     def on_train_start(self, trainer: Trainer, module: Module) -> None:
@@ -375,7 +395,7 @@ class ModelCheckpoint(Checkpoint):
         epoch: int,
         step: int,
         metrics: dict[str, float]
-    ) -> Path:
+    ) -> str:
         # Resolves the filename template against epoch, step, and the metric
         # values, appends the checkpoint suffix when absent, and disambiguates
         # collisions with retained checkpoints through a version suffix so an
@@ -385,7 +405,7 @@ class ModelCheckpoint(Checkpoint):
         }
         candidates["epoch"] = torch.tensor(epoch)
         candidates["step"] = torch.tensor(step)
-        return Path(self._get_metric_interpolated_filepath_name(candidates))
+        return self._get_metric_interpolated_filepath_name(candidates)
 
     def _save_checkpoint(
         self,
@@ -419,16 +439,15 @@ class ModelCheckpoint(Checkpoint):
             None,
             synchronize
         )
-        checkpoint_path: Path = Path(filepath)
         if (
             trainer.is_global_zero
-            and checkpoint_path.is_file()
+            and is_file(filepath)
             and trainer.loggers
         ):
             checkpoint_duration_ms: float = (
                 time.perf_counter() - checkpoint_start_time
             ) * 1000.0
-            checkpoint_size_mb: float = checkpoint_path.stat().st_size / 1048576.0
+            checkpoint_size_mb: float = file_size(filepath) / 1048576.0
             trainer._log_metrics(
                 {
                     "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
@@ -437,7 +456,11 @@ class ModelCheckpoint(Checkpoint):
                 step=trainer.state.global_step
             )
 
-    def _save_partial_checkpoint(self, module: Module, filepath: Path) -> None:
+    def _save_partial_checkpoint(
+        self,
+        module: Module,
+        filepath: str | Path
+    ) -> None:
         # Writes a weights-only payload marked partial in its metadata, used
         # by the exception path when the run failed before the optimizer
         # existed. The write follows the same atomic temporary-file protocol
@@ -449,7 +472,6 @@ class ModelCheckpoint(Checkpoint):
             else nullcontext()
         )
         with profile_context:
-            filepath.parent.mkdir(parents=True, exist_ok=True)
             model_state_dict: CheckpointDict = cast(
                 CheckpointDict,
                 module.state_dict()
@@ -471,7 +493,11 @@ class ModelCheckpoint(Checkpoint):
 
             trainer.strategy.save_checkpoint(checkpoint, filepath)
 
-    def _update_top_k(self, score: torch.Tensor, filepath: Path) -> None:
+    def _update_top_k(
+        self,
+        score: torch.Tensor,
+        filepath: str | Path
+    ) -> None:
         # Inserts the new checkpoint into the retention set, sorts by score in
         # the monitored direction, and evicts entries beyond the retention
         # count, deleting their files unless a file is the recorded best path.
@@ -589,7 +615,7 @@ class ModelCheckpoint(Checkpoint):
                 (resolved_filename, f"v{ver}")
             )
         name: str = f"{resolved_filename}{self.FILE_EXTENSION}"
-        return str(Path(self.dirpath) / name) if self.dirpath is not None else name
+        return join_path(self.dirpath, name) if self.dirpath is not None else name
 
     def _get_metric_interpolated_filepath_name(
         self,
@@ -603,7 +629,7 @@ class ModelCheckpoint(Checkpoint):
             while (
                 self.file_exists(filepath, trainer)
                 if trainer is not None
-                else Path(filepath).exists()
+                else exists(filepath)
             ) and filepath != del_filepath:
                 filepath = self.format_checkpoint_name(
                     monitor_candidates,
@@ -735,7 +761,7 @@ class ModelCheckpoint(Checkpoint):
             delete_filepath
         )
         self.current_score = resolved_current
-        self._update_top_k(resolved_current, Path(filepath))
+        self._update_top_k(resolved_current, filepath)
         self._save_checkpoint(trainer, filepath)
         if self.verbose and trainer.is_global_zero:
             log.info(
@@ -774,7 +800,7 @@ class ModelCheckpoint(Checkpoint):
             while (
                 self.file_exists(filepath, trainer)
                 if synchronize
-                else Path(filepath).exists()
+                else exists(filepath)
             ) and filepath != self.last_model_path:
                 filepath = self.format_checkpoint_name(
                     monitor_candidates,
@@ -827,24 +853,28 @@ class ModelCheckpoint(Checkpoint):
         linkpath: str | Path,
         synchronize: bool
     ) -> None:
-        filepath = Path(filepath)
-        linkpath = Path(linkpath)
+        if not is_local_path(filepath) or not is_local_path(linkpath):
+            raise ValueError("Checkpoint links require local filesystem paths.")
+        local_filepath: Path = Path(normalize_path(filepath))
+        local_linkpath: Path = Path(normalize_path(linkpath))
         if not trainer.is_global_zero:
             if synchronize:
                 trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
             return
-        if filepath.resolve() == linkpath.resolve():
+        if local_filepath.resolve() == local_linkpath.resolve():
             if synchronize:
                 trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
             return
         try:
-            linkpath.parent.mkdir(parents=True, exist_ok=True)
-            if linkpath.is_symlink() or linkpath.is_file():
-                linkpath.unlink()
+            local_linkpath.parent.mkdir(parents=True, exist_ok=True)
+            if local_linkpath.is_symlink() or local_linkpath.is_file():
+                local_linkpath.unlink()
             try:
-                linkpath.symlink_to(os.path.relpath(filepath, linkpath.parent))
+                local_linkpath.symlink_to(
+                    os.path.relpath(local_filepath, local_linkpath.parent)
+                )
             except OSError:
-                shutil.copy2(filepath, linkpath)
+                shutil.copy2(local_filepath, local_linkpath)
         finally:
             if synchronize:
                 trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
@@ -857,17 +887,18 @@ class ModelCheckpoint(Checkpoint):
     ) -> bool:
         if previous == current:
             return False
-        previous_path: Path = Path(previous).absolute()
+        if not is_local_path(previous):
+            return True
         resume_value: object = getattr(
             trainer,
             "ckpt_path",
             trainer.resume_from_checkpoint
         )
-        if resume_value is not None and previous_path == Path(str(resume_value)).absolute():
+        if resume_value is not None and same_path(previous, str(resume_value)):
             return False
         if self.dirpath is None:
             return False
-        return Path(self.dirpath).absolute() in previous_path.parents
+        return is_path_within(previous, self.dirpath)
 
     def _remove_checkpoint(self, trainer: Trainer, filepath: str) -> None:
         del self
@@ -878,8 +909,8 @@ class ModelCheckpoint(Checkpoint):
         return self._every_n_epochs
 
     def file_exists(self, filepath: str | Path, trainer: Trainer) -> bool:
-        exists: bool = Path(filepath).exists() if trainer.is_global_zero else False
-        return trainer.strategy.reduce_boolean_decision(exists)
+        path_exists: bool = exists(filepath) if trainer.is_global_zero else False
+        return trainer.strategy.reduce_boolean_decision(path_exists)
 
     def to_yaml(self, filepath: str | Path | None = None) -> None:
         import yaml
@@ -887,11 +918,11 @@ class ModelCheckpoint(Checkpoint):
         if filepath is None:
             if self.dirpath is None:
                 raise RuntimeError("ModelCheckpoint directory is unresolved before setup.")
-            filepath = Path(self.dirpath) / "best_k_models.yaml"
+            filepath = join_path(self.dirpath, "best_k_models.yaml")
         values: dict[str, float] = {
             path: float(score.item()) for path, score in self.best_k_models.items()
         }
-        Path(filepath).write_text(yaml.safe_dump(values))
+        write_text(filepath, yaml.safe_dump(values))
 
     @override
     def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
@@ -907,16 +938,16 @@ class ModelCheckpoint(Checkpoint):
         if trainer.state.stage != "fit":
             return
         del exception
-        dirpath: Path = self._resolve_dirpath(trainer)
+        dirpath: str = self._resolve_dirpath(trainer)
         monitor_candidates: dict[str, torch.Tensor] = self._monitor_candidates(
             trainer,
             module
         )
-        exception_path: Path = Path(
-            self._get_metric_interpolated_filepath_name(monitor_candidates)
+        exception_path: str = self._get_metric_interpolated_filepath_name(
+            monitor_candidates
         )
         try:
-            dirpath.mkdir(parents=True, exist_ok=True)
+            make_directory(dirpath)
             self._save_checkpoint_internal(
                 trainer,
                 exception_path,

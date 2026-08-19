@@ -20,33 +20,59 @@
 # Author: Rahul Sawhney
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import cast
 
 import torch
+from fsspec.spec import AbstractFileSystem
 
+from syntheticmind.utilities.filesystem import (
+    dirname,
+    exists,
+    get_filesystem,
+    is_local_path,
+    make_directory,
+    normalize_path,
+    open_binary,
+)
 from syntheticmind.utilities.types import CheckpointDict, MapLocation
 
 __all__: list[str] = ["save_checkpoint", "load_checkpoint"]
 
 
-def save_checkpoint(checkpoint: CheckpointDict, filepath: Path) -> None:
+def save_checkpoint(checkpoint: CheckpointDict, filepath: str | Path) -> None:
     # Serializes the payload to a temporary file beside the destination and
     # promotes it with an atomic rename, creating parent directories on demand.
     # Readers therefore observe either the previous complete file or the new
     # complete file, never a partial write.
-    filepath.parent.mkdir(parents=True, exist_ok=True)
+    if not is_local_path(filepath):
+        make_directory(dirname(filepath))
+        filesystem: AbstractFileSystem = get_filesystem(filepath)
+        with tempfile.TemporaryFile() as temporary_file:
+            torch.save(checkpoint, temporary_file)
+            temporary_file.seek(0)
+            with filesystem.transaction:
+                with open_binary(
+                    filepath,
+                    "wb",
+                    filesystem=filesystem
+                ) as destination_file:
+                    shutil.copyfileobj(temporary_file, destination_file)
+        return
+    local_filepath: Path = Path(normalize_path(filepath))
+    local_filepath.parent.mkdir(parents=True, exist_ok=True)
     file_descriptor: int
     tmp_path_str: str
     file_descriptor, tmp_path_str = tempfile.mkstemp(
-        dir=str(filepath.parent), suffix=".tmp"
+        dir=str(local_filepath.parent), suffix=".tmp"
     )
     os.close(file_descriptor)
     tmp_path: Path = Path(tmp_path_str)
     try:
         torch.save(checkpoint, tmp_path)
-        tmp_path.replace(filepath)
+        tmp_path.replace(local_filepath)
     except BaseException:
         if tmp_path.exists():
             tmp_path.unlink()
@@ -54,7 +80,7 @@ def save_checkpoint(checkpoint: CheckpointDict, filepath: Path) -> None:
 
 
 def load_checkpoint(
-    filepath: Path,
+    filepath: str | Path,
     map_location: MapLocation = "cpu",
     weights_only: bool | None = None
 ) -> CheckpointDict:
@@ -62,13 +88,26 @@ def load_checkpoint(
     # offending path instead of letting torch.load fail with a less direct
     # message. map_location defaults to CPU so restoration never requires the
     # original device.
-    if not filepath.exists():
+    if not exists(filepath):
         raise FileNotFoundError(f"Checkpoint not found: {filepath}")
-    checkpoint: object = torch.load(
-        filepath,
-        map_location=map_location,
-        weights_only=False if weights_only is None else weights_only
-    )
+    if is_local_path(filepath):
+        checkpoint: object = torch.load(
+            Path(normalize_path(filepath)),
+            map_location=map_location,
+            weights_only=False if weights_only is None else weights_only
+        )
+    else:
+        with (
+            open_binary(filepath, "rb") as source_file,
+            tempfile.TemporaryFile() as temporary_file
+        ):
+            shutil.copyfileobj(source_file, temporary_file)
+            temporary_file.seek(0)
+            checkpoint = torch.load(
+                temporary_file,
+                map_location=map_location,
+                weights_only=False if weights_only is None else weights_only
+            )
     if not isinstance(checkpoint, dict):
         raise TypeError(
             f"Checkpoint payload must be a dictionary, got {type(checkpoint).__name__}."

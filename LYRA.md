@@ -193,3 +193,12 @@
     3. The standard `DataModule.trainer` attachment is available inside data hooks and survives multiprocessing reconciliation, allowing inherited datamodules to inspect epoch, stage, rank, and Trainer configuration through the expected extension surface.
     4. Loader construction remains SyntheticMind-owned behind one focused internal boundary while preserving established public hook names, return expectations, sampler behavior, batch horizons, and failure semantics.
     5. CPU, MPS, external Gloo, local fork, spawn, and subprocess evidence establishes the supported execution contract; real CUDA remains unavailable. The next dependency-ordered parameter boundary is `default_root_dir`.
+
+| Strategic Note | Artifact Root and Storage Ownership | Date: 19 August 2026 | Time: 06:38 PM | Name: Ghost |
+
+    1. ✅ The standard artifact root now reaches every built-in logger, checkpoint, profiler, and runtime-telemetry consumer without corrupting remote protocol paths or inventing a SyntheticMind-specific storage vocabulary.
+    2. Local filesystem behavior retains normalized paths, atomic checkpoint replacement, and optional symbolic-link semantics, while remote behavior uses protocol-aware I/O and rejects capabilities that cannot be represented truthfully.
+    3. Distributed artifact resolution is collective even when persistence is rank-zero-only. Lazy version selection and all-rank directory agreement prevent duplicate run directories and collective deadlocks.
+    4. Remote object stores cannot be treated as network-mounted local disks. CSV and profiler durability therefore avoids append assumptions, and exporters requiring filenames stage locally before upload.
+    5. CPU, MPS, TensorBoard, CSV, checkpoint continuation, profilers, fast development, exception recovery, and two-rank Gloo execution establish the supported contract. Real cloud-provider credentials and CUDA remain explicit verification boundaries.
+    6. The next sequential public parameter is `enable_autolog_hparams`; its exact capture boundary, model ownership, logger interactions, inheritance behavior, and disabling semantics must be audited before implementation.

@@ -56,7 +56,12 @@ class _TensorBoardWriter(Protocol):
 class TensorBoardLogger(Logger):
     # Concrete logger backed by a lazily created SummaryWriter writing into
     # log_dir. Construction is cheap; the event file appears on first write.
-    def __init__(self, save_dir: Path, name: str = "default", version: str | None = None) -> None:
+    def __init__(
+        self,
+        save_dir: str | Path,
+        name: str = "default",
+        version: str | None = None
+    ) -> None:
         # Binds the logger identity; the writer slot stays empty until the
         # first metric or hyperparameter write.
         super().__init__(save_dir=save_dir, name=name, version=version)

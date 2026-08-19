@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import io
 import re
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
-from typing import TextIO
 
 from torch import nn
+
+from syntheticmind.utilities.filesystem import (
+    append_text,
+    exists,
+    is_local_path,
+    join_path,
+    open_text,
+)
 
 __all__: list[str] = ["Profiler"]
 
@@ -21,7 +30,7 @@ class Profiler(ABC):
     ) -> None:
         self.dirpath: str | Path | None = dirpath
         self.filename: str | None = filename
-        self._output_file: TextIO | None = None
+        self._output_file: io.TextIOWrapper | None = None
         self._write_stream: Callable[[str], object] | None = None
         self._local_rank: int | None = None
         self._stage: str | None = None
@@ -91,13 +100,20 @@ class Profiler(ABC):
         if self._write_stream is not None:
             return
         if self.filename and self.dirpath:
-            directory: Path = Path(self.dirpath).expanduser()
-            directory.mkdir(parents=True, exist_ok=True)
-            path: Path = directory / self._prepare_filename()
-            self._output_file = path.open("a", encoding="utf-8")
-            self._write_stream = self._output_file.write
+            path: str = join_path(self.dirpath, self._prepare_filename())
+            if is_local_path(path):
+                self._output_file: io.TextIOWrapper | None = open_text(
+                    path,
+                    "a" if exists(path) else "w"
+                )
+                self._write_stream: Callable[[str], object] | None = self._output_file.write
+            else:
+                self._write_stream: Callable[[str], object] | None = partial(
+                    append_text,
+                    path
+                )
             return
-        self._write_stream = self._rank_zero_info
+        self._write_stream: Callable[[str], object] | None = self._rank_zero_info
 
     def describe(self) -> None:
         self._prepare_streams()
@@ -128,20 +144,20 @@ class Profiler(ABC):
         local_rank: int | None = None,
         log_dir: str | None = None
     ) -> None:
-        self._stage = stage
-        self._local_rank = local_rank
+        self._stage: str | None = stage
+        self._local_rank: int | None = local_rank
         if self.dirpath is None:
-            self.dirpath = log_dir
+            self.dirpath: str | Path | None = log_dir
 
     def teardown(self, stage: str | None) -> None:
         del stage
-        self._write_stream = None
+        self._write_stream: Callable[[str], object] | None = None
         if self._output_file is not None:
             self._output_file.close()
-            self._output_file = None
+            self._output_file: io.TextIOWrapper | None = None
 
     def _attach_module(self, module: nn.Module) -> None:
-        self._module = module
+        self._module: nn.Module | None = module
 
     def __del__(self) -> None:
         try:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import override
 
 from syntheticmind.profilers.profiler import Profiler
+from syntheticmind.utilities.filesystem import join_path, local_artifact_path
 
 __all__: list[str] = ["AdvancedProfiler"]
 
@@ -59,11 +60,12 @@ class AdvancedProfiler(Profiler):
     def _dump_stats(self, action_name: str, profile: cProfile.Profile) -> None:
         if self.dirpath is None:
             raise RuntimeError("AdvancedProfiler requires dirpath to dump raw statistics.")
-        directory: Path = Path(self.dirpath).expanduser()
-        directory.mkdir(parents=True, exist_ok=True)
-        profile.dump_stats(
-            str(directory / self._prepare_filename(action_name=action_name, extension=".prof"))
+        destination: str = join_path(
+            self.dirpath,
+            self._prepare_filename(action_name=action_name, extension=".prof")
         )
+        with local_artifact_path(destination) as local_path:
+            profile.dump_stats(str(local_path))
 
     @override
     def summary(self) -> str:

@@ -40,7 +40,6 @@ import math
 import os
 import subprocess
 import time
-from pathlib import Path
 from typing import Literal, override
 
 import torch
@@ -49,6 +48,14 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.core.trainer import Trainer
 from syntheticmind.utilities.distributed import is_rank_zero
+from syntheticmind.utilities.filesystem import (
+    append_text,
+    exists,
+    join_path,
+    make_directory,
+    read_text,
+    write_text,
+)
 from syntheticmind.utilities.types import Batch, ModelOutput, RunningStage, StepOutput, TrainerStage
 
 __all__: list[str] = ["RuntimeProfiler"]
@@ -136,10 +143,10 @@ class RuntimeProfiler(Callback):
         self._profile_every_n_steps: int = profile_every_n_steps
         self._include_cpu_metrics: bool = include_cpu_metrics
         self._include_gpu_metrics: bool = include_gpu_metrics
-        self._metrics_directory: Path | None = None
-        self._profile_events_path: Path | None = None
-        self._profile_summary_path: Path | None = None
-        self._profile_config_path: Path | None = None
+        self._metrics_directory: str | None = None
+        self._profile_events_path: str | None = None
+        self._profile_summary_path: str | None = None
+        self._profile_config_path: str | None = None
         self._stage_start_times: dict[ProfileStageName, float] = {}
         self._batch_start_times: dict[ProfileStageName, float] = {}
         self._last_batch_end_times: dict[ProfileStageName, float] = {}
@@ -156,15 +163,25 @@ class RuntimeProfiler(Callback):
         # reloads any existing summary so sequential dispatches accumulate,
         # and records the profiling configuration sidecar. Without a logger
         # the profiler stays disabled for the stage.
+        if trainer.logger is None or trainer.fast_dev_run:
+            return
+        log_dir: str = trainer.log_dir
         if not is_rank_zero():
             return
-        if trainer.logger is None:
-            return
-        self._metrics_directory: Path | None = trainer.logger.save_dir / "metrics"
-        self._metrics_directory.mkdir(parents=True, exist_ok=True)
-        self._profile_events_path: Path | None = self._metrics_directory / "runtime_profile.jsonl"
-        self._profile_summary_path: Path | None = self._metrics_directory / "runtime_profile_summary.json"
-        self._profile_config_path: Path | None = self._metrics_directory / "runtime_profile_config.json"
+        self._metrics_directory: str | None = join_path(log_dir, "metrics")
+        make_directory(self._metrics_directory)
+        self._profile_events_path: str | None = join_path(
+            self._metrics_directory,
+            "runtime_profile.jsonl"
+        )
+        self._profile_summary_path: str | None = join_path(
+            self._metrics_directory,
+            "runtime_profile_summary.json"
+        )
+        self._profile_config_path: str | None = join_path(
+            self._metrics_directory,
+            "runtime_profile_config.json"
+        )
         self._load_existing_profile_summary()
         self._write_profile_config(stage)
 
@@ -579,10 +596,12 @@ class RuntimeProfiler(Callback):
             "running_stage": trainer.state.running_stage,
             "metrics": metrics
         }
-        self._profile_events_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._profile_events_path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(payload, sort_keys=True, allow_nan=False))
-            file.write("\n")
+        serialized_payload: str = json.dumps(
+            payload,
+            sort_keys=True,
+            allow_nan=False
+        )
+        append_text(self._profile_events_path, f"{serialized_payload}\n")
 
     def _write_profile_config(self, stage: TrainerStage) -> None:
         # Writes profiler configuration so telemetry cadence is auditable.
@@ -595,17 +614,17 @@ class RuntimeProfiler(Callback):
             "stage_at_setup": stage,
             "cpu_count": self._cpu_count
         }
-        self._profile_config_path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
-            encoding="utf-8"
+        write_text(
+            self._profile_config_path,
+            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
         )
 
     def _load_existing_profile_summary(self) -> None:
         # Loads prior summary state so sequential trainer dispatches share one run summary.
-        if self._profile_summary_path is None or not self._profile_summary_path.exists():
+        if self._profile_summary_path is None or not exists(self._profile_summary_path):
             return
         try:
-            loaded_payload: object = json.loads(self._profile_summary_path.read_text(encoding="utf-8"))
+            loaded_payload: object = json.loads(read_text(self._profile_summary_path))
         except json.JSONDecodeError:
             return
         if not isinstance(loaded_payload, dict):
@@ -627,9 +646,9 @@ class RuntimeProfiler(Callback):
             metric_name: metric_summary.as_record()
             for metric_name, metric_summary in sorted(self._metric_summaries.items())
         }
-        self._profile_summary_path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
-            encoding="utf-8"
+        write_text(
+            self._profile_summary_path,
+            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
         )
 
     def _finite_metrics(self, metrics: dict[str, float]) -> dict[str, float]:

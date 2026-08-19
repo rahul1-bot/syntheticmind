@@ -97,3 +97,12 @@
     4. ✅ Centralized loader reconstruction preserves overfit behavior, compatible custom batch samplers, distributed sampling and sampler epochs, effective batch totals, rank barriers, actionable worker warnings, and primary exception identity.
     5. ✅ `DataModule.trainer` is attached across all public stages and multiprocessing parent restoration. Focused CPU, MPS, external Gloo, fork, spawn, subprocess, repeated-fit, dynamic-length, failure, signature, compilation, and targeted type-checking probes pass without invoking a linter.
     6. Real CUDA execution remains hardware-bounded. The next dependency-ordered phase is the pinned `default_root_dir` contract and its interaction with logger, checkpoint, profiler, and distributed artifact ownership.
+
+| Progress Complete | Standard Artifact Root Capability | Date: 19 August 2026 | Time: 06:38 PM | Name: Ghost |
+
+    1. ✅ The pinned `default_root_dir` parameter and property semantics are implemented for current-directory fallback, local strings, path-like values, `file://` paths, and protocol-preserving remote URIs.
+    2. ✅ Default and custom logger destinations, lazy version discovery, TensorBoard and CSV persistence, checkpoint save, restore, retention and selection, profiler reports and traces, runtime telemetry, and YAML sidecars share protocol-aware artifact handling.
+    3. ✅ Remote streams remain operational when append mode is rejected, local checkpoint links retain fallback copy behavior, remote links fail explicitly, and fast development produces no leaked artifacts.
+    4. ✅ Focused execution covers CPU, MPS, local files, in-memory remote storage, default TensorBoard, explicit CSV, full checkpoint continuation, exception recovery, Simple, Advanced, PyTorch, and runtime profiler artifacts, and real two-rank Gloo ownership.
+    5. ✅ Python compilation, diff validation, direct guideline review, and targeted Pyright inspection report no defects without invoking Ruff or another linter.
+    6. Real cloud-provider credentials and CUDA hardware remain environment-bounded. The next dependency-ordered phase is the pinned `enable_autolog_hparams` contract.
