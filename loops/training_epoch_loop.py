@@ -189,6 +189,9 @@ class TrainingEpochLoop(Loop):
         self._epoch_start_rng_state: CheckpointDict | None = None
         self._resume_rng_state: CheckpointDict | None = None
         self._resume_checkpoint_rng_state: CheckpointDict | None = None
+        self._combined_loader_state_restored: bool = False
+        self._completed_loader_states: list[dict[str, object]] = []
+        self._use_completed_loader_states: bool = False
         self.is_last_batch: bool = False
 
     def reset_on_run(self) -> None:
@@ -203,6 +206,9 @@ class TrainingEpochLoop(Loop):
         self._has_entered_batch_loop = False
         self._resume_rng_state = None
         self._resume_checkpoint_rng_state = None
+        self._combined_loader_state_restored: bool = False
+        self._completed_loader_states: list[dict[str, object]] = []
+        self._use_completed_loader_states: bool = False
 
     def run(self) -> None:
         # Executes one complete training epoch. The sequence per batch is:
@@ -245,27 +251,62 @@ class TrainingEpochLoop(Loop):
         self._grad_scaler: torch.GradScaler | None = trainer.scaler
 
         total_batches: int | None = combined_loader._length()
-        max_batches: int | None = total_batches
         epoch_accum: dict[str, MetricAccumulator] = {}
         epoch_logger_names: set[str] = set()
         epoch_progress_bar_names: set[str] = set()
-        skip_batches: int = self._completed_batches
+        loader_state_restored: bool = self._combined_loader_state_restored
+        self._combined_loader_state_restored: bool = False
+        resume_batch_offset: int = (
+            self._completed_batches if loader_state_restored else 0
+        )
+        if total_batches is not None and resume_batch_offset > total_batches:
+            raise MisconfigurationError(
+                f"Checkpoint progress contains {resume_batch_offset} completed batches, "
+                f"but the resumed training loader has only {total_batches} batches."
+            )
+        max_batches: int | None = (
+            None
+            if total_batches is None
+            else total_batches - resume_batch_offset
+            if loader_state_restored
+            else total_batches
+        )
+        skip_batches: int = (
+            0 if loader_state_restored else self._completed_batches
+        )
         tail_is_accumulating: bool = False
+        epoch_completed: bool = max_batches == 0
 
         self._has_entered_batch_loop: bool = True
+        loader_is_sized: bool = combined_loader._has_sized_iterables()
+        self._use_completed_loader_states: bool = (
+            combined_loader._has_stateful_iterables()
+            and not loader_is_sized
+        )
+        if self._use_completed_loader_states:
+            self._completed_loader_states: list[dict[str, object]] = (
+                combined_loader._state_dicts()
+            )
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_train_dataloader"):
             data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
                 combined_loader,
                 max_batches,
-                sized=combined_loader._has_sized_iterables()
+                sized=loader_is_sized,
+                state_snapshot=(
+                    combined_loader._state_dicts
+                    if self._use_completed_loader_states
+                    else None
+                )
             )
             train_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
+        if data_fetcher.done:
+            epoch_completed: bool = True
         trainer._record_dataloader_iterator_creation_time(
             "training",
             time.perf_counter() - dataloader_iterator_start_time
         )
-        batch_idx: int = -1
+        batch_idx: int = resume_batch_offset - 1
         while not data_fetcher.done:
             trainer._raise_if_sigterm()
             if self._max_steps_reached(state):
@@ -280,6 +321,7 @@ class TrainingEpochLoop(Loop):
                     fetched_batch: object
                     fetched_batch, _, _ = next(train_iterator)
             except StopIteration:
+                epoch_completed: bool = True
                 break
             trainer._record_dataloader_fetch_time(
                 "training",
@@ -369,6 +411,7 @@ class TrainingEpochLoop(Loop):
             )
             if hook_response == -1:
                 self.is_last_batch = True
+                epoch_completed: bool = True
                 break
 
             # Automatic path: the loss is divided by the accumulation factor
@@ -409,6 +452,18 @@ class TrainingEpochLoop(Loop):
 
             self._completed_batches = batch_idx + 1
             self._total_batches_processed += 1
+            if self._use_completed_loader_states:
+                fetched_loader_states: object | None = data_fetcher.state
+                if not isinstance(fetched_loader_states, list):
+                    raise RuntimeError(
+                        "Stateful training data did not produce a loader-state snapshot."
+                    )
+                self._completed_loader_states: list[dict[str, object]] = cast(
+                    list[dict[str, object]],
+                    fetched_loader_states
+                )
+            if self.is_last_batch:
+                epoch_completed: bool = True
 
             trainer._call_callback_hooks(
                 module,
@@ -500,6 +555,28 @@ class TrainingEpochLoop(Loop):
                 state.current_epoch + 1,
                 update_plateau_schedulers=False
             )
+
+        combined_loader_states: list[dict[str, object]] = (
+            self._completed_loader_states
+            if self._use_completed_loader_states
+            else combined_loader._state_dicts()
+        )
+        if combined_loader_states and not epoch_completed:
+            trainer._last_train_dataloader_states = (
+                combined_loader_states
+            )
+            trainer._train_dataloader_state_active = True
+            trainer._last_train_dataloader_batches_completed = (
+                self._completed_batches
+            )
+            trainer._last_train_total_batch_idx = (
+                self._total_batches_processed - 1
+            )
+        else:
+            trainer._last_train_dataloader_states = []
+            trainer._train_dataloader_state_active = False
+            trainer._last_train_dataloader_batches_completed = 0
+            trainer._last_train_total_batch_idx = -1
 
         self._has_entered_batch_loop: bool = False
         self._completed_batches: int = 0

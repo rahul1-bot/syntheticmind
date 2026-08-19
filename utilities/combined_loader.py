@@ -467,8 +467,20 @@ class CombinedLoader(Iterable[_IteratorOutput]):
         iterable: object
         for iterable in self._flattened:
             if isinstance(iterable, _StatefulIterable):
-                state_dicts.append(iterable.state_dict())
+                state_dict: object = iterable.state_dict()
+                if not isinstance(state_dict, dict):
+                    raise TypeError(
+                        f"{type(iterable).__qualname__}.state_dict() must return a "
+                        f"mapping, got {type(state_dict).__qualname__}."
+                    )
+                state_dicts.append(cast(_LoaderState, state_dict))
         return state_dicts
+
+    def _has_stateful_iterables(self) -> bool:
+        return any(
+            isinstance(iterable, _StatefulIterable)
+            for iterable in self._flattened
+        )
 
     def _load_state_dicts(self, state_dicts: list[_LoaderState]) -> None:
         if not state_dicts:
@@ -481,7 +493,8 @@ class CombinedLoader(Iterable[_IteratorOutput]):
         if len(stateful_iterables) != len(state_dicts):
             raise RuntimeError(
                 f"CombinedLoader has {len(stateful_iterables)} stateful iterables, "
-                f"but received {len(state_dicts)} states."
+                f"but received {len(state_dicts)} states. Ensure the resumed loader "
+                "collection matches the checkpointed loader collection."
             )
         iterable: _StatefulIterable
         state_dict: _LoaderState

@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import cast, override
 
 __all__: list[str] = []
@@ -11,13 +11,16 @@ class _DataFetcher[T](Iterator[T]):
         self,
         iterable: Iterable[T],
         max_batches: int | None,
-        sized: bool
+        sized: bool,
+        state_snapshot: Callable[[], object] | None = None
     ) -> None:
         self._iterable: Iterable[T] = iterable
         self._max_batches: int | None = max_batches
         self._prefetch: bool = not sized
         self._iterator: Iterator[T] | None = None
         self._next_batch: T | object = _MISSING_BATCH
+        self._state_snapshot: Callable[[], object] | None = state_snapshot
+        self.state: object | None = None
         self.fetched: int = 0
         self.done: bool = max_batches == 0
 
@@ -25,6 +28,7 @@ class _DataFetcher[T](Iterator[T]):
     def __iter__(self) -> _DataFetcher[T]:
         self._iterator = iter(self._iterable)
         self._next_batch = _MISSING_BATCH
+        self.state: object | None = None
         self.fetched = 0
         self.done = self._max_batches == 0
         if self._prefetch and not self.done:
@@ -55,6 +59,8 @@ class _DataFetcher[T](Iterator[T]):
         batch = cast(T, self._next_batch)
         self._next_batch = _MISSING_BATCH
         self.fetched += 1
+        if self._state_snapshot is not None:
+            self.state: object | None = self._state_snapshot()
         if (
             self._max_batches is not None
             and self.fetched >= self._max_batches

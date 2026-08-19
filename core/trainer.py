@@ -880,6 +880,10 @@ class Trainer:
         self._val_combined_loader: CombinedLoader | None = None
         self._test_combined_loader: CombinedLoader | None = None
         self._predict_combined_loader: CombinedLoader | None = None
+        self._last_train_dataloader_states: list[dict[str, object]] = []
+        self._train_dataloader_state_active: bool = False
+        self._last_train_dataloader_batches_completed: int = 0
+        self._last_train_total_batch_idx: int = -1
         self._train_dataloader_source: object | None = None
         self._val_dataloader_source: object | None = None
         self._test_dataloader_source: object | None = None
@@ -986,6 +990,10 @@ class Trainer:
         self._total_val_batches: list[int | None] | None = None
         self._train_combined_loader: CombinedLoader | None = None
         self._val_combined_loader: CombinedLoader | None = None
+        self._last_train_dataloader_states: list[dict[str, object]] = []
+        self._train_dataloader_state_active: bool = False
+        self._last_train_dataloader_batches_completed: int = 0
+        self._last_train_total_batch_idx: int = -1
         self._last_train_dataloader_reload_epoch = None
         self._last_val_dataloader_reload_epoch = None
         self.fit_loop.should_stop = False
@@ -2394,38 +2402,160 @@ class Trainer:
                     f"{type(batch_sampler).__qualname__}. Its constructor must accept "
                     "sampler, batch_size, and drop_last."
                 ) from exception
-            return torch.utils.data.DataLoader(
-                dataset=dataloader.dataset,
-                batch_sampler=replaced_batch_sampler,
-                num_workers=dataloader.num_workers,
-                collate_fn=dataloader.collate_fn,
-                pin_memory=dataloader.pin_memory,
-                timeout=dataloader.timeout,
-                worker_init_fn=dataloader.worker_init_fn,
-                multiprocessing_context=getattr(dataloader, "multiprocessing_context", None),
-                generator=getattr(dataloader, "generator", None),
-                prefetch_factor=dataloader.prefetch_factor,
-                persistent_workers=dataloader.persistent_workers,
-                pin_memory_device=getattr(dataloader, "pin_memory_device", ""),
-                in_order=getattr(dataloader, "in_order", True)
+            return self._reinstantiate_dataloader(
+                dataloader,
+                {
+                    "dataset": dataloader.dataset,
+                    "batch_sampler": replaced_batch_sampler,
+                    "num_workers": dataloader.num_workers,
+                    "collate_fn": dataloader.collate_fn,
+                    "pin_memory": dataloader.pin_memory,
+                    "timeout": dataloader.timeout,
+                    "worker_init_fn": dataloader.worker_init_fn,
+                    "multiprocessing_context": getattr(
+                        dataloader,
+                        "multiprocessing_context",
+                        None
+                    ),
+                    "generator": getattr(dataloader, "generator", None),
+                    "prefetch_factor": dataloader.prefetch_factor,
+                    "persistent_workers": dataloader.persistent_workers,
+                    "pin_memory_device": getattr(
+                        dataloader,
+                        "pin_memory_device",
+                        ""
+                    ),
+                    "in_order": getattr(dataloader, "in_order", True)
+                }
             )
-        return torch.utils.data.DataLoader(
-            dataset=dataloader.dataset,
-            batch_size=dataloader.batch_size,
-            sampler=sampler,
-            drop_last=dataloader.drop_last,
-            num_workers=dataloader.num_workers,
-            collate_fn=dataloader.collate_fn,
-            pin_memory=dataloader.pin_memory,
-            timeout=dataloader.timeout,
-            worker_init_fn=dataloader.worker_init_fn,
-            multiprocessing_context=getattr(dataloader, "multiprocessing_context", None),
-            generator=getattr(dataloader, "generator", None),
-            prefetch_factor=dataloader.prefetch_factor,
-            persistent_workers=dataloader.persistent_workers,
-            pin_memory_device=getattr(dataloader, "pin_memory_device", ""),
-            in_order=getattr(dataloader, "in_order", True)
+        return self._reinstantiate_dataloader(
+            dataloader,
+            {
+                "dataset": dataloader.dataset,
+                "batch_size": dataloader.batch_size,
+                "sampler": sampler,
+                "drop_last": dataloader.drop_last,
+                "num_workers": dataloader.num_workers,
+                "collate_fn": dataloader.collate_fn,
+                "pin_memory": dataloader.pin_memory,
+                "timeout": dataloader.timeout,
+                "worker_init_fn": dataloader.worker_init_fn,
+                "multiprocessing_context": getattr(
+                    dataloader,
+                    "multiprocessing_context",
+                    None
+                ),
+                "generator": getattr(dataloader, "generator", None),
+                "prefetch_factor": dataloader.prefetch_factor,
+                "persistent_workers": dataloader.persistent_workers,
+                "pin_memory_device": getattr(
+                    dataloader,
+                    "pin_memory_device",
+                    ""
+                ),
+                "in_order": getattr(dataloader, "in_order", True)
+            }
         )
+
+    def _reinstantiate_dataloader(
+        self,
+        dataloader: torch.utils.data.DataLoader,
+        constructor_kwargs: dict[str, object]
+    ) -> torch.utils.data.DataLoader:
+        constructor: type[torch.utils.data.DataLoader] = type(dataloader)
+        parameters: dict[str, inspect.Parameter] = dict(
+            inspect.signature(constructor).parameters
+        )
+        base_constructor: type[object]
+        for base_constructor in constructor.__mro__[1:]:
+            if not issubclass(base_constructor, torch.utils.data.DataLoader):
+                continue
+            base_name: str
+            base_parameter: inspect.Parameter
+            for base_name, base_parameter in inspect.signature(
+                base_constructor
+            ).parameters.items():
+                parameters.setdefault(base_name, base_parameter)
+        dataloader_parameters: set[str] = set(
+            inspect.signature(torch.utils.data.DataLoader).parameters
+        )
+        accepts_kwargs: bool = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        for name, parameter in parameters.items():
+            if (
+                name not in constructor_kwargs
+                and parameter.kind
+                in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY
+                }
+                and hasattr(dataloader, name)
+                and (
+                    parameter.default is inspect.Parameter.empty
+                    or name not in dataloader_parameters
+                )
+            ):
+                constructor_kwargs[name] = getattr(dataloader, name)
+        missing: list[str] = [
+            name
+            for name, parameter in parameters.items()
+            if parameter.default is inspect.Parameter.empty
+            and parameter.kind
+            in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY
+            }
+            and name not in constructor_kwargs
+        ]
+        if missing:
+            raise MisconfigurationError(
+                f"SyntheticMind cannot reconstruct {constructor.__qualname__} with a "
+                f"replacement sampler because required constructor values {missing!r} "
+                "are not available as dataloader attributes."
+            )
+        positional_args: list[object] = []
+        name: str
+        parameter: inspect.Parameter
+        for name, parameter in parameters.items():
+            if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+                positional_args.append(constructor_kwargs.pop(name))
+        if not accepts_kwargs:
+            unexpected: list[str] = [
+                name
+                for name in constructor_kwargs
+                if name not in parameters
+            ]
+            if unexpected:
+                raise MisconfigurationError(
+                    f"SyntheticMind cannot reconstruct {constructor.__qualname__} with a "
+                    f"replacement sampler because its constructor does not accept "
+                    f"DataLoader parameters {unexpected!r}."
+                )
+        try:
+            constructor_callable: Callable[..., object] = cast(
+                Callable[..., object],
+                constructor
+            )
+            rebuilt: object = constructor_callable(
+                *positional_args,
+                **constructor_kwargs
+            )
+        except TypeError as exception:
+            raise MisconfigurationError(
+                f"SyntheticMind could not reconstruct {constructor.__qualname__} with "
+                "the replacement sampler. Its constructor must preserve the standard "
+                "DataLoader parameter contract."
+            ) from exception
+        if not isinstance(rebuilt, torch.utils.data.DataLoader):
+            raise TypeError(
+                f"Reconstructing {constructor.__qualname__} returned "
+                f"{type(rebuilt).__qualname__}, not a DataLoader."
+            )
+        return rebuilt
 
     def _sanity_check_validation(self, module: Module) -> None:
         # Runs a bounded validation pass before training to surface evaluation
@@ -2490,18 +2620,44 @@ class Trainer:
             precision_plugin=self.precision_plugin,
             restore_datamodule_state=restore_datamodule_state
         )
+        combined_loader_states: list[dict[str, object]] = (
+            CheckpointState.combined_loader_states(loaded_checkpoint)
+            if self.state.stage == "fit"
+            else []
+        )
+        if combined_loader_states:
+            self._last_train_dataloader_states: list[dict[str, object]] = (
+                combined_loader_states
+            )
+            self._train_dataloader_state_active: bool = True
+            self._last_train_dataloader_batches_completed: int = completed_batches
+            self._last_train_total_batch_idx: int = total_batch_idx
+            if self._train_combined_loader is not None:
+                self._train_combined_loader._load_state_dicts(
+                    combined_loader_states
+                )
         self.state.load_state_dict({"current_epoch": epoch, "global_step": global_step})
         module._current_epoch = epoch
         module._global_step = global_step
         if self.fit_loop.epoch_loop is not None:
+            loader_state_restored: bool = bool(
+                combined_loader_states
+                and self._train_combined_loader is not None
+            )
+            self.fit_loop.epoch_loop._combined_loader_state_restored = (
+                loader_state_restored
+            )
             if completed_batches > 0:
                 self.fit_loop.epoch_loop._completed_batches = completed_batches
             if total_batch_idx >= 0:
                 self.fit_loop.epoch_loop._total_batches_processed = total_batch_idx + 1
-            if epoch_rng_state is not None:
+            if epoch_rng_state is not None and not loader_state_restored:
                 self.fit_loop.epoch_loop._resume_rng_state = epoch_rng_state
             checkpoint_rng_state: object | None = loaded_checkpoint.get("rng_state")
-            if completed_batches > 0 and isinstance(checkpoint_rng_state, dict):
+            if (
+                (completed_batches > 0 or loader_state_restored)
+                and isinstance(checkpoint_rng_state, dict)
+            ):
                 self.fit_loop.epoch_loop._resume_checkpoint_rng_state = cast(
                     CheckpointDict,
                     checkpoint_rng_state
@@ -2613,6 +2769,35 @@ class Trainer:
         is_mid_epoch: bool = has_batch_progress and (
             self._is_mid_epoch_validation or not is_validation_checkpoint
         )
+        combined_loader_states: list[dict[str, object]] = []
+        if (
+            is_mid_epoch
+            and self._train_combined_loader is not None
+        ):
+            combined_loader_states: list[dict[str, object]] = (
+                epoch_loop._completed_loader_states
+                if epoch_loop is not None
+                and epoch_loop._use_completed_loader_states
+                else self._train_combined_loader._state_dicts()
+            )
+        elif self._train_dataloader_state_active:
+            combined_loader_states: list[dict[str, object]] = (
+                self._last_train_dataloader_states
+            )
+        checkpoint_completed_batches: int = (
+            completed_batches
+            if is_mid_epoch
+            else self._last_train_dataloader_batches_completed
+            if self._train_dataloader_state_active
+            else 0
+        )
+        checkpoint_total_batch_idx: int = (
+            total_batch_idx
+            if total_batch_idx >= 0
+            else self._last_train_total_batch_idx
+            if self._train_dataloader_state_active
+            else -1
+        )
         epoch: int = self.state.current_epoch
         if (
             self.state.stage == "fit"
@@ -2633,9 +2818,10 @@ class Trainer:
             global_step=self.state.global_step,
             callbacks=self.callbacks,
             datamodule=self.datamodule,
-            completed_batches=completed_batches if is_mid_epoch else 0,
-            total_batch_idx=total_batch_idx,
+            completed_batches=checkpoint_completed_batches,
+            total_batch_idx=checkpoint_total_batch_idx,
             epoch_rng_state=epoch_rng_state if is_mid_epoch else None,
+            combined_loader_states=combined_loader_states,
             strategy_name=type(self.strategy).__name__,
             world_size=self.world_size,
             precision_plugin=self.precision_plugin,

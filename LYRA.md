@@ -254,3 +254,11 @@
     3. A real datamodule remains distinguishable from direct data. SyntheticMind does not conceal missing lifecycle state behind a fabricated compatibility adapter.
     4. The batch-transfer order defect was accelerator-critical rather than cosmetic: user hooks and model steps now receive the converted, device-resident batch on CPU and MPS paths.
     5. The next sequential capability is checkpointed stateful-loader continuation. Cursor restoration and deterministic replay require one proven owner for every completed batch before the capability can be claimed.
+
+| Strategic Note | Stateful Data Continuity | Date: 19 August 2026 | Time: 09:21 PM | Name: Ghost |
+
+    1. ✅ Stateful training data now survives checkpoint boundaries through the established combined-loader state path without replacing SyntheticMind ownership or exposing a project-specific public term.
+    2. Cursor restoration and deterministic replay have mutually exclusive ownership. Logical batch progress remains continuous, while mixed stateful and stateless leaves preserve the pinned continuation behavior.
+    3. Unsized prefetch, natural exhaustion, step-limited termination, multiprocessing parent transfer, and concrete dataloader subclass reconstruction are explicit correctness boundaries rather than incidental implementation details.
+    4. Restricted checkpoint loading is executable with tensor-backed NumPy random state, and historical ndarray checkpoints retain backward-compatible restoration.
+    5. Real TorchData workers, stochastic datasets, CPU, MPS, every local DDP launcher, and external Gloo establish the supported continuation contract. The next action is a fresh pinned Trainer surface audit rather than an assumed capability list.

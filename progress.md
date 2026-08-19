@@ -160,9 +160,17 @@
     4. ✅ Checkpoint, exception, hyperparameter, teardown, nested-loader, CPU, MPS, fork, spawn, and subprocess paths preserve the selected data source and pass focused runtime verification.
     5. ✅ Python compilation, diff validation, exact signature inspection, and targeted Pyright verification pass without invoking Ruff or another linter.
 
-| Progress Todo | Stateful Dataloader Checkpoint Continuation | Date: 19 August 2026 | Time: 08:58 PM | Name: Ghost |
+| Progress Complete | Stateful Dataloader Checkpoint Continuation | Date: 19 August 2026 | Time: 09:21 PM | Name: Ghost |
 
-    1. Audit the pinned loader-state capture and restoration path together with SyntheticMind checkpoint progress, `CombinedLoader`, data fetching, and deterministic prefix replay.
-    2. Define replay ownership for stateless, stateful, nested, and mixed loader collections so no completed sample is skipped twice or replayed through optimization.
-    3. Implement the smallest standard-compatible checkpoint state boundary, then verify uninterrupted equivalence across shuffled data, model-side randomness, reload cadence, failure saves, CPU, MPS, and supported distributed launch modes.
-    4. Keep `verbose` result presentation and omitted-model checkpoint selection recorded as separate parameter-semantic audit items rather than falsely claiming their behavior through accepted arguments alone.
+    1. ✅ Stateful loader state is captured, validated, restored, and persisted under the established combined-loader checkpoint schema without double-applying deterministic prefix replay.
+    2. ✅ Logical batch progress, remaining horizons, mixed collections, cycling loaders, unsized prefetch snapshots, empty streams, natural exhaustion, and step-limited termination preserve their distinct continuation meanings.
+    3. ✅ Concrete stateful dataloader subclasses and available custom constructor values survive sampler replacement for distributed and overfit execution.
+    4. ✅ Multiprocessing parent reconciliation retains post-worker loader state, and restricted checkpoint loading retains exact random continuation through a safe NumPy state representation with legacy compatibility.
+    5. ✅ Focused custom and TorchData execution covers zero and two workers, stochastic dataset state, full and weights-only checkpoints, failure saves, CPU, MPS, fork, spawn, nested worker spawn, subprocess, external Gloo, Python compilation, diff validation, and targeted type checking without invoking a linter.
+
+| Progress Todo | Remaining Trainer Surface Audit | Date: 19 August 2026 | Time: 09:21 PM | Name: Ghost |
+
+    1. Recompute the pinned public Trainer constructor, entry-point, property, and method surface against the current SyntheticMind implementation after completion of the foundational data path.
+    2. Separate universal training capability from Lightning product ownership, promotional integration, Fabric, release work, documentation, and upstream-suite replication before selecting any missing name.
+    3. Prioritize accepted parameters whose runtime meaning remains incomplete, including `verbose` result presentation and omitted-model checkpoint selection, then harden the earliest dependency without unrelated code surgery.
+    4. Continue to require executable CPU and MPS evidence, supported distributed evidence where ownership changes, Python compilation, targeted type checking, source-comment preservation, and synchronized `dev` and `origin/dev` commits after each completed phase.

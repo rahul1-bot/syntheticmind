@@ -69,6 +69,12 @@ class _WorkerStateTransfer:
             total_val_batches=trainer._total_val_batches,
             total_test_batches=trainer._total_test_batches,
             total_predict_batches=trainer._total_predict_batches,
+            train_dataloader_states=trainer._last_train_dataloader_states,
+            train_dataloader_state_active=trainer._train_dataloader_state_active,
+            train_dataloader_batches_completed=(
+                trainer._last_train_dataloader_batches_completed
+            ),
+            train_total_batch_idx=trainer._last_train_total_batch_idx,
             received_sigterm=trainer.received_sigterm,
             is_last_batch=trainer.is_last_batch,
             global_state=_GlobalState.capture()
@@ -123,6 +129,16 @@ class _WorkerStateTransfer:
         trainer._total_val_batches = worker_output.total_val_batches
         trainer._total_test_batches = worker_output.total_test_batches
         trainer._total_predict_batches = worker_output.total_predict_batches
+        trainer._last_train_dataloader_states = (
+            worker_output.train_dataloader_states
+        )
+        trainer._train_dataloader_state_active = (
+            worker_output.train_dataloader_state_active
+        )
+        trainer._last_train_dataloader_batches_completed = (
+            worker_output.train_dataloader_batches_completed
+        )
+        trainer._last_train_total_batch_idx = worker_output.train_total_batch_idx
         trainer._signal_connector.received_sigterm = (
             trainer.received_sigterm or worker_output.received_sigterm
         )

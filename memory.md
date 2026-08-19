@@ -324,3 +324,14 @@
     6. Distributed entry-point invocation must pass the optional datamodule by keyword after direct loader parameters enter the public signature; positional forwarding otherwise reclassifies a datamodule as data.
     7. Batch-start hooks and step argument tuples must be formed after precision conversion and device transfer. Constructing either beforehand retains references to the CPU batch even if a later local variable is replaced with its device-resident form.
     8. Cursor-aware checkpoint continuation must distinguish stateful loader restoration from stateless deterministic prefix replay at the same structural granularity as nested loader leaves.
+
+| Memory | Stateful Loader Resume Ownership | Date: 19 August 2026 | Time: 09:21 PM | Name: Ghost |
+
+    1. Stateful cursor restoration and deterministic prefix replay are alternative physical-position mechanisms. Applying both to one resumed collection advances stateful leaves twice even when optimizer and epoch counters appear correct.
+    2. Loader cursor and loop progress solve different problems. The cursor selects the next data item; restored completed-batch progress preserves hook indices, accumulation boundaries, validation cadence, and the remaining limited horizon.
+    3. Mixed collections cannot provide exact stateless-leaf continuation from stateful-leaf state alone. Preserving the pinned contract means stateful leaves resume and stateless leaves restart rather than fabricating unavailable state.
+    4. One-batch lookahead advances an unsized iterable before the current batch executes. A safe checkpoint cursor must therefore be captured between returning the current batch and prefetching the next batch, then promoted only after current-batch completion.
+    5. A stateful dataloader is still stateful after sampler replacement only if reconstruction preserves its concrete class and subclass-specific constructor values. Rebuilding every subclass as a plain `DataLoader` silently deletes checkpoint capability.
+    6. Stateful loader state must survive worker-to-parent reconciliation because a dormant spawn or fork parent may save a checkpoint after its rank-zero worker has already torn down the live loader iterator.
+    7. Natural epoch completion and premature step-limited completion require different persistence decisions. Loading an exhausted cursor into a genuine next epoch suppresses data, while discarding a cursor after an iteration-limited stop repeats data.
+    8. Restricted PyTorch loading excludes arbitrary NumPy reconstruction globals. Encoding NumPy random state with a torch tensor preserves exact continuation while making ordinary framework checkpoints compatible with `weights_only=True`; legacy ndarray tuples remain a read-only compatibility path.

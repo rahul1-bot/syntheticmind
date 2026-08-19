@@ -65,6 +65,7 @@ class CheckpointState:
         completed_batches: int = 0,
         total_batch_idx: int = -1,
         epoch_rng_state: CheckpointDict | None = None,
+        combined_loader_states: list[dict[str, object]] | None = None,
         strategy_name: str = "SingleDeviceStrategy",
         world_size: int = 1,
         precision_plugin: Precision | None = None,
@@ -110,6 +111,18 @@ class CheckpointState:
 
         if epoch_rng_state is not None:
             checkpoint["epoch_rng_state"] = epoch_rng_state
+
+        if combined_loader_states:
+            checkpoint["loops"] = cast(
+                CheckpointValue,
+                {
+                    "fit_loop": {
+                        "state_dict": {
+                            "combined_loader": combined_loader_states
+                        }
+                    }
+                }
+            )
 
         if not weights_only:
             scheduler_list: list[_SchedulerInstance] = []
@@ -315,6 +328,42 @@ class CheckpointState:
         return epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state
 
     @staticmethod
+    def combined_loader_states(
+        checkpoint: CheckpointDict
+    ) -> list[dict[str, object]]:
+        loops_value: CheckpointValue | None = checkpoint.get("loops")
+        if loops_value is None:
+            return []
+        if not isinstance(loops_value, dict):
+            raise TypeError("Checkpoint `loops` state must be a mapping.")
+        fit_loop_value: CheckpointValue | None = loops_value.get("fit_loop")
+        if fit_loop_value is None:
+            return []
+        if not isinstance(fit_loop_value, dict):
+            raise TypeError("Checkpoint `loops.fit_loop` state must be a mapping.")
+        state_dict_value: CheckpointValue | None = fit_loop_value.get("state_dict")
+        if state_dict_value is None:
+            return []
+        if not isinstance(state_dict_value, dict):
+            raise TypeError("Checkpoint fit-loop `state_dict` must be a mapping.")
+        combined_loader_value: CheckpointValue | None = state_dict_value.get(
+            "combined_loader"
+        )
+        if combined_loader_value is None:
+            return []
+        if not isinstance(combined_loader_value, list):
+            raise TypeError("Checkpoint combined-loader state must be a list.")
+        states: list[dict[str, object]] = []
+        state: CheckpointValue
+        for state in combined_loader_value:
+            if not isinstance(state, dict):
+                raise TypeError(
+                    "Each checkpointed combined-loader state must be a mapping."
+                )
+            states.append(cast(dict[str, object], state))
+        return states
+
+    @staticmethod
     def load_datamodule_state(
         checkpoint: CheckpointDict,
         datamodule: DataModule
@@ -345,9 +394,22 @@ class CheckpointState:
     def _collect_rng_states(cls) -> CheckpointDict:
         # Captures every random stream the harness seeds: Python, NumPy, torch
         # CPU, and one state per visible CUDA device when CUDA is present.
+        numpy_rng_state: tuple[str, np.ndarray, int, int, float] = cast(
+            tuple[str, np.ndarray, int, int, float],
+            np.random.get_state()
+        )
         states: CheckpointDict = {
             "python": random.getstate(),
-            "numpy": np.random.get_state(),
+            "numpy": cast(
+                CheckpointValue,
+                {
+                    "bit_generator": numpy_rng_state[0],
+                    "state": torch.from_numpy(numpy_rng_state[1].copy()),
+                    "position": numpy_rng_state[2],
+                    "has_gauss": numpy_rng_state[3],
+                    "cached_gaussian": numpy_rng_state[4]
+                }
+            ),
             "torch": torch.random.get_rng_state()
         }
         if torch.cuda.is_available():
@@ -366,7 +428,39 @@ class CheckpointState:
         if "python" in rng_state:
             random.setstate(rng_state["python"])  # type: ignore[arg-type]
         if "numpy" in rng_state:
-            np.random.set_state(rng_state["numpy"])  # type: ignore[arg-type]
+            numpy_rng_state: CheckpointValue = rng_state["numpy"]
+            if isinstance(numpy_rng_state, dict):
+                bit_generator: CheckpointValue | None = numpy_rng_state.get(
+                    "bit_generator"
+                )
+                state_tensor: CheckpointValue | None = numpy_rng_state.get("state")
+                position: CheckpointValue | None = numpy_rng_state.get("position")
+                has_gauss: CheckpointValue | None = numpy_rng_state.get("has_gauss")
+                cached_gaussian: CheckpointValue | None = numpy_rng_state.get(
+                    "cached_gaussian"
+                )
+                if (
+                    not isinstance(bit_generator, str)
+                    or not isinstance(state_tensor, torch.Tensor)
+                    or type(position) is not int
+                    or type(has_gauss) is not int
+                    or not isinstance(cached_gaussian, int | float)
+                ):
+                    raise TypeError("Checkpoint NumPy RNG state is malformed.")
+                np.random.set_state(
+                    (
+                        bit_generator,
+                        state_tensor.detach().cpu().numpy().astype(
+                            np.uint32,
+                            copy=True
+                        ),
+                        position,
+                        has_gauss,
+                        float(cached_gaussian)
+                    )
+                )
+            else:
+                np.random.set_state(numpy_rng_state)  # type: ignore[arg-type]
         if "torch" in rng_state:
             torch_rng: CheckpointValue = rng_state["torch"]
             if isinstance(torch_rng, torch.Tensor):
