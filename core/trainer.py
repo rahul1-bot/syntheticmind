@@ -652,6 +652,7 @@ class Trainer:
             else None
         )
         self._ckpt_path: str | Path | None = None
+        self._ckpt_path_user_managed: bool = False
 
         if accumulate_grad_batches < 1:
             raise MisconfigurationError("accumulate_grad_batches must be >= 1")
@@ -961,6 +962,18 @@ class Trainer:
             )
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
+        requested_checkpoint_path: str | Path | None = ckpt_path
+        if (
+            requested_checkpoint_path is None
+            and not self._ckpt_path_user_managed
+        ):
+            requested_checkpoint_path = self.resume_from_checkpoint
+        resume_path: str | Path | None = self._select_checkpoint_path(
+            requested_checkpoint_path,
+            stage="fit",
+            model_provided=True,
+            ckpt_path_provided=ckpt_path is not None
+        )
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             launcher.launch(
@@ -971,7 +984,7 @@ class Trainer:
                 {
                     "train_dataloaders": train_dataloaders,
                     "val_dataloaders": val_dataloaders,
-                    "ckpt_path": ckpt_path,
+                    "ckpt_path": resume_path,
                     "weights_only": weights_only
                 }
             )
@@ -1022,10 +1035,6 @@ class Trainer:
 
         # An explicit per-call checkpoint path overrides the constructor-level
         # resume path; with both absent the run starts fresh.
-        resume_path: str | Path | None = self._select_checkpoint_path(
-            ckpt_path if ckpt_path is not None else self.resume_from_checkpoint
-        )
-
         try:
             self._signal_connector.register_signal_handlers()
             # Initialize the strategy's process context, run single-copy data
@@ -1298,6 +1307,7 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the validation pass, keyed by
         #     metric name.
+        model_provided: bool = model is not None
         module: Module = self._resolve_model(model, "validate")
         if isinstance(dataloaders, DataModule):
             datamodule = dataloaders
@@ -1310,6 +1320,12 @@ class Trainer:
             raise TypeError("`verbose` must be a bool.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
+        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
+            ckpt_path,
+            stage="validate",
+            model_provided=model_provided,
+            ckpt_path_provided=ckpt_path is not None
+        )
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
@@ -1321,7 +1337,7 @@ class Trainer:
                     datamodule,
                     {
                         "dataloaders": dataloaders,
-                        "ckpt_path": ckpt_path,
+                        "ckpt_path": selected_checkpoint_path,
                         "verbose": verbose,
                         "weights_only": weights_only
                     }
@@ -1344,9 +1360,6 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         metrics: list[dict[str, float]] = []
-        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
-            ckpt_path
-        )
         try:
             self._signal_connector.register_signal_handlers()
             self.strategy.setup_environment()
@@ -1408,6 +1421,7 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the test pass, keyed by metric
         #     name.
+        model_provided: bool = model is not None
         module: Module = self._resolve_model(model, "test")
         if isinstance(dataloaders, DataModule):
             datamodule = dataloaders
@@ -1420,6 +1434,12 @@ class Trainer:
             raise TypeError("`verbose` must be a bool.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
+        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
+            ckpt_path,
+            stage="test",
+            model_provided=model_provided,
+            ckpt_path_provided=ckpt_path is not None
+        )
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
@@ -1431,7 +1451,7 @@ class Trainer:
                     datamodule,
                     {
                         "dataloaders": dataloaders,
-                        "ckpt_path": ckpt_path,
+                        "ckpt_path": selected_checkpoint_path,
                         "verbose": verbose,
                         "weights_only": weights_only
                     }
@@ -1454,9 +1474,6 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         metrics: list[dict[str, float]] = []
-        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
-            ckpt_path
-        )
         try:
             self._signal_connector.register_signal_handlers()
             self.strategy.setup_environment()
@@ -1524,6 +1541,7 @@ class Trainer:
         # Returns:
         #     The prediction-step outputs in batch order, or an empty list
         #     when retention is disabled.
+        model_provided: bool = model is not None
         module: Module = self._resolve_model(model, "predict")
         if isinstance(dataloaders, DataModule):
             datamodule = dataloaders
@@ -1536,6 +1554,12 @@ class Trainer:
             raise TypeError("`weights_only` must be a bool or None.")
         if return_predictions is not None and type(return_predictions) is not bool:
             raise TypeError("`return_predictions` must be a bool or None.")
+        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
+            ckpt_path,
+            stage="predict",
+            model_provided=model_provided,
+            ckpt_path_provided=ckpt_path is not None
+        )
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
@@ -1548,7 +1572,7 @@ class Trainer:
                     {
                         "dataloaders": dataloaders,
                         "return_predictions": return_predictions,
-                        "ckpt_path": ckpt_path,
+                        "ckpt_path": selected_checkpoint_path,
                         "weights_only": weights_only
                     }
                 )
@@ -1570,9 +1594,6 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         predictions: list[ModelOutput] | list[list[ModelOutput]] | None = None
-        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
-            ckpt_path
-        )
         try:
             self._signal_connector.register_signal_handlers()
             self.strategy.setup_environment()
@@ -2673,23 +2694,64 @@ class Trainer:
 
     def _select_checkpoint_path(
         self,
-        ckpt_path: str | Path | None
+        ckpt_path: str | Path | None,
+        *,
+        stage: TrainerStage,
+        model_provided: bool,
+        ckpt_path_provided: bool
     ) -> str | Path | None:
+        if self._ckpt_path_user_managed:
+            if not ckpt_path_provided:
+                ckpt_path = self._ckpt_path
+            elif ckpt_path != self._ckpt_path:
+                if self.is_global_zero:
+                    warnings.warn(
+                        f"`trainer.ckpt_path={self._ckpt_path!r}` is overridden by "
+                        f"`Trainer.{stage}(ckpt_path={ckpt_path!r})`.",
+                        UserWarning,
+                        stacklevel=3
+                    )
+                self._ckpt_path_user_managed = False
+        if ckpt_path is None and not model_provided and stage != "fit":
+            ckpt_path = "best"
+            if self.is_global_zero:
+                warnings.warn(
+                    f"`Trainer.{stage}(ckpt_path=None)` was called without a model; "
+                    "the best checkpoint from the previous fit will be loaded. Pass "
+                    "a model to use its current weights, or set `ckpt_path` explicitly.",
+                    UserWarning,
+                    stacklevel=3
+                )
         if ckpt_path is None:
-            self.ckpt_path = None
+            self._ckpt_path = None
             return None
         if isinstance(ckpt_path, str) and ckpt_path == "best":
-            for callback in self.checkpoint_callbacks:
-                if (
-                    isinstance(callback, ModelCheckpoint)
-                    and callback.best_model_path
-                ):
-                    path: str = callback.best_model_path
-                    self.ckpt_path = path
-                    return path
+            model_checkpoint_callbacks: list[ModelCheckpoint] = [
+                callback
+                for callback in self.checkpoint_callbacks
+                if isinstance(callback, ModelCheckpoint)
+            ]
+            if len(model_checkpoint_callbacks) > 1 and self.is_global_zero:
+                warnings.warn(
+                    f"`Trainer.{stage}(ckpt_path='best')` received multiple "
+                    "ModelCheckpoint callbacks; the first callback owns best-checkpoint "
+                    "selection.",
+                    UserWarning,
+                    stacklevel=3
+                )
+            if model_checkpoint_callbacks:
+                best_model_path: str = model_checkpoint_callbacks[0].best_model_path
+                if best_model_path:
+                    self._ckpt_path = best_model_path
+                    return best_model_path
+            if self.fast_dev_run:
+                raise MisconfigurationError(
+                    f"`Trainer.{stage}(ckpt_path='best')` is unavailable with "
+                    "`fast_dev_run=True`; pass an exact checkpoint path."
+                )
             raise MisconfigurationError(
-                "`ckpt_path='best'` requires a ModelCheckpoint with a saved "
-                "`best_model_path`."
+                f"`Trainer.{stage}(ckpt_path='best')` requires the first "
+                "ModelCheckpoint callback to have a saved `best_model_path`."
             )
         if isinstance(ckpt_path, str) and ckpt_path == "last":
             candidates: list[str] = []
@@ -2711,15 +2773,21 @@ class Trainer:
                         candidates.append(candidate)
             unique_candidates: set[str] = set(candidates)
             if not unique_candidates:
-                raise MisconfigurationError(
-                    "`ckpt_path='last'` could not find a last checkpoint. "
-                    "Configure `ModelCheckpoint(save_last=True)` first."
-                )
+                self._ckpt_path = None
+                if self.is_global_zero:
+                    warnings.warn(
+                        f"`Trainer.{stage}(ckpt_path='last')` found no last checkpoint; "
+                        "no checkpoint will be loaded. Configure "
+                        "`ModelCheckpoint(save_last=True)` to enable it.",
+                        UserWarning,
+                        stacklevel=3
+                    )
+                return None
             path: str = max(
                 unique_candidates,
                 key=modified_time
             )
-            self.ckpt_path = path
+            self._ckpt_path = path
             return path
         if isinstance(ckpt_path, str) and ckpt_path in {"hpc", "registry"}:
             raise MisconfigurationError(
@@ -2728,7 +2796,7 @@ class Trainer:
         path: str = normalize_path(ckpt_path)
         if not is_file(path):
             raise FileNotFoundError(f"Checkpoint not found: {path}")
-        self.ckpt_path = path
+        self._ckpt_path = path
         return path
 
     def _resolve_checkpoint_callback_directories(self) -> None:
@@ -3330,6 +3398,7 @@ class Trainer:
         if ckpt_path is not None and not isinstance(ckpt_path, str | Path):
             raise TypeError("`ckpt_path` must be a string, Path, or None.")
         self._ckpt_path = ckpt_path
+        self._ckpt_path_user_managed = ckpt_path is not None
 
     @property
     def logger(self) -> Logger | None:

@@ -262,3 +262,10 @@
     3. Unsized prefetch, natural exhaustion, step-limited termination, multiprocessing parent transfer, and concrete dataloader subclass reconstruction are explicit correctness boundaries rather than incidental implementation details.
     4. Restricted checkpoint loading is executable with tensor-backed NumPy random state, and historical ndarray checkpoints retain backward-compatible restoration.
     5. Real TorchData workers, stochastic datasets, CPU, MPS, every local DDP launcher, and external Gloo establish the supported continuation contract. The next action is a fresh pinned Trainer surface audit rather than an assumed capability list.
+
+| Strategic Note | Checkpoint Selection Semantics | Date: 19 August 2026 | Time: 09:33 PM | Name: Ghost |
+
+    1. ✅ Trainer checkpoint selection now distinguishes an explicitly supplied model from a model reused from a previous stage, preserving current weights in the first case and selecting the prior best checkpoint in the second.
+    2. The stateful `trainer.ckpt_path` property, explicit stage override, best ownership, and last-checkpoint fallback now have independent and executable meanings across local and distributed launches.
+    3. Vendor registry and HPC aliases were not imitated. SyntheticMind retains the universal `ckpt_path` contract without inheriting external product ownership.
+    4. The next phase gives `verbose` its promised runtime effect through concise evaluation-result rendering and keeps internal fit validation silent.

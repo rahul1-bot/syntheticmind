@@ -168,9 +168,21 @@
     4. ✅ Multiprocessing parent reconciliation retains post-worker loader state, and restricted checkpoint loading retains exact random continuation through a safe NumPy state representation with legacy compatibility.
     5. ✅ Focused custom and TorchData execution covers zero and two workers, stochastic dataset state, full and weights-only checkpoints, failure saves, CPU, MPS, fork, spawn, nested worker spawn, subprocess, external Gloo, Python compilation, diff validation, and targeted type checking without invoking a linter.
 
-| Progress Todo | Remaining Trainer Surface Audit | Date: 19 August 2026 | Time: 09:21 PM | Name: Ghost |
+| Progress Complete | Remaining Trainer Surface Audit | Date: 19 August 2026 | Time: 09:33 PM | Name: Ghost |
 
-    1. Recompute the pinned public Trainer constructor, entry-point, property, and method surface against the current SyntheticMind implementation after completion of the foundational data path.
-    2. Separate universal training capability from Lightning product ownership, promotional integration, Fabric, release work, documentation, and upstream-suite replication before selecting any missing name.
-    3. Prioritize accepted parameters whose runtime meaning remains incomplete, including `verbose` result presentation and omitted-model checkpoint selection, then harden the earliest dependency without unrelated code surgery.
-    4. Continue to require executable CPU and MPS evidence, supported distributed evidence where ownership changes, Python compilation, targeted type checking, source-comment preservation, and synchronized `dev` and `origin/dev` commits after each completed phase.
+    1. ✅ The pinned constructor, stage entry points, public methods, and properties were recomputed against the current SyntheticMind Trainer.
+    2. ✅ Universal public concepts already exposed as attributes were distinguished from absent methods, and Lightning-owned module branding, registries, integration suggestions, Fabric, release, documentation, and upstream-suite work were excluded.
+    3. ✅ Omitted-model checkpoint selection ranked ahead of `verbose` presentation because it changes evaluated model weights and therefore correctness rather than terminal appearance.
+
+| Progress Complete | Trainer Checkpoint Path Semantics | Date: 19 August 2026 | Time: 09:33 PM | Name: Ghost |
+
+    1. ✅ Explicit models retain current weights under `ckpt_path=None`, while omitted models select the first ModelCheckpoint callback's prior best checkpoint for validation, test, and prediction.
+    2. ✅ Stateful `trainer.ckpt_path`, explicit argument precedence, constructor resume fallback, deterministic best ownership, and non-fatal missing-last behavior are implemented without changing public signatures.
+    3. ✅ Path selection survives spawn and subprocess launch boundaries and preserves exact best and last weights on CPU and MPS.
+    4. ✅ Existing stateful-loader and direct multiple-dataloader distributed regressions remain intact, and compilation plus targeted type verification pass without invoking a linter.
+
+| Progress Todo | Verbose Evaluation Results | Date: 19 August 2026 | Time: 09:33 PM | Name: Ghost |
+
+    1. Give the existing `verbose` parameter an observable effect for standalone validation and test while keeping sanity checks and fit-owned validation silent.
+    2. Render complete returned metric mappings through the existing minimal ConsoleRenderer with deterministic ordering, bounded terminal width, multiple-dataloader identity, non-interactive output, and rank-zero ownership.
+    3. Verify empty results, long names, finite and non-finite values, multiple dataloaders, `verbose=False`, disabled progress bars, CPU, MPS, spawn, and subprocess execution before committing the phase.

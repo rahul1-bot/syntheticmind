@@ -335,3 +335,11 @@
     6. Stateful loader state must survive worker-to-parent reconciliation because a dormant spawn or fork parent may save a checkpoint after its rank-zero worker has already torn down the live loader iterator.
     7. Natural epoch completion and premature step-limited completion require different persistence decisions. Loading an exhausted cursor into a genuine next epoch suppresses data, while discarding a cursor after an iteration-limited stop repeats data.
     8. Restricted PyTorch loading excludes arbitrary NumPy reconstruction globals. Encoding NumPy random state with a torch tensor preserves exact continuation while making ordinary framework checkpoints compatible with `weights_only=True`; legacy ndarray tuples remain a read-only compatibility path.
+
+| Memory | Checkpoint Path Ownership | Date: 19 August 2026 | Time: 09:33 PM | Name: Ghost |
+
+    1. `model=None` after a previous Trainer stage is not equivalent to supplying the attached model explicitly. The omitted form delegates weight selection to the Trainer and therefore defaults to the previous best checkpoint; the explicit form preserves current in-memory weights when no path is requested.
+    2. A stateful checkpoint property requires an ownership marker separate from the stored value. Internal path resolution must update the resolved value without falsely reclassifying it as a new user assignment.
+    3. Stage-level path arguments outrank stateful property values, while a stateful value outranks constructor fallback. Preserving this precedence prevents a deprecated constructor convenience from silently defeating an explicit later decision.
+    4. Parent-side path selection is necessary before local process launch because workers receive a concrete model argument even when the original public stage call omitted it. Passing the resolved path preserves the original semantic intent without contaminating public signatures.
+    5. `best` and `last` are selection policies rather than filesystem paths. Best ownership is deterministic through the first ModelCheckpoint callback; last selection may safely degrade to current weights when no saved candidate exists.
