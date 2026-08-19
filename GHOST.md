@@ -89,9 +89,17 @@
     4. `on_gpu` now preserves the established CUDA-specific meaning; MPS and CPU placement correctly return false.
     5. Focused CPU, MPS, parameter-state, detached, attached, direct Gloo, subprocess, spawn, fork, compilation, signature, and diff verification passes without static-analysis tools.
 
-| Active Next Step | Standard TorchScript Export | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+| Architecture Decision | Standard TorchScript Export | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
 
-    1. Audit the pinned `to_torchscript` signature, method selection, example-input precedence, mode preservation, file output, and inherited override behavior.
-    2. Keep ONNX and TensorRT exports independent because they have separate dependency, serialization, and accelerator contracts.
-    3. Keep `device_mesh` deferred until a model-parallel Strategy owns and initializes that state.
+    1. ✅ `Module.to_torchscript(file_path=None, method="script", example_inputs=None, **kwargs)` now preserves the standard inherited public name, parameter order, defaults, scripting and tracing meanings, and framework-neutral ownership.
+    2. Script and trace execution use evaluation mode without permanently changing any root or nested module mode, including when compilation, tracing, input hooks, or validation fail.
+    3. Trace inputs use explicit values before `example_input_array`, pass through the established batch-transfer hook chain, move to the model device, support positional tuples and documented keyword dictionaries, and forward trace options including prepared check inputs.
+    4. Exported artifacts save through the existing local and remote filesystem boundary and reload through `torch.jit.load`; nested SyntheticMind modules exclude runtime-only Trainer, logger, metric, device, and hyperparameter properties from scripting.
+    5. CPU, MPS, attached and detached models, nested scripting, positional and keyword tracing, hook precedence, local and remote reload, exception restoration, compilation, signatures, inheritance, source, and diff checks pass without a linter or static type checker.
+
+| Active Next Step | Standard ONNX Export | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+
+    1. Audit the pinned `to_onnx` signature against the installed PyTorch ONNX exporter, installed optional dependencies, input semantics, return contract, mode restoration, and path behavior.
+    2. Keep legacy and dynamo exporter behavior explicit because their dependency, return, and file-production contracts differ materially.
+    3. Keep TensorRT independent and `device_mesh` deferred until their actual accelerator and model-parallel owners are implemented.
     4. Preserve all scope, terminology, guideline, evidence, and branch-synchronization policies.

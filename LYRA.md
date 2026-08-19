@@ -54,9 +54,16 @@
     3. CUDA-specific `on_gpu` behavior is available without misclassifying MPS placement.
     4. Local, MPS, direct Gloo, subprocess, spawn, fork, compilation, and direct guideline evidence establish the corrected surface without static-analysis tools.
 
-| Strategic Note | Immediate Direction | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+| Strategic Note | Model TorchScript Export Contract | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
 
-    1. TorchScript is the next universal model capability because it uses the installed PyTorch runtime and has no model-parallel ownership dependency.
-    2. ONNX and TensorRT remain separate later audits with independent dependencies and serialization behavior.
-    3. `device_mesh` remains deferred until a model-parallel Strategy can create and own a real mesh rather than exposing an empty compatibility property.
+    1. ✅ SyntheticMind now exposes the standard `to_torchscript` inheritance surface without Lightning branding or copied internal architecture.
+    2. Scripting and tracing preserve exact nested model modes, remove runtime-only framework properties, route representative inputs through model or datamodule transfer ownership, and retain PyTorch keyword options.
+    3. Positional tuples, documented keyword dictionaries, local paths, remote filesystems, nested modules, CPU, MPS, and failure restoration have executable evidence.
+    4. Direct source and guideline review, Python compilation, signatures, inheritance, exception probes, artifact reload, and regressions establish the phase without static-analysis tools.
+
+| Strategic Note | Immediate Direction | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+
+    1. ONNX export is the next independent model capability and requires an installed-runtime and optional-dependency audit before implementation.
+    2. Legacy and dynamo ONNX paths must retain their actual PyTorch meanings rather than being collapsed behind a cosmetic parameter surface.
+    3. TensorRT remains independent, and `device_mesh` remains deferred until a model-parallel Strategy can create and own a real mesh.
     4. Preserve the private scope, excluded work, terminology discipline, direct guideline review, executable evidence, and `dev` synchronization requirements.

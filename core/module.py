@@ -146,6 +146,23 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
     CHECKPOINT_HYPER_PARAMS_KEY: ClassVar[str] = "hyper_parameters"
     CHECKPOINT_HYPER_PARAMS_NAME: ClassVar[str] = "hparams_name"
     CHECKPOINT_HYPER_PARAMS_TYPE: ClassVar[str] = "hparams_type"
+    __jit_unused_properties__: ClassVar[list[str]] = [
+        "example_input_array",
+        "on_gpu",
+        "current_epoch",
+        "global_step",
+        "global_rank",
+        "local_rank",
+        "logger",
+        "loggers",
+        "automatic_optimization",
+        "trainer",
+        "strict_loading",
+        "device",
+        "dtype",
+        "logged_metrics"
+    ] + HyperparametersMixin.__jit_unused_properties__
+    _jit_is_scripting: ClassVar[bool] = False
     # Base class for every model the harness trains or evaluates. Subclasses
     # implement forward, the step methods, and configure_optimizers; the
     # trainer attaches itself before execution, after which the metric-logging
@@ -273,6 +290,19 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             weights_only,
             kwargs
         )
+
+    @torch.no_grad()
+    def to_torchscript(
+        self,
+        file_path: str | Path | None = None,
+        method: str | None = "script",
+        example_inputs: object | None = None,
+        **kwargs: object
+    ) -> torch.jit.ScriptModule | dict[str, torch.jit.ScriptModule]:
+        from syntheticmind.core.model_export import ModelTorchScriptExporter
+
+        exporter: ModelTorchScriptExporter = ModelTorchScriptExporter(self)
+        return exporter.export(file_path, method, example_inputs, kwargs)
 
     @contextmanager
     def _hook_context(self, hook_name: str) -> Iterator[None]:
@@ -1241,9 +1271,9 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         # The attached trainer. Raises when the module has never been passed
         # to a trainer entry point, because trainer-dependent functionality
         # cannot operate detached.
-        if self._trainer is None:
+        if self._trainer is None and not self._jit_is_scripting:
             raise RuntimeError("Module is not attached to a Trainer. Call trainer.fit(module, ...) first")
-        return self._trainer
+        return cast("Trainer", self._trainer)
 
     @trainer.setter
     def trainer(self, trainer: Trainer | None) -> None:

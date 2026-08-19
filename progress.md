@@ -44,9 +44,16 @@
     2. ✅ `freeze` and `unfreeze` preserve fluent self-return, attached epoch, step, and rank properties use Trainer authority, detached values remain zero, and `on_gpu` retains CUDA-specific meaning.
     3. ✅ CPU, MPS, detached and attached state, parameter modes, direct two-rank Gloo, subprocess, spawn, fork, compilation, signature inspection, comment preservation, and diff review pass without static-analysis tools.
 
-| Progress Todo | Standard TorchScript Export | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+| Progress Complete | Standard TorchScript Export | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
 
-    1. Audit the standard `to_torchscript` public signature and execution contract against the pinned reference and current model initialization surface.
-    2. Implement scripting, tracing, example-input resolution, mode restoration, path serialization, and failure diagnostics without coupling ONNX or TensorRT behavior.
-    3. Verify callable and nested inputs, CPU and applicable MPS behavior, saved artifact reload, training-mode restoration, inherited forwards, malformed configuration, compilation, and source review.
+    1. ✅ The standard `to_torchscript` signature supports script and trace selection, explicit or registered example inputs, forwarded PyTorch options, and optional filesystem persistence.
+    2. ✅ Runtime-only properties are excluded during recursive scripting, model and datamodule transfer hooks prepare trace and check inputs, and keyword dictionaries retain their documented forward semantics.
+    3. ✅ Exact nested training modes and the scripting guard restore on success and failure, while exported artifacts remain in evaluation mode.
+    4. ✅ CPU, MPS, attached, detached, nested, positional, keyword, local, remote, malformed, compilation, signature, inheritance, source, diff, checkpoint, callback, and runtime regressions pass without static-analysis tools.
+
+| Progress Todo | Standard ONNX Export | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+
+    1. Audit the pinned `to_onnx` signature, installed PyTorch exporter signatures, optional dependencies, input precedence, legacy and dynamo behavior, return meanings, and path support.
+    2. Implement the standard inherited surface through a focused SyntheticMind-owned export component without coupling TensorRT or model-parallel state.
+    3. Verify CPU and applicable MPS execution, positional and keyword inputs, local and supported remote artifacts, mode restoration, exporter failures, signatures, inheritance, compilation, and regressions.
     4. Commit on `dev`, push `origin/dev`, verify exact synchronization, and continue sequentially.

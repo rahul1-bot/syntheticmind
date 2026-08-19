@@ -124,3 +124,11 @@
     3. Fluent `freeze` and `unfreeze` returns matter because inherited user code may chain evaluation, placement, or export operations after changing parameter state.
     4. `on_gpu` is a historical CUDA-specific convenience and intentionally remains false for MPS despite both being accelerators.
     5. Direct process-group and every Trainer launcher path are required to distinguish detached neutrality from attached rank truth.
+
+| Memory | TorchScript Export Boundaries | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+
+    1. TorchScript introspection evaluates Python properties even when they are later excluded, so detached Trainer access requires a narrowly scoped scripting state that is restored under every outcome.
+    2. Export mode restoration must capture every named submodule rather than only the root training flag; restoring through `train(root_mode)` destroys deliberately mixed child modes.
+    3. A dictionary registered as `example_input_array` represents named forward arguments, while a positional dictionary remains available by wrapping the mapping in a one-element tuple.
+    4. Representative and check inputs must follow the same model-or-datamodule batch-transfer ownership used during execution so accelerator exports do not trace host tensors against device-resident parameters.
+    5. Export serialization belongs to the shared filesystem boundary, while TorchScript compilation and tracing remain PyTorch-owned operations with their original keyword controls and diagnostics.
