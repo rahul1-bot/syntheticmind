@@ -137,3 +137,12 @@
     4. Overfitting a fixed subset requires sampler control in addition to a batch ceiling. Random training or validation samplers would otherwise select a different subset each epoch and make the feature semantically false.
     5. A custom `BatchSampler` can hide its active sampler behind `batch_sampler.sampler` while `DataLoader.sampler` appears sequential. Shuffle detection and replacement must inspect the batching path that iteration actually consumes.
     6. Distributed overfit execution must use `DistributedSampler(shuffle=False)`. Sequentializing before distributed wrapping is insufficient if the later wrapper silently restores shuffling.
+
+| Memory | Device Topology and Distributed Environment | Date: 19 August 2026 | Time: 01:39 PM | Name: Ghost |
+
+    1. A device count and an ordered list of device identifiers represent different information. Counts expand through accelerator-specific availability, while explicit GPU identifiers must survive unchanged because local rank indexes the declared list rather than the physical identifier space directly.
+    2. CPU parallel devices intentionally repeat `torch.device("cpu")`; their public `device_ids` are logical process positions. CUDA and MPS devices carry physical identifiers, so their public identifiers come from the concrete device objects.
+    3. Distributed world size is a topology invariant equal to node count multiplied by processes per node. Both a launcher-provided `WORLD_SIZE` and an already initialized process group must be checked against that invariant or a stale group can execute with silently incorrect rank assumptions.
+    4. Communication backend selection follows execution hardware: Gloo is the safe CPU default and NCCL is the CUDA default. Requesting NCCL without CUDA must fail before rendezvous rather than hanging or surfacing a remote backend error.
+    5. Externally launched DDP is now executable and parameter-synchronized, but requiring users to invoke `torchrun` manually is not Trainer capability parity. Local subprocess creation, worker re-entry, failure propagation, and parent-state reconciliation remain the next distributed foundation.
+    6. A real CUDA runtime is unavailable on the current MacBook. CUDA topology claims must therefore remain bounded to mocked availability, parser, signature, and rank-to-device probes until execution is verified on CUDA hardware.

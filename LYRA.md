@@ -98,3 +98,11 @@
     2. ✅ `overfit_batches` now selects a stable training and validation subset and disables shuffling across initial, reloaded, standalone, and distributed dataloader paths.
     3. The implementation remains SyntheticMind-owned. Its private no-operation logger and centralized sampler reconstruction provide the required behavior without copying Lightning namespaces or connector architecture.
     4. The next dependency-ordered boundary is hardware topology: `accelerator`, `strategy`, `devices`, and `num_nodes` must become one validated execution contract before precision and higher distributed capabilities are expanded.
+
+| Strategic Note | Standard Hardware Topology | Date: 19 August 2026 | Time: 01:39 PM | Name: Ghost |
+
+    1. ✅ Accelerator choice, ordered parallel devices, node count, strategy selection, process ranks, world size, and root-device placement now form one validated runtime contract rather than independent constructor hints.
+    2. The public surface preserves established hardware terminology and defaults. Internal parsing and topology composition remain SyntheticMind-owned, with no Lightning-branded class or connector vocabulary introduced.
+    3. CPU multi-process execution defaults to Gloo, CUDA execution defaults to NCCL, explicit GPU identifiers retain their declared order, and unsupported or contradictory configurations fail before model placement.
+    4. Real CPU and MPS execution plus a two-process CPU `torchrun` fit verify the supported local hardware paths; CUDA parsing and rank mapping are verified through controlled availability probes because the current MacBook exposes no CUDA runtime.
+    5. Topology alone is not distributed user parity. The next sequential phase is a local subprocess launcher that converts a multi-device Trainer request into the required worker processes while preserving entry-point arguments, failures, teardown, and parent-process results.

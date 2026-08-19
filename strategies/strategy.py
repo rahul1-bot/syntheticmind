@@ -20,12 +20,18 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
 
 from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
+
+if TYPE_CHECKING:
+    from syntheticmind.accelerators.accelerator import Accelerator
 
 __all__: list[str] = ["Strategy"]
 
@@ -35,11 +41,34 @@ class Strategy(ABC):
     # root device and the execution of each step kind; the trainer talks to
     # this boundary so single-device and multi-process execution stay
     # interchangeable.
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        accelerator: Accelerator | None = None,
+        parallel_devices: list[torch.device] | None = None,
+        num_nodes: int = 1
+    ) -> None:
         # Starts with no model attached and the CPU as the provisional root
         # device until setup binds the real placement.
         self._model: nn.Module | None = None
-        self._device: torch.device = torch.device("cpu")
+        self._accelerator: Accelerator | None = accelerator
+        self._parallel_devices: list[torch.device] = list(parallel_devices or [])
+        self._num_nodes: int = num_nodes
+        self._device: torch.device = (
+            self._parallel_devices[0]
+            if self._parallel_devices
+            else torch.device("cpu")
+        )
+
+    def configure_topology(
+        self,
+        accelerator: Accelerator,
+        parallel_devices: list[torch.device],
+        num_nodes: int
+    ) -> None:
+        self._accelerator = accelerator
+        self._parallel_devices = list(parallel_devices)
+        self._num_nodes = num_nodes
+        self._device = self._parallel_devices[0]
 
     @abstractmethod
     def setup_environment(self) -> None:
@@ -131,6 +160,42 @@ class Strategy(ABC):
         # Whether this strategy coordinates multiple processes; base default is
         # single-process.
         return False
+
+    @property
+    def accelerator(self) -> Accelerator | None:
+        return self._accelerator
+
+    @property
+    def parallel_devices(self) -> list[torch.device]:
+        return self._parallel_devices
+
+    @property
+    def num_nodes(self) -> int:
+        return self._num_nodes
+
+    @property
+    def num_processes(self) -> int:
+        return len(self._parallel_devices) if self._parallel_devices else 1
+
+    @property
+    def global_rank(self) -> int:
+        return 0
+
+    @property
+    def local_rank(self) -> int:
+        return 0
+
+    @property
+    def node_rank(self) -> int:
+        return 0
+
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @property
+    def is_global_zero(self) -> bool:
+        return self.global_rank == 0
 
     @property
     def root_device(self) -> torch.device:

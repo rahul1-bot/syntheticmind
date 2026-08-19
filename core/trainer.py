@@ -61,6 +61,7 @@ from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.accelerators.cpu import CPUAccelerator
 from syntheticmind.accelerators.cuda import CUDAAccelerator
 from syntheticmind.accelerators.mps import MPSAccelerator
+from syntheticmind.accelerators.topology import DeviceTopology, resolve_device_topology
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import ModelHooks
@@ -217,37 +218,38 @@ class Trainer:
     def __init__(
         self,
         *,
+        accelerator: str | Accelerator = "auto",
+        strategy: str | Strategy = "auto",
+        devices: int | str | list[int] = "auto",
+        num_nodes: int = 1,
+        precision: Precision = "32-true",
+        logger: Logger | None = None,
+        callbacks: list[Callback] | None = None,
+        fast_dev_run: int | bool = False,
         max_epochs: int | None = None,
         min_epochs: int | None = None,
         max_steps: int = -1,
         min_steps: int | None = None,
         max_time: str | timedelta | dict[str, int] | None = None,
-        accelerator: str | Accelerator = "auto",
-        strategy: str | Strategy = "auto",
-        devices: int = 1,
-        callbacks: list[Callback] | None = None,
-        logger: Logger | None = None,
-        fast_dev_run: int | bool = False,
-        accumulate_grad_batches: int = 1,
-        val_check_interval: int | float | str | timedelta | dict[str, int] | None = None,
-        check_val_every_n_epoch: int | None = 1,
-        precision: Precision = "32-true",
-        gradient_clip_val: int | float | None = None,
-        gradient_clip_algorithm: str | None = None,
-        log_every_n_steps: int = 10,
-        enable_progress_bar: bool = True,
-        deterministic: bool = False,
-        num_sanity_val_steps: int | None = None,
         limit_train_batches: int | float | None = None,
         limit_val_batches: int | float | None = None,
         limit_test_batches: int | float | None = None,
         limit_predict_batches: int | float | None = None,
         overfit_batches: int | float = 0.0,
+        val_check_interval: int | float | str | timedelta | dict[str, int] | None = None,
+        check_val_every_n_epoch: int | None = 1,
+        num_sanity_val_steps: int | None = None,
+        log_every_n_steps: int = 10,
+        enable_progress_bar: bool = True,
+        accumulate_grad_batches: int = 1,
+        gradient_clip_val: int | float | None = None,
+        gradient_clip_algorithm: str | None = None,
+        deterministic: bool = False,
         use_distributed_sampler: bool = True,
         sync_batchnorm: bool = False,
+        reload_dataloaders_every_n_epochs: int = 0,
         resume_from_checkpoint: str | Path | None = None,
-        seed: int | None = None,
-        reload_dataloaders_every_n_epochs: int = 0
+        seed: int | None = None
     ) -> None:
         # Validates the configuration surface, optionally seeds every random
         # source, resolves the accelerator and strategy, installs the default
@@ -444,7 +446,6 @@ class Trainer:
                 "norm" if normalized_gradient_clip_algorithm == "norm" else "value"
             )
 
-        self.devices: int = devices
         self.precision: Precision = precision
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
@@ -467,8 +468,47 @@ class Trainer:
         if seed is not None:
             SeedManager.seed_everything(seed, deterministic=deterministic)
 
-        self.accelerator: Accelerator = self._resolve_accelerator(accelerator)
-        self.strategy: Strategy = self._resolve_strategy(strategy, self.accelerator)
+        configured_parallel_devices: list[torch.device] | None = None
+        resolved_accelerator_input: str | Accelerator = accelerator
+        accelerator_is_auto: bool = (
+            isinstance(accelerator, str) and accelerator.lower() == "auto"
+        )
+        if isinstance(strategy, Strategy):
+            if strategy.accelerator is not None:
+                if not accelerator_is_auto:
+                    raise MisconfigurationError(
+                        "Set the accelerator through either Trainer or the strategy instance, not both."
+                    )
+                resolved_accelerator_input = strategy.accelerator
+            if strategy.parallel_devices:
+                configured_parallel_devices = strategy.parallel_devices
+                if accelerator_is_auto and strategy.accelerator is None:
+                    resolved_accelerator_input = configured_parallel_devices[0].type
+
+        self.accelerator: Accelerator = self._resolve_accelerator(
+            resolved_accelerator_input
+        )
+        device_topology: DeviceTopology = resolve_device_topology(
+            self.accelerator,
+            devices,
+            num_nodes,
+            configured_parallel_devices
+        )
+        self.devices: int | list[int] = device_topology.devices
+        self.parallel_devices: list[torch.device] = list(
+            device_topology.parallel_devices
+        )
+        self.strategy: Strategy = self._resolve_strategy(
+            strategy,
+            self.accelerator,
+            self.parallel_devices,
+            device_topology.num_nodes
+        )
+        self.strategy.configure_topology(
+            self.accelerator,
+            self.parallel_devices,
+            device_topology.num_nodes
+        )
 
         self.callbacks: list[Callback] = list(callbacks) if callbacks is not None else []
         from syntheticmind.callbacks.progress_bar import ProgressBarCallback
@@ -1304,59 +1344,111 @@ class Trainer:
         # Resolves the accelerator argument: a live instance passes through
         # unchanged, a backend name constructs the matching accelerator, and
         # "auto" prefers CUDA, then MPS, then CPU by availability.
+        resolved_accelerator: Accelerator
         if isinstance(accelerator, Accelerator):
-            return accelerator
-        match accelerator:
-            case "cuda":
-                return CUDAAccelerator()
-            case "mps":
-                return MPSAccelerator()
-            case "cpu":
-                return CPUAccelerator()
-            case "auto":
-                if CUDAAccelerator.is_available():
-                    return CUDAAccelerator()
-                if MPSAccelerator.is_available():
-                    return MPSAccelerator()
-                return CPUAccelerator()
-            case _:
-                raise ValueError(f"Unknown accelerator: {accelerator}")
+            resolved_accelerator = accelerator
+        elif not isinstance(accelerator, str):
+            raise TypeError(
+                f"`accelerator` must be a string or Accelerator instance, got {accelerator!r}."
+            )
+        else:
+            normalized_accelerator: str = accelerator.lower()
+            match normalized_accelerator:
+                case "cuda":
+                    resolved_accelerator = CUDAAccelerator()
+                case "mps":
+                    resolved_accelerator = MPSAccelerator()
+                case "cpu":
+                    resolved_accelerator = CPUAccelerator()
+                case "gpu":
+                    if MPSAccelerator.is_available():
+                        resolved_accelerator = MPSAccelerator()
+                    elif CUDAAccelerator.is_available():
+                        resolved_accelerator = CUDAAccelerator()
+                    else:
+                        raise MisconfigurationError(
+                            "No supported GPU accelerator is available."
+                        )
+                case "auto":
+                    if CUDAAccelerator.is_available():
+                        resolved_accelerator = CUDAAccelerator()
+                    elif MPSAccelerator.is_available():
+                        resolved_accelerator = MPSAccelerator()
+                    else:
+                        resolved_accelerator = CPUAccelerator()
+                case _:
+                    raise ValueError(
+                        f"Unknown accelerator {accelerator!r}. Available choices are "
+                        "'auto', 'gpu', 'cpu', 'cuda', and 'mps'."
+                    )
+        if not type(resolved_accelerator).is_available():
+            available_accelerators: list[str] = ["cpu"]
+            if CUDAAccelerator.is_available():
+                available_accelerators.append("cuda")
+            if MPSAccelerator.is_available():
+                available_accelerators.append("mps")
+            raise MisconfigurationError(
+                f"{type(resolved_accelerator).__name__} is not available on this system. "
+                f"Available accelerators: {available_accelerators}."
+            )
+        return resolved_accelerator
 
-    def _resolve_strategy(self, strategy: str | Strategy, accelerator: Accelerator) -> Strategy:
+    def _resolve_strategy(
+        self,
+        strategy: str | Strategy,
+        accelerator: Accelerator,
+        parallel_devices: list[torch.device],
+        num_nodes: int
+    ) -> Strategy:
         # Resolves the strategy argument: a live instance passes through
         # unchanged, a strategy name constructs the matching strategy, and
         # "auto" selects distributed data parallel only for multi-device CUDA
         # configurations, defaulting to single-device execution otherwise.
+        resolved_strategy: Strategy
         if isinstance(strategy, Strategy):
-            return strategy
-        match strategy:
-            case "ddp":
-                return DDPStrategy()
-            case "single_device":
-                return SingleDeviceStrategy()
-            case "auto":
-                if self.devices > 1 and isinstance(accelerator, CUDAAccelerator):
-                    return DDPStrategy()
-                return SingleDeviceStrategy()
-            case _:
-                raise ValueError(f"Unknown strategy: {strategy}")
+            resolved_strategy = strategy
+        elif not isinstance(strategy, str):
+            raise TypeError(
+                f"`strategy` must be a string or Strategy instance, got {strategy!r}."
+            )
+        else:
+            normalized_strategy: str = strategy.lower()
+            match normalized_strategy:
+                case "ddp":
+                    resolved_strategy = DDPStrategy()
+                case "single_device":
+                    resolved_strategy = SingleDeviceStrategy()
+                case "auto":
+                    if len(parallel_devices) > 1 or num_nodes > 1:
+                        resolved_strategy = DDPStrategy()
+                    else:
+                        resolved_strategy = SingleDeviceStrategy()
+                case _:
+                    raise ValueError(
+                        f"Unknown strategy {strategy!r}. Available choices are "
+                        "'auto', 'single_device', and 'ddp'."
+                    )
+        requires_distributed_strategy: bool = (
+            len(parallel_devices) > 1 or num_nodes > 1
+        )
+        if isinstance(accelerator, MPSAccelerator) and resolved_strategy.is_distributed:
+            raise MisconfigurationError(
+                "Distributed strategies are not supported with the MPS accelerator. "
+                "Use accelerator='cpu' or a single-device strategy."
+            )
+        if requires_distributed_strategy and not resolved_strategy.is_distributed:
+            raise MisconfigurationError(
+                f"{type(resolved_strategy).__name__} cannot manage num_devices="
+                f"{len(parallel_devices)} and num_nodes={num_nodes}. Use strategy='ddp'."
+            )
+        return resolved_strategy
 
     def _resolve_device(self) -> torch.device:
         # Resolves the concrete device for this process. Distributed CUDA
         # execution derives the device index from the launcher-provided
         # LOCAL_RANK so each process binds its own GPU; single-process CUDA
         # uses device zero, and the remaining backends have one device each.
-        accelerator_name: str = type(self.accelerator).__name__
-        match accelerator_name:
-            case "CUDAAccelerator":
-                if self.strategy.is_distributed:
-                    local_rank: int = int(__import__("os").environ.get("LOCAL_RANK", "0"))
-                    return torch.device("cuda", local_rank)
-                return torch.device("cuda", 0)
-            case "MPSAccelerator":
-                return torch.device("mps")
-            case _:
-                return torch.device("cpu")
+        return self.strategy.root_device
 
     def _wrap_with_distributed_sampler(
         self,
@@ -1745,6 +1837,41 @@ class Trainer:
     def current_epoch(self) -> int:
         # Zero-based epoch counter mirrored from the trainer state.
         return self.state.current_epoch
+
+    @property
+    def global_rank(self) -> int:
+        return self.strategy.global_rank
+
+    @property
+    def local_rank(self) -> int:
+        return self.strategy.local_rank
+
+    @property
+    def node_rank(self) -> int:
+        return self.strategy.node_rank
+
+    @property
+    def world_size(self) -> int:
+        return self.strategy.world_size
+
+    @property
+    def num_nodes(self) -> int:
+        return self.strategy.num_nodes
+
+    @property
+    def device_ids(self) -> list[int]:
+        return [
+            device.index if device.index is not None else index
+            for index, device in enumerate(self.parallel_devices)
+        ]
+
+    @property
+    def num_devices(self) -> int:
+        return len(self.parallel_devices)
+
+    @property
+    def is_global_zero(self) -> bool:
+        return self.strategy.is_global_zero
 
     @property
     def max_epochs(self) -> int:

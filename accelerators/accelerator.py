@@ -17,6 +17,8 @@ from abc import ABC, abstractmethod
 
 import torch
 
+from syntheticmind.accelerators.device_parser import DeviceInput
+
 __all__: list[str] = ["Accelerator"]
 
 
@@ -35,8 +37,19 @@ class Accelerator(ABC):
         # Returns the bound device, or the backend's default when none is bound.
         raise NotImplementedError
 
+    @staticmethod
     @abstractmethod
-    def auto_device_count(self) -> int:
+    def parse_devices(devices: DeviceInput) -> int | list[int]:
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def get_parallel_devices(devices: int | list[int]) -> list[torch.device]:
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def auto_device_count() -> int:
         # Number of devices this backend can drive on the current host.
         raise NotImplementedError
 

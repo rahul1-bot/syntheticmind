@@ -19,6 +19,8 @@ from typing import override
 import torch
 
 from syntheticmind.accelerators.accelerator import Accelerator
+from syntheticmind.accelerators.device_parser import DeviceInput, parse_gpu_devices
+from syntheticmind.utilities.exceptions import MisconfigurationError
 
 __all__: list[str] = ["CUDAAccelerator"]
 
@@ -35,6 +37,8 @@ class CUDAAccelerator(Accelerator):
     def setup_device(self, device: torch.device) -> None:
         # Binds the device and makes it the process-wide current CUDA device so
         # context-free allocations follow the binding.
+        if device.type != "cuda":
+            raise MisconfigurationError(f"Device should be CUDA, got {device} instead.")
         self._device: torch.device | None = device
         torch.cuda.set_device(device)
 
@@ -45,8 +49,25 @@ class CUDAAccelerator(Accelerator):
             return torch.device("cuda", 0)
         return self._device
 
+    @staticmethod
     @override
-    def auto_device_count(self) -> int:
+    def parse_devices(devices: DeviceInput) -> int | list[int]:
+        return parse_gpu_devices(
+            devices,
+            CUDAAccelerator.auto_device_count(),
+            "CUDAAccelerator"
+        )
+
+    @staticmethod
+    @override
+    def get_parallel_devices(devices: int | list[int]) -> list[torch.device]:
+        if not isinstance(devices, list):
+            raise TypeError("CUDAAccelerator requires parsed device IDs.")
+        return [torch.device("cuda", device_id) for device_id in devices]
+
+    @staticmethod
+    @override
+    def auto_device_count() -> int:
         # Number of visible CUDA devices on this host.
         return torch.cuda.device_count()
 

@@ -30,9 +30,11 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 import os
 from collections.abc import Callable
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import torch
 import torch.distributed as dist
@@ -43,6 +45,9 @@ from syntheticmind.core.module import Module
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
 
+if TYPE_CHECKING:
+    from syntheticmind.accelerators.accelerator import Accelerator
+
 __all__: list[str] = ["DDPStrategy"]
 
 
@@ -51,12 +56,31 @@ class DDPStrategy(Strategy):
     # device and one replica; this class manages the process-group lifecycle,
     # the DistributedDataParallel wrapping, and the collective operations the
     # trainer and callbacks invoke through the Strategy interface.
-    def __init__(self, backend: str = "nccl") -> None:
+    def __init__(
+        self,
+        accelerator: Accelerator | None = None,
+        parallel_devices: list[torch.device] | None = None,
+        process_group_backend: str | None = None
+    ) -> None:
         # Records the requested communication backend. The local rank is
         # resolved later, during environment setup, from the launcher-provided
         # environment variables.
-        super().__init__()
-        self._backend: str = backend
+        super().__init__(
+            accelerator=accelerator,
+            parallel_devices=parallel_devices
+        )
+        if process_group_backend is not None and not isinstance(
+            process_group_backend,
+            str
+        ):
+            raise TypeError(
+                f"`process_group_backend` must be a string or None, got {process_group_backend!r}."
+            )
+        self._process_group_backend: str | None = (
+            process_group_backend.lower()
+            if process_group_backend is not None
+            else None
+        )
         self._local_rank: int = 0
 
     @override
@@ -66,29 +90,68 @@ class DDPStrategy(Strategy):
         # environment is complete, so misconfiguration surfaces as an immediate
         # MisconfigurationError with corrective guidance rather than a
         # rendezvous hang inside torch.distributed.
-        if not dist.is_initialized():
-            from syntheticmind.utilities.exceptions import MisconfigurationError
+        from syntheticmind.utilities.exceptions import MisconfigurationError
 
-            if self._backend == "nccl" and not torch.cuda.is_available():
+        try:
+            self._local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        except ValueError as exception:
+            raise MisconfigurationError(
+                f"LOCAL_RANK must be an integer, got {os.environ.get('LOCAL_RANK')!r}."
+            ) from exception
+        if self._local_rank < 0 or self._local_rank >= self.num_processes:
+            raise MisconfigurationError(
+                f"LOCAL_RANK={self._local_rank} is outside the configured per-node device "
+                f"range [0, {self.num_processes - 1}]."
+            )
+        backend: str = self._process_group_backend or (
+            "nccl" if self.root_device.type == "cuda" else "gloo"
+        )
+        configured_world_size: int = self.num_nodes * self.num_processes
+        if dist.is_initialized():
+            active_world_size: int = dist.get_world_size()
+            if active_world_size != configured_world_size:
                 raise MisconfigurationError(
-                    "DDPStrategy with backend='nccl' requires CUDA, but CUDA is not available. "
-                    "Use DDPStrategy(backend='gloo') for CPU distributed training, "
-                    "or ensure CUDA is properly installed."
+                    f"The initialized process group has world_size={active_world_size}, but the "
+                    f"configured topology requires {configured_world_size} processes."
                 )
+            return
+        if backend == "nccl" and not torch.cuda.is_available():
+            raise MisconfigurationError(
+                "DDPStrategy with process_group_backend='nccl' requires CUDA, but CUDA is not available. "
+                "Use DDPStrategy(process_group_backend='gloo') for CPU distributed training, "
+                "or ensure CUDA is properly installed."
+            )
 
-            required_env_vars: list[str] = ["RANK", "WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT"]
-            missing_env_vars: list[str] = [
-                var for var in required_env_vars if var not in os.environ
-            ]
-            if missing_env_vars:
-                raise MisconfigurationError(
-                    f"DDPStrategy requires environment variables {missing_env_vars}, "
-                    f"but they are not set. Launch with: "
-                    f"torchrun --nproc_per_node=<NUM_GPUS> your_script.py"
-                )
+        required_env_vars: list[str] = [
+            "RANK",
+            "WORLD_SIZE",
+            "LOCAL_RANK",
+            "MASTER_ADDR",
+            "MASTER_PORT"
+        ]
+        missing_env_vars: list[str] = [
+            var for var in required_env_vars if var not in os.environ
+        ]
+        if missing_env_vars:
+            raise MisconfigurationError(
+                f"DDPStrategy requires environment variables {missing_env_vars}, "
+                f"but they are not set. Launch with: "
+                f"torchrun --nproc_per_node=<NUM_GPUS> your_script.py"
+            )
 
-            self._local_rank: int = int(os.environ.get("LOCAL_RANK", "0"))
-            dist.init_process_group(backend=self._backend)
+        try:
+            launched_world_size: int = int(os.environ["WORLD_SIZE"])
+        except ValueError as exception:
+            raise MisconfigurationError(
+                f"WORLD_SIZE must be an integer, got {os.environ['WORLD_SIZE']!r}."
+            ) from exception
+        if launched_world_size != configured_world_size:
+            raise MisconfigurationError(
+                f"WORLD_SIZE={launched_world_size} does not match the configured topology "
+                f"of num_nodes={self.num_nodes} and num_devices={self.num_processes} "
+                f"({configured_world_size} processes)."
+            )
+        dist.init_process_group(backend=backend)
 
     @override
     def setup(self, model: nn.Module, device: torch.device) -> nn.Module:
@@ -204,6 +267,14 @@ class DDPStrategy(Strategy):
         return True
 
     @property
+    @override
+    def root_device(self) -> torch.device:
+        if not self.parallel_devices:
+            return self._device
+        return self.parallel_devices[self.local_rank]
+
+    @property
+    @override
     def local_rank(self) -> int:
         # Node-local rank resolved from the launcher environment during
         # environment setup. Zero before setup and in single-node launches
@@ -211,12 +282,35 @@ class DDPStrategy(Strategy):
         return self._local_rank
 
     @property
+    @override
+    def global_rank(self) -> int:
+        if dist.is_initialized():
+            return dist.get_rank()
+        return int(os.environ.get("RANK", "0"))
+
+    @property
+    @override
+    def node_rank(self) -> int:
+        if "GROUP_RANK" in os.environ:
+            return int(os.environ["GROUP_RANK"])
+        if "NODE_RANK" in os.environ:
+            return int(os.environ["NODE_RANK"])
+        return self.global_rank // self.num_processes
+
+    @property
+    @override
     def world_size(self) -> int:
         # Number of participating processes, or one before the process group
         # is initialized.
         if dist.is_initialized():
             return dist.get_world_size()
-        return 1
+        if "WORLD_SIZE" in os.environ:
+            return int(os.environ["WORLD_SIZE"])
+        return self.num_nodes * self.num_processes
+
+    @property
+    def process_group_backend(self) -> str | None:
+        return self._process_group_backend
 
     @override
     def reduce_boolean_decision(self, decision: bool) -> bool:
