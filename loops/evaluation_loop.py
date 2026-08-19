@@ -107,6 +107,8 @@ class EvaluationLoop(Loop):
         running_stage: RunningStage = "validating" if self.stage == "validate" else "testing"
         state.set_running_stage(running_stage)
         module._running_stage: str | None = running_stage
+        if not trainer._sanity_checking:
+            trainer._reset_progress_bar_metrics(running_stage)
 
         dataloader: DataLoader = self._get_dataloader()  # type: ignore[type-arg]
         total_batches: int | None = self._safe_len(dataloader)
@@ -145,6 +147,7 @@ class EvaluationLoop(Loop):
                 module.on_test_epoch_start()
         epoch_accum: dict[str, MetricAccumulator] = {}
         logger_metric_names: set[str] = set()
+        progress_bar_metric_names: set[str] = set()
 
         with torch.inference_mode():
             dataloader_iterator_start_time: float = time.perf_counter()
@@ -214,9 +217,24 @@ class EvaluationLoop(Loop):
                             callback.on_test_batch_end(trainer, module, outputs, batch, batch_idx, 0)
                         module.on_test_batch_end(outputs, batch, batch_idx, 0)
 
-                self._accumulate_metrics(module, epoch_accum, logger_metric_names, log_fn, state)
+                self._accumulate_metrics(
+                    module,
+                    epoch_accum,
+                    logger_metric_names,
+                    progress_bar_metric_names,
+                    log_fn,
+                    state,
+                    running_stage
+                )
 
         self.epoch_metrics: dict[str, float] = self._reduce_epoch_metrics(epoch_accum)
+        if not trainer._sanity_checking:
+            progress_bar_epoch_metrics: dict[str, float] = {
+                name: value
+                for name, value in self.epoch_metrics.items()
+                if name in progress_bar_metric_names
+            }
+            trainer._update_progress_bar_metrics(running_stage, progress_bar_epoch_metrics)
 
         if log_fn is not None and self.epoch_metrics and DistributedUtils.is_rank_zero():
             logger_epoch_metrics: dict[str, float] = {
@@ -232,7 +250,7 @@ class EvaluationLoop(Loop):
                     callback.on_validation_epoch_end(trainer, module)
             with module._hook_context("on_validation_epoch_end"):
                 module.on_validation_epoch_end()
-            self._consume_epoch_end_hook_metrics(module, log_fn, state)
+            self._consume_epoch_end_hook_metrics(module, log_fn, state, running_stage)
             self.trainer._callback_metrics.update(self.epoch_metrics)
             with module._hook_context("on_validation_epoch_end"):
                 for callback in monitoring_callbacks:
@@ -253,7 +271,7 @@ class EvaluationLoop(Loop):
                     callback.on_test_epoch_end(trainer, module)
             with module._hook_context("on_test_epoch_end"):
                 module.on_test_epoch_end()
-            self._consume_epoch_end_hook_metrics(module, log_fn, state)
+            self._consume_epoch_end_hook_metrics(module, log_fn, state, running_stage)
             self.trainer._callback_metrics.update(self.epoch_metrics)
             with module._hook_context("on_test_end"):
                 for callback in callbacks:
@@ -315,8 +333,10 @@ class EvaluationLoop(Loop):
         module: Module,
         epoch_accum: dict[str, MetricAccumulator],
         logger_metric_names: set[str],
+        progress_bar_metric_names: set[str],
         log_fn: Logger | None,
-        state: TrainerState
+        state: TrainerState,
+        running_stage: RunningStage
     ) -> None:
         # Drains the module's logged-metric buffer after each batch. Metrics
         # marked for distributed synchronization are mean-reduced across ranks
@@ -329,6 +349,7 @@ class EvaluationLoop(Loop):
             return
 
         step_metrics: dict[str, float] = {}
+        progress_bar_step_metrics: dict[str, float] = {}
         for name, metric in logged.items():
             value: torch.Tensor | float = metric.value
             if metric.sync_distributed and DistributedUtils.is_distributed():
@@ -339,15 +360,24 @@ class EvaluationLoop(Loop):
                 value: torch.Tensor | float = value.item()
             if metric.on_step and metric.logger:
                 step_metrics[name] = value
+            if metric.on_step and metric.progress_bar:
+                progress_bar_step_metrics[name] = value
             if metric.on_epoch:
                 if name not in epoch_accum:
                     epoch_accum[name] = MetricAccumulator(reduction=metric.reduction)
                 epoch_accum[name].update(value, batch_size=metric.batch_size)
                 if metric.logger:
                     logger_metric_names.add(name)
+                if metric.progress_bar:
+                    progress_bar_metric_names.add(name)
 
         if step_metrics and log_fn is not None and DistributedUtils.is_rank_zero():
             log_fn.log_metrics(step_metrics, step=state.global_step)
+        if not self.trainer._sanity_checking:
+            self.trainer._update_progress_bar_metrics(
+                running_stage,
+                progress_bar_step_metrics
+            )
 
         module._reset_logged_metrics()
 
@@ -355,7 +385,8 @@ class EvaluationLoop(Loop):
         self,
         module: Module,
         log_fn: Logger | None,
-        state: TrainerState
+        state: TrainerState,
+        running_stage: RunningStage
     ) -> None:
         # Drains metrics logged inside the module's epoch-end hook, which runs
         # after the batch accumulators have already been reduced. Epoch-scoped
@@ -366,6 +397,7 @@ class EvaluationLoop(Loop):
         if not logged:
             return
         hook_logger_metrics: dict[str, float] = {}
+        hook_progress_bar_metrics: dict[str, float] = {}
         for name, metric in logged.items():
             value: torch.Tensor | float = metric.value
             if metric.sync_distributed and DistributedUtils.is_distributed():
@@ -378,8 +410,15 @@ class EvaluationLoop(Loop):
                 self.epoch_metrics[name] = value
             if metric.logger:
                 hook_logger_metrics[name] = value
+            if metric.progress_bar:
+                hook_progress_bar_metrics[name] = value
         if hook_logger_metrics and log_fn is not None and DistributedUtils.is_rank_zero():
             log_fn.log_metrics(hook_logger_metrics, step=state.global_step)
+        if not self.trainer._sanity_checking:
+            self.trainer._update_progress_bar_metrics(
+                running_stage,
+                hook_progress_bar_metrics
+            )
         module._reset_logged_metrics()
 
     @staticmethod

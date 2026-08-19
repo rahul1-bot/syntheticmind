@@ -49,7 +49,8 @@
 | Strategic Note | Console Experience Boundary | Date: 19 August 2026 | Time: 11:28 AM | Name: Ghost |
 
     1. SyntheticMind's terminal experience should operate as a coherent live run console rather than independent progress bars interrupted by raw logger sentences.
-    2. Visual polish is subordinate to measurement truth. The incorrect shared timer state, sanity-time contamination, stale metric routing, and missing prediction presentation must be corrected before a richer renderer is trusted.
+    2. Visual polish is subordinate to measurement truth. Independent stage timers, sanity exclusion, stage-isolated progress metrics, boundary resets, and prediction batch totals now provide the verified substrate required by the renderer.
     3. Existing runtime telemetry should feed the console through structured events so terminal rendering, CSV and TensorBoard persistence, callbacks, and distributed execution remain separate concerns.
     4. The approved renderer uses one active TTY line, one completed-epoch line, and one final stage line. It shows only stage, progress, at most two selected metrics, and honest ETA by default; all detailed telemetry stays in structured experiment outputs.
     5. Non-interactive output remains stable plain text, distributed rendering remains rank-zero only, and unknown dataloader lengths produce counts rather than false percentages or ETA values.
+    6. Callback monitoring metrics, experiment logging, profiling telemetry, and terminal-selected metrics remain separate channels. The renderer consumes runtime truth but does not become another authority for it.

@@ -398,8 +398,17 @@ class Trainer:
         self._total_train_batches: int | None = None
         self._total_val_batches: int | None = None
         self._total_test_batches: int | None = None
+        self._total_predict_batches: int | None = None
         self.reload_dataloaders_every_n_epochs: int = reload_dataloaders_every_n_epochs
         self._callback_metrics: dict[str, float] = {}
+        self._progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]] = {
+            "training": {},
+            "validating": {},
+            "testing": {},
+            "predicting": {},
+            "sanity_checking": {}
+        }
+        self._last_progress_bar_stage: RunningStage | None = None
         self._dataloader_fetch_time_seconds: dict[RunningStage, float] = {}
         self._dataloader_iterator_creation_time_seconds: dict[RunningStage, float] = {}
 
@@ -440,6 +449,9 @@ class Trainer:
         self.state.set_stage("fit")
         self.state.reset_on_run()
         self._callback_metrics.clear()
+        self._reset_progress_bar_metrics()
+        self._total_train_batches: int | None = None
+        self._total_val_batches: int | None = None
         self.fit_loop.should_stop: bool = False
         if self.fit_loop.epoch_loop is not None:
             self.fit_loop.epoch_loop.reset_on_run()
@@ -713,6 +725,8 @@ class Trainer:
         #     metric name.
         self.state.set_stage("validate")
         self._callback_metrics.clear()
+        self._reset_progress_bar_metrics("validating")
+        self._total_val_batches: int | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer: Trainer | None = self
@@ -796,6 +810,8 @@ class Trainer:
         #     name.
         self.state.set_stage("test")
         self._callback_metrics.clear()
+        self._reset_progress_bar_metrics("testing")
+        self._total_test_batches: int | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer: Trainer | None = self
@@ -886,6 +902,8 @@ class Trainer:
         #     when retention is disabled.
         self.state.set_stage("predict")
         self._callback_metrics.clear()
+        self._reset_progress_bar_metrics("predicting")
+        self._total_predict_batches: int | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer: Trainer | None = self
@@ -914,6 +932,8 @@ class Trainer:
                     self.predict_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_unrepeated_sampler(self.predict_dataloader)
                 else:
                     log.warning("Skipping DistributedSampler for predict dataloader: IterableDataset detected.")
+
+            self._total_predict_batches: int | None = self._safe_len(self.predict_dataloader)
 
             device: torch.device = self._resolve_device()
             self.accelerator.setup_device(device)
@@ -966,6 +986,33 @@ class Trainer:
         # Records the most recent blocking dataloader fetch duration for the
         # stage; consumed by runtime diagnostics such as the profiler callback.
         self._dataloader_fetch_time_seconds[running_stage] = max(0.0, duration_seconds)
+
+    def _reset_progress_bar_metrics(self, running_stage: RunningStage | None = None) -> None:
+        if running_stage is None:
+            self._progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]] = {
+                "training": {},
+                "validating": {},
+                "testing": {},
+                "predicting": {},
+                "sanity_checking": {}
+            }
+            self._last_progress_bar_stage: RunningStage | None = None
+            return
+        self._progress_bar_metrics_by_stage[running_stage] = {}
+        self._last_progress_bar_stage: RunningStage | None = running_stage
+
+    def _update_progress_bar_metrics(
+        self,
+        running_stage: RunningStage,
+        metrics: dict[str, float]
+    ) -> None:
+        if not metrics:
+            return
+        self._progress_bar_metrics_by_stage[running_stage].update(metrics)
+        self._last_progress_bar_stage: RunningStage | None = running_stage
+
+    def _get_progress_bar_metrics(self, running_stage: RunningStage) -> dict[str, float]:
+        return dict(self._progress_bar_metrics_by_stage[running_stage])
 
     def _get_dataloader_fetch_time(self, running_stage: RunningStage) -> float | None:
         # Returns the most recent recorded fetch duration for the stage, or
@@ -1167,6 +1214,7 @@ class Trainer:
         self.validate_loop.epoch_metrics: dict[str, float] = {}
         module._reset_logged_metrics()
         self._callback_metrics.clear()
+        self._reset_progress_bar_metrics("validating")
 
         with module._hook_context("on_sanity_check_end"):
             for callback in self.callbacks:
@@ -1308,6 +1356,18 @@ class Trainer:
         metrics: dict[str, float] = {}
         metrics.update(self.validate_loop.epoch_metrics)
         return metrics
+
+    @property
+    def progress_bar_metrics(self) -> dict[str, float]:
+        running_stage: RunningStage | None = self.state.running_stage
+        if running_stage == "sanity_checking":
+            return {}
+        resolved_stage: RunningStage | None = (
+            running_stage if running_stage is not None else self._last_progress_bar_stage
+        )
+        if resolved_stage is None:
+            return {}
+        return self._get_progress_bar_metrics(resolved_stage)
 
     @property
     def interrupted(self) -> bool:

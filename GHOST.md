@@ -94,3 +94,13 @@
     5. Actionable warnings may interrupt the compact presentation; routine Loguru timestamps, module names, source locations, and diagnostic chatter must not pollute the interactive progress surface.
     6. Rendering occurs only on global rank zero. Non-interactive and redirected execution emits stable plain-text epoch and stage lines without ANSI control sequences, spinners, carriage-return rewriting, or fabricated progress percentages for unsized dataloaders.
     7. Presentation depends on truthful stage-isolated measurements. Training, validation, testing, prediction, and sanity-check timing must not overwrite or contaminate one another, and metric routing must prevent stale values from crossing stage boundaries.
+
+| Architecture Decision | Stage Metrics and Runtime Timing | Date: 19 August 2026 | Time: 11:54 AM | Name: Ghost |
+
+    1. Progress-bar metrics are a dedicated presentation contract rather than an alias for callback monitoring metrics or experiment-logger metrics. Only values explicitly configured with `progress_bar=True` enter this surface.
+    2. Training, validation, testing, prediction, and sanity checking have isolated metric mappings. Training resets at every epoch, evaluation resets at every pass, each public entry point clears run-local state, and the sanity pass is discarded before real training begins.
+    3. Step-scoped values publish the latest scalar while epoch-scoped values publish the configured reduction. Metrics logged in training, validation, and test epoch-end module hooks are retained under the same stage contract.
+    4. `Trainer.progress_bar_metrics` returns a defensive snapshot for the active or most recently completed stage. Monitoring callbacks continue to consume `callback_metrics`, preventing console selection from changing early-stopping, checkpointing, or scheduler behavior.
+    5. `TimerCallback` is now a measurement-only subscriber with independent monotonic clocks for fit, training, validation, testing, and prediction. Training time pauses during validation, sanity validation is excluded, standalone stages reset before execution, and exception handling closes every active segment.
+    6. Prediction now records its real dataloader horizon alongside the existing training, validation, and test horizons. Unknown lengths remain `None` so the renderer cannot invent percentages or estimated completion times.
+    7. The terminal renderer must consume these authoritative measurements and may not reconstruct timing or metric truth from mixed callback state, logger output, or presentation-local guesses.

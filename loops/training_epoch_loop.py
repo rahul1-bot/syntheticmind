@@ -236,6 +236,7 @@ class TrainingEpochLoop(Loop):
         max_batches: int | None = self._resolve_limit_batches(total_batches)
         epoch_accum: dict[str, MetricAccumulator] = {}
         epoch_logger_names: set[str] = set()
+        epoch_progress_bar_names: set[str] = set()
         skip_batches: int = self._completed_batches
         tail_is_accumulating: bool = False
 
@@ -330,7 +331,15 @@ class TrainingEpochLoop(Loop):
                     callback.on_train_batch_end(trainer, module, outputs, batch, batch_idx)
                 module.on_train_batch_end(outputs, batch, batch_idx)
 
-            self._dispatch_step_metrics(module, state, log_fn, epoch_accum, epoch_logger_names, is_accumulating)
+            self._dispatch_step_metrics(
+                module,
+                state,
+                log_fn,
+                epoch_accum,
+                epoch_logger_names,
+                epoch_progress_bar_names,
+                is_accumulating
+            )
 
             self._completed_batches: int = batch_idx + 1
             tail_is_accumulating: bool = is_accumulating
@@ -390,7 +399,13 @@ class TrainingEpochLoop(Loop):
 
         self._has_entered_batch_loop: bool = False
         self._completed_batches: int = 0
-        self._dispatch_epoch_metrics(epoch_accum, state, log_fn, epoch_logger_names)
+        self._dispatch_epoch_metrics(
+            epoch_accum,
+            state,
+            log_fn,
+            epoch_logger_names,
+            epoch_progress_bar_names
+        )
 
     def _make_autocast_context(self, device: torch.device) -> autocast | nullcontext[None]:
         # Returns the autocast context matching the configured precision policy:
@@ -801,6 +816,7 @@ class TrainingEpochLoop(Loop):
         log_fn: Logger | None,
         epoch_accum: dict[str, MetricAccumulator],
         epoch_logger_names: set[str],
+        epoch_progress_bar_names: set[str],
         is_accumulating: bool = False
     ) -> None:
         # Drains the module's logged-metric buffer after each batch. Metrics
@@ -816,6 +832,7 @@ class TrainingEpochLoop(Loop):
 
         step_metrics: dict[str, float] = {}
         callback_step_metrics: dict[str, float] = {}
+        progress_bar_step_metrics: dict[str, float] = {}
         for name, metric in logged.items():
             value: torch.Tensor | float = metric.value
             if metric.sync_distributed and DistributedUtils.is_distributed():
@@ -829,14 +846,19 @@ class TrainingEpochLoop(Loop):
                 callback_step_metrics[name] = value
                 if metric.logger:
                     step_metrics[name] = value
+                if metric.progress_bar:
+                    progress_bar_step_metrics[name] = value
             if metric.on_epoch:
                 if name not in epoch_accum:
                     epoch_accum[name] = MetricAccumulator(reduction=metric.reduction)
                 epoch_accum[name].update(value, batch_size=metric.batch_size)
                 if metric.logger:
                     epoch_logger_names.add(name)
+                if metric.progress_bar:
+                    epoch_progress_bar_names.add(name)
 
         self.trainer._callback_metrics.update(callback_step_metrics)
+        self.trainer._update_progress_bar_metrics("training", progress_bar_step_metrics)
         if step_metrics and log_fn is not None and not is_accumulating and state.global_step % self.log_every_n_steps == 0:
             if DistributedUtils.is_rank_zero():
                 log_fn.log_metrics(step_metrics, step=state.global_step)
@@ -848,7 +870,8 @@ class TrainingEpochLoop(Loop):
         epoch_accum: dict[str, MetricAccumulator],
         state: TrainerState,
         log_fn: Logger | None,
-        epoch_logger_names: set[str]
+        epoch_logger_names: set[str],
+        epoch_progress_bar_names: set[str]
     ) -> None:
         # Reduces every epoch accumulator at the epoch boundary. The reduced
         # values update the trainer's callback metrics on every rank, because
@@ -861,6 +884,12 @@ class TrainingEpochLoop(Loop):
         for name in epoch_accum:
             all_reduced[name] = epoch_accum[name].compute()
         self.trainer._callback_metrics.update(all_reduced)
+        progress_bar_reduced: dict[str, float] = {
+            name: value
+            for name, value in all_reduced.items()
+            if name in epoch_progress_bar_names
+        }
+        self.trainer._update_progress_bar_metrics("training", progress_bar_reduced)
         if log_fn is None:
             return
         if not DistributedUtils.is_rank_zero():

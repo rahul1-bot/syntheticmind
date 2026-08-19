@@ -133,6 +133,7 @@ class FitLoop(Loop):
 
             state.set_running_stage("training")
             module._running_stage: str | None = "training"
+            trainer._reset_progress_bar_metrics("training")
             module.train()
 
             with module._hook_context("on_train_epoch_start"):
@@ -204,6 +205,7 @@ class FitLoop(Loop):
             return
         log_metrics: dict[str, float] = {}
         callback_metrics: dict[str, float] = {}
+        progress_bar_metrics: dict[str, float] = {}
         for name, metric in logged.items():
             val: torch.Tensor | float = metric.value
             if isinstance(val, torch.Tensor):
@@ -212,7 +214,10 @@ class FitLoop(Loop):
                 callback_metrics[name] = val
             if metric.logger:
                 log_metrics[name] = val
+            if metric.progress_bar:
+                progress_bar_metrics[name] = val
         trainer._callback_metrics.update(callback_metrics)
+        trainer._update_progress_bar_metrics("training", progress_bar_metrics)
         if log_metrics and trainer.logger is not None and DistributedUtils.is_rank_zero():
             trainer.logger.log_metrics(log_metrics, step=state.global_step)
         module._reset_logged_metrics()
