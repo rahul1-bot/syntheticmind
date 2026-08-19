@@ -80,3 +80,11 @@
     3. ✅ User callbacks, model optimization, `max_time`, exception propagation, teardown, and the complete public-stage lifecycle remain operational without default checkpoint, logger, progress, model-summary, sanity, anomaly, development-run, or profiler infrastructure.
     4. ✅ Focused verification covers every conflict and disabled value, all public stages, artifact isolation, explicit callback boundaries, CPU, MPS, two-process Gloo rank ownership, compilation, and targeted changed-region type checking without invoking a linter.
     5. The next dependency-ordered phase is the standard `plugins` Trainer contract, beginning with an ownership and runtime-integration audit against the pinned reference before any new plugin class is adopted.
+
+| Progress Complete | Standard Core Plugin Capability | Date: 19 August 2026 | Time: 05:46 PM | Name: Ghost |
+
+    1. ✅ The standard `plugins` parameter now composes `Precision`, `CheckpointIO`, `ClusterEnvironment`, and `LayerSync` with exact family duplication and Trainer-versus-strategy ownership conflicts.
+    2. ✅ Strategy checkpoint save, load, removal, storage options, asynchronous snapshots, transactional teardown, cluster ranks, rendezvous values, layer application and reversal, and `sync_batchnorm` composition are executable runtime paths.
+    3. ✅ Focused verification covers signature and conflict matrices, local and custom checkpoint I/O, map-location forms, repeated and failed asynchronous execution, save-last links, replacement precision modules, direct strategy configuration, CPU, MPS, fork, spawn, subprocess, and external Gloo execution.
+    4. Default remote protocol storage, scheduler-specific cluster environments, and real CUDA synchronized batch normalization remain open capabilities rather than claimed parity.
+    5. The next dependency-ordered phase is the standard `reload_dataloaders_every_n_epochs` Trainer contract.

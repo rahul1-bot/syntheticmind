@@ -29,8 +29,21 @@ from typing import TYPE_CHECKING, Literal, TypeVar, cast
 import torch
 from torch import nn
 
+from syntheticmind.plugins.environments import ClusterEnvironment, LocalEnvironment
+from syntheticmind.plugins.io import (
+    CheckpointIO,
+    CheckpointPath,
+    TorchCheckpointIO,
+    _WrappingCheckpointIO
+)
+from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.precision.precision import Precision
-from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
+from syntheticmind.utilities.types import (
+    Batch,
+    CheckpointDict,
+    ModelOutput,
+    StepOutput
+)
 
 if TYPE_CHECKING:
     from syntheticmind.accelerators.accelerator import Accelerator
@@ -51,7 +64,10 @@ class Strategy(ABC):
         accelerator: Accelerator | None = None,
         parallel_devices: list[torch.device] | None = None,
         num_nodes: int = 1,
-        precision_plugin: Precision | None = None
+        cluster_environment: ClusterEnvironment | None = None,
+        checkpoint_io: CheckpointIO | None = None,
+        precision_plugin: Precision | None = None,
+        layer_sync: LayerSync | None = None
     ) -> None:
         # Starts with no model attached and the CPU as the provisional root
         # device until setup binds the real placement.
@@ -60,8 +76,18 @@ class Strategy(ABC):
         self._accelerator: Accelerator | None = accelerator
         self._parallel_devices: list[torch.device] = list(parallel_devices or [])
         self._num_nodes: int = num_nodes
+        self._cluster_environment: ClusterEnvironment = (
+            cluster_environment or LocalEnvironment()
+        )
+        self._configured_cluster_environment: ClusterEnvironment | None = (
+            cluster_environment
+        )
+        self._checkpoint_io: CheckpointIO | None = checkpoint_io
+        self._configured_checkpoint_io: CheckpointIO | None = checkpoint_io
         self._precision_plugin: Precision = precision_plugin or Precision()
         self._configured_precision_plugin: Precision | None = precision_plugin
+        self._layer_sync: LayerSync | None = layer_sync
+        self._configured_layer_sync: LayerSync | None = layer_sync
         self._device: torch.device = (
             self._parallel_devices[0]
             if self._parallel_devices
@@ -78,6 +104,51 @@ class Strategy(ABC):
         self._parallel_devices = list(parallel_devices)
         self._num_nodes = num_nodes
         self._device = self._parallel_devices[0]
+        self._configure_cluster_environment()
+
+    def _configure_cluster_environment(self) -> None:
+        if not self.is_distributed:
+            return
+        self._cluster_environment.validate_settings(
+            self.num_processes,
+            self.num_nodes
+        )
+        if self._cluster_environment.creates_processes_externally:
+            return
+        self._cluster_environment.set_world_size(
+            self.num_nodes * self.num_processes
+        )
+        self._cluster_environment.set_global_rank(
+            self._cluster_environment.node_rank() * self.num_processes
+            + self._cluster_environment.local_rank()
+        )
+
+    def save_checkpoint(
+        self,
+        checkpoint: CheckpointDict,
+        filepath: CheckpointPath,
+        storage_options: object | None = None
+    ) -> None:
+        if self.is_global_zero:
+            self.checkpoint_io.save_checkpoint(
+                checkpoint,
+                filepath,
+                storage_options
+            )
+
+    def load_checkpoint(
+        self,
+        checkpoint_path: CheckpointPath,
+        weights_only: bool | None = None
+    ) -> CheckpointDict:
+        return self.checkpoint_io.load_checkpoint(
+            checkpoint_path,
+            weights_only=weights_only
+        )
+
+    def remove_checkpoint(self, filepath: CheckpointPath) -> None:
+        if self.is_global_zero:
+            self.checkpoint_io.remove_checkpoint(filepath)
 
     @abstractmethod
     def setup_environment(self) -> None:
@@ -296,6 +367,68 @@ class Strategy(ABC):
         return self._accelerator
 
     @property
+    def cluster_environment(self) -> ClusterEnvironment:
+        return self._cluster_environment
+
+    @cluster_environment.setter
+    def cluster_environment(
+        self,
+        cluster_environment: ClusterEnvironment
+    ) -> None:
+        if not isinstance(cluster_environment, ClusterEnvironment):
+            raise TypeError(
+                "cluster_environment must be a ClusterEnvironment instance, got "
+                f"{type(cluster_environment).__name__}."
+            )
+        self._cluster_environment = cluster_environment
+        self._configure_cluster_environment()
+        self._configured_cluster_environment = cluster_environment
+
+    def _attach_cluster_environment(
+        self,
+        cluster_environment: ClusterEnvironment
+    ) -> None:
+        if not isinstance(cluster_environment, ClusterEnvironment):
+            raise TypeError(
+                "cluster_environment must be a ClusterEnvironment instance, got "
+                f"{type(cluster_environment).__name__}."
+            )
+        self._cluster_environment = cluster_environment
+        self._configure_cluster_environment()
+
+    @property
+    def configured_cluster_environment(self) -> ClusterEnvironment | None:
+        return self._configured_cluster_environment
+
+    @property
+    def checkpoint_io(self) -> CheckpointIO:
+        if self._checkpoint_io is None:
+            self._checkpoint_io = TorchCheckpointIO()
+        elif isinstance(self._checkpoint_io, _WrappingCheckpointIO):
+            self._checkpoint_io.checkpoint_io = TorchCheckpointIO()
+        return self._checkpoint_io
+
+    @checkpoint_io.setter
+    def checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
+        if not isinstance(checkpoint_io, CheckpointIO):
+            raise TypeError(
+                f"checkpoint_io must be a CheckpointIO instance, got {type(checkpoint_io).__name__}."
+            )
+        self._checkpoint_io = checkpoint_io
+        self._configured_checkpoint_io = checkpoint_io
+
+    def _attach_checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
+        if not isinstance(checkpoint_io, CheckpointIO):
+            raise TypeError(
+                f"checkpoint_io must be a CheckpointIO instance, got {type(checkpoint_io).__name__}."
+            )
+        self._checkpoint_io = checkpoint_io
+
+    @property
+    def configured_checkpoint_io(self) -> CheckpointIO | None:
+        return self._configured_checkpoint_io
+
+    @property
     def precision_plugin(self) -> Precision:
         return self._precision_plugin
 
@@ -318,6 +451,30 @@ class Strategy(ABC):
     @property
     def configured_precision_plugin(self) -> Precision | None:
         return self._configured_precision_plugin
+
+    @property
+    def layer_sync(self) -> LayerSync | None:
+        return self._layer_sync
+
+    @layer_sync.setter
+    def layer_sync(self, layer_sync: LayerSync | None) -> None:
+        if layer_sync is not None and not isinstance(layer_sync, LayerSync):
+            raise TypeError(
+                f"layer_sync must be a LayerSync instance or None, got {type(layer_sync).__name__}."
+            )
+        self._layer_sync = layer_sync
+        self._configured_layer_sync = layer_sync
+
+    def _attach_layer_sync(self, layer_sync: LayerSync | None) -> None:
+        if layer_sync is not None and not isinstance(layer_sync, LayerSync):
+            raise TypeError(
+                f"layer_sync must be a LayerSync instance or None, got {type(layer_sync).__name__}."
+            )
+        self._layer_sync = layer_sync
+
+    @property
+    def configured_layer_sync(self) -> LayerSync | None:
+        return self._configured_layer_sync
 
     @property
     def parallel_devices(self) -> list[torch.device]:

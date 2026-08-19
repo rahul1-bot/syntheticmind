@@ -43,6 +43,9 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
 from syntheticmind.core.module import Module
+from syntheticmind.plugins.environments import ClusterEnvironment
+from syntheticmind.plugins.io import CheckpointIO
+from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.precision.precision import Precision
 from syntheticmind.strategies.launcher import _ProcessLauncher, ProcessStartMethod
 from syntheticmind.strategies.strategy import Strategy, TBroadcast
@@ -63,9 +66,12 @@ class DDPStrategy(Strategy):
         self,
         accelerator: Accelerator | None = None,
         parallel_devices: list[torch.device] | None = None,
+        cluster_environment: ClusterEnvironment | None = None,
+        checkpoint_io: CheckpointIO | None = None,
+        precision_plugin: Precision | None = None,
         process_group_backend: str | None = None,
         start_method: ProcessStartMethod = "popen",
-        precision_plugin: Precision | None = None
+        layer_sync: LayerSync | None = None
     ) -> None:
         # Records the requested communication backend. The local rank is
         # resolved later, during environment setup, from the launcher-provided
@@ -73,7 +79,10 @@ class DDPStrategy(Strategy):
         super().__init__(
             accelerator=accelerator,
             parallel_devices=parallel_devices,
-            precision_plugin=precision_plugin
+            cluster_environment=cluster_environment,
+            checkpoint_io=checkpoint_io,
+            precision_plugin=precision_plugin,
+            layer_sync=layer_sync
         )
         if process_group_backend is not None and not isinstance(
             process_group_backend,
@@ -100,12 +109,11 @@ class DDPStrategy(Strategy):
         # rendezvous hang inside torch.distributed.
         from syntheticmind.utilities.exceptions import MisconfigurationError
 
-        try:
-            self._local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-        except ValueError as exception:
-            raise MisconfigurationError(
-                f"LOCAL_RANK must be an integer, got {os.environ.get('LOCAL_RANK')!r}."
-            ) from exception
+        self.cluster_environment.validate_settings(
+            self.num_processes,
+            self.num_nodes
+        )
+        self._local_rank = self.cluster_environment.local_rank()
         if self._local_rank < 0 or self._local_rank >= self.num_processes:
             raise MisconfigurationError(
                 f"LOCAL_RANK={self._local_rank} is outside the configured per-node device "
@@ -115,6 +123,31 @@ class DDPStrategy(Strategy):
             "nccl" if self.root_device.type == "cuda" else "gloo"
         )
         configured_world_size: int = self.num_nodes * self.num_processes
+        launched_world_size: int = self.cluster_environment.world_size()
+        global_rank: int = self.cluster_environment.global_rank()
+        node_rank: int = self.cluster_environment.node_rank()
+        if global_rank < 0 or global_rank >= launched_world_size:
+            raise MisconfigurationError(
+                f"global_rank={global_rank} is outside the launched world range "
+                f"[0, {launched_world_size - 1}]."
+            )
+        if launched_world_size != configured_world_size:
+            raise MisconfigurationError(
+                f"world_size={launched_world_size} does not match the configured topology "
+                f"of num_nodes={self.num_nodes} and num_devices={self.num_processes} "
+                f"({configured_world_size} processes)."
+            )
+        if node_rank < 0 or node_rank >= self.num_nodes:
+            raise MisconfigurationError(
+                f"node_rank={node_rank} is outside the configured node range "
+                f"[0, {self.num_nodes - 1}]."
+            )
+        expected_global_rank: int = node_rank * self.num_processes + self._local_rank
+        if expected_global_rank != global_rank:
+            raise MisconfigurationError(
+                f"global_rank={global_rank} does not match node_rank={node_rank} and "
+                f"local_rank={self._local_rank}; expected global_rank={expected_global_rank}."
+            )
         if dist.is_initialized():
             active_world_size: int = dist.get_world_size()
             active_backend: str = str(dist.get_backend()).lower()
@@ -137,69 +170,16 @@ class DDPStrategy(Strategy):
                 "or ensure CUDA is properly installed."
             )
 
-        required_env_vars: list[str] = [
-            "RANK",
-            "WORLD_SIZE",
-            "LOCAL_RANK",
-            "MASTER_ADDR",
-            "MASTER_PORT"
-        ]
-        missing_env_vars: list[str] = [
-            var for var in required_env_vars if var not in os.environ
-        ]
-        if missing_env_vars:
-            raise MisconfigurationError(
-                f"DDPStrategy requires environment variables {missing_env_vars}, "
-                f"but they are not set. Launch with: "
-                f"torchrun --nproc_per_node=<NUM_GPUS> your_script.py"
-            )
-
-        try:
-            launched_world_size: int = int(os.environ["WORLD_SIZE"])
-        except ValueError as exception:
-            raise MisconfigurationError(
-                f"WORLD_SIZE must be an integer, got {os.environ['WORLD_SIZE']!r}."
-            ) from exception
-        try:
-            global_rank: int = int(os.environ["RANK"])
-        except ValueError as exception:
-            raise MisconfigurationError(
-                f"RANK must be an integer, got {os.environ['RANK']!r}."
-            ) from exception
-        if global_rank < 0 or global_rank >= launched_world_size:
-            raise MisconfigurationError(
-                f"RANK={global_rank} is outside the launched world range "
-                f"[0, {launched_world_size - 1}]."
-            )
-        if launched_world_size != configured_world_size:
-            raise MisconfigurationError(
-                f"WORLD_SIZE={launched_world_size} does not match the configured topology "
-                f"of num_nodes={self.num_nodes} and num_devices={self.num_processes} "
-                f"({configured_world_size} processes)."
-            )
-        node_rank_value: str | None = os.environ.get(
-            "GROUP_RANK",
-            os.environ.get("NODE_RANK")
+        os.environ["MASTER_ADDR"] = self.cluster_environment.main_address
+        os.environ["MASTER_PORT"] = str(self.cluster_environment.main_port)
+        os.environ["WORLD_SIZE"] = str(launched_world_size)
+        os.environ["RANK"] = str(global_rank)
+        os.environ["LOCAL_RANK"] = str(self._local_rank)
+        dist.init_process_group(
+            backend=backend,
+            rank=global_rank,
+            world_size=launched_world_size
         )
-        if node_rank_value is not None:
-            try:
-                node_rank: int = int(node_rank_value)
-            except ValueError as exception:
-                raise MisconfigurationError(
-                    f"NODE_RANK must be an integer, got {node_rank_value!r}."
-                ) from exception
-            expected_global_rank: int = node_rank * self.num_processes + self._local_rank
-            if node_rank < 0 or node_rank >= self.num_nodes:
-                raise MisconfigurationError(
-                    f"NODE_RANK={node_rank} is outside the configured node range "
-                    f"[0, {self.num_nodes - 1}]."
-                )
-            if expected_global_rank != global_rank:
-                raise MisconfigurationError(
-                    f"RANK={global_rank} does not match NODE_RANK={node_rank} and "
-                    f"LOCAL_RANK={self._local_rank}; expected RANK={expected_global_rank}."
-                )
-        dist.init_process_group(backend=backend)
         self._register_process_group_cleanup()
 
     @override
@@ -380,16 +360,12 @@ class DDPStrategy(Strategy):
     def global_rank(self) -> int:
         if dist.is_initialized():
             return dist.get_rank()
-        return int(os.environ.get("RANK", "0"))
+        return self.cluster_environment.global_rank()
 
     @property
     @override
     def node_rank(self) -> int:
-        if "GROUP_RANK" in os.environ:
-            return int(os.environ["GROUP_RANK"])
-        if "NODE_RANK" in os.environ:
-            return int(os.environ["NODE_RANK"])
-        return self.global_rank // self.num_processes
+        return self.cluster_environment.node_rank()
 
     @property
     @override
@@ -398,9 +374,7 @@ class DDPStrategy(Strategy):
         # is initialized.
         if dist.is_initialized():
             return dist.get_world_size()
-        if "WORLD_SIZE" in os.environ:
-            return int(os.environ["WORLD_SIZE"])
-        return self.num_nodes * self.num_processes
+        return self.cluster_environment.world_size()
 
     @property
     def process_group_backend(self) -> str | None:

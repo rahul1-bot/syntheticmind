@@ -23,6 +23,7 @@
 #
 # Author: Rahul Sawhney
 
+from collections.abc import Callable
 from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
@@ -51,7 +52,8 @@ __all__: list[str] = [
     "TrainerStateDict",
     "CheckpointScalar",
     "CheckpointValue",
-    "CheckpointDict"
+    "CheckpointDict",
+    "MapLocation"
 ]
 
 type TrainerStage = Literal["fit", "validate", "test", "predict"]
@@ -160,3 +162,11 @@ type CheckpointValue = (
 )
 
 type CheckpointDict = dict[str, CheckpointValue]
+
+type MapLocation = (
+    Callable[[torch.types.Storage, str], torch.types.Storage]
+    | torch.device
+    | str
+    | dict[str, str]
+    | None
+)

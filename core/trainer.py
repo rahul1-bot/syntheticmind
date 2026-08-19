@@ -42,7 +42,6 @@
 import inspect
 import math
 import os
-import tempfile
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Sized
 from contextlib import AbstractContextManager, nullcontext
@@ -93,13 +92,13 @@ from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.loops.validation_schedule import ValidationSchedule
 from syntheticmind.precision.precision import Precision
 from syntheticmind.precision.resolver import PrecisionResolver
+from syntheticmind.plugins import Plugin, PluginConfiguration, PluginResolver
 from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
 from syntheticmind.state.checkpoint_state import CheckpointState
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.single_device import SingleDeviceStrategy
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.checkpoint import load_checkpoint
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError
@@ -269,7 +268,7 @@ class Trainer:
         profiler: Profiler | str | None = None,
         detect_anomaly: bool = False,
         barebones: bool = False,
-        plugins: Precision | list[Precision] | None = None,
+        plugins: Plugin | list[Plugin] | None = None,
         sync_batchnorm: bool = False,
         reload_dataloaders_every_n_epochs: int = 0,
         default_root_dir: str | Path | None = None,
@@ -427,6 +426,10 @@ class Trainer:
             )
         if type(barebones) is not bool:
             raise TypeError(f"`barebones` must be a bool, got {barebones!r}.")
+        if type(sync_batchnorm) is not bool:
+            raise TypeError(
+                f"`sync_batchnorm` must be a bool, got {sync_batchnorm!r}."
+            )
         if (
             log_every_n_steps is not None
             and (
@@ -489,6 +492,10 @@ class Trainer:
                     f"`Trainer(barebones=True, profiler={profiler!r})` was passed. "
                     "Profiling can impact raw speed and is disabled in barebones mode."
                 )
+        plugin_configuration: PluginConfiguration = PluginResolver.resolve(
+            plugins,
+            sync_batchnorm
+        )
         if callbacks is None:
             resolved_callbacks: list[Callback] = []
         elif isinstance(callbacks, Callback):
@@ -656,10 +663,44 @@ class Trainer:
             self.parallel_devices,
             device_topology.num_nodes
         )
+        if (
+            plugin_configuration.checkpoint_io is not None
+            and self.strategy.configured_checkpoint_io is not None
+        ):
+            raise MisconfigurationError(
+                "CheckpointIO was configured through both Trainer(plugins=...) and the strategy. "
+                "Configure it in exactly one place."
+            )
+        if plugin_configuration.checkpoint_io is not None:
+            self.strategy._attach_checkpoint_io(
+                plugin_configuration.checkpoint_io
+            )
+        if (
+            plugin_configuration.cluster_environment is not None
+            and self.strategy.configured_cluster_environment is not None
+        ):
+            raise MisconfigurationError(
+                "ClusterEnvironment was configured through both Trainer(plugins=...) and the strategy. "
+                "Configure it in exactly one place."
+            )
+        if plugin_configuration.cluster_environment is not None:
+            self.strategy._attach_cluster_environment(
+                plugin_configuration.cluster_environment
+            )
+        if (
+            plugin_configuration.layer_sync is not None
+            and self.strategy.configured_layer_sync is not None
+        ):
+            raise MisconfigurationError(
+                "LayerSync was configured through both Trainer(plugins=...) and the strategy. "
+                "Configure it in exactly one place."
+            )
+        if plugin_configuration.layer_sync is not None:
+            self.strategy._attach_layer_sync(plugin_configuration.layer_sync)
         self._precision_plugin: Precision = PrecisionResolver.resolve(
             precision,
             self.accelerator.name(),
-            plugins,
+            plugin_configuration.precision,
             self.strategy.configured_precision_plugin
         )
         self.strategy._attach_precision_plugin(self._precision_plugin)
@@ -823,6 +864,7 @@ class Trainer:
         self._dataloader_iterator_creation_time_seconds: dict[RunningStage, float] = {}
         self._active_exception: BaseException | None = None
         self._profiler_is_setup: bool = False
+        self._layer_sync_model: Module | None = None
 
     def fit(
         self,
@@ -1839,21 +1881,27 @@ class Trainer:
         self.accelerator.setup_device(device)
         with self.precision_plugin.module_init_context():
             self._configure_model(module)
+        layer_sync = self.strategy.layer_sync
+        if (
+            self.state.stage == "fit"
+            and self.strategy.is_distributed
+            and layer_sync is not None
+        ):
+            synchronized_model: torch.nn.Module = layer_sync.apply(module)
+            if not isinstance(synchronized_model, Module):
+                raise TypeError(
+                    f"LayerSync.apply must return Module, got {type(synchronized_model).__name__}."
+                )
+            module = synchronized_model
+            self._layer_sync_model = synchronized_model
         converted_model: torch.nn.Module = self.precision_plugin.convert_module(module)
         if not isinstance(converted_model, Module):
             raise TypeError(
                 f"Precision.convert_module must return Module, got {type(converted_model).__name__}."
             )
         resolved_module: Module = converted_model
-        if self.sync_batchnorm and self.strategy.is_distributed:
-            synchronized_model: torch.nn.Module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(
-                resolved_module
-            )
-            if not isinstance(synchronized_model, Module):
-                raise TypeError(
-                    f"SyncBatchNorm conversion must preserve Module, got {type(synchronized_model).__name__}."
-                )
-            resolved_module: Module = synchronized_model
+        if self._layer_sync_model is not None:
+            self._layer_sync_model = resolved_module
         resolved_module._trainer = self
         self.module = resolved_module
         self.profiler._attach_module(resolved_module)
@@ -2160,10 +2208,9 @@ class Trainer:
         # markers (completed batches and epoch-start random state) into the
         # training epoch loop. The module and callback load hooks fire last so
         # they observe the fully restored payload.
-        checkpoint: CheckpointDict = load_checkpoint(
+        checkpoint: CheckpointDict = self.strategy.load_checkpoint(
             path,
-            map_location=self.strategy.root_device,
-            weights_only=weights_only
+            weights_only
         )
         self.precision_plugin.on_load_checkpoint(checkpoint)
         epoch: int
@@ -2347,42 +2394,41 @@ class Trainer:
             raise TypeError("`filepath` must be a string or Path.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
-        if storage_options is not None:
-            raise MisconfigurationError(
-                "`storage_options` requires a checkpoint I/O plugin, which is not configured."
-            )
         if self.module is None:
             raise AttributeError(
                 "Saving a checkpoint requires a model attached through a Trainer stage."
             )
+        self._save_checkpoint(
+            filepath,
+            bool(weights_only),
+            storage_options,
+            synchronize=True
+        )
+
+    def _save_checkpoint(
+        self,
+        filepath: str | Path,
+        weights_only: bool,
+        storage_options: object | None,
+        synchronize: bool
+    ) -> None:
         profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
             self.profiler.profile("save_checkpoint")
             if self._profiler_is_setup
             else nullcontext()
         )
         with profile_context:
-            path: Path = Path(filepath).expanduser()
-            checkpoint: CheckpointDict = self._build_checkpoint(bool(weights_only))
-            if self.is_global_zero:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                file_descriptor: int
-                temporary_path_value: str
-                file_descriptor, temporary_path_value = tempfile.mkstemp(
-                    dir=str(path.parent),
-                    suffix=".tmp"
-                )
-                os.close(file_descriptor)
-                temporary_path: Path = Path(temporary_path_value)
-                try:
-                    torch.save(checkpoint, temporary_path)
-                    temporary_path.replace(path)
-                finally:
-                    if temporary_path.exists():
-                        temporary_path.unlink()
-            if self._profiler_is_setup:
-                self._call_strategy_hook("barrier", self.strategy.barrier)
-            else:
-                self.strategy.barrier()
+            checkpoint: CheckpointDict = self._build_checkpoint(weights_only)
+            self.strategy.save_checkpoint(
+                checkpoint,
+                filepath,
+                storage_options
+            )
+            if synchronize:
+                if self._profiler_is_setup:
+                    self._call_strategy_hook("barrier", self.strategy.barrier)
+                else:
+                    self.strategy.barrier()
 
     def _handle_exception(
         self,
@@ -2451,8 +2497,23 @@ class Trainer:
         progress_callbacks: list[tuple[int, ProgressBarCallback]] = []
         self._attempt_teardown("strategy.teardown", self.strategy.teardown, failures)
         self._attempt_teardown(
+            "checkpoint_io.teardown",
+            self.strategy.checkpoint_io.teardown,
+            failures
+        )
+        self._attempt_teardown(
+            "layer_sync.revert",
+            self._revert_layer_sync,
+            failures
+        )
+        self._attempt_teardown(
             "precision_plugin.teardown",
             self.precision_plugin.teardown,
+            failures
+        )
+        self._attempt_teardown(
+            "cluster_environment.teardown",
+            self.strategy.cluster_environment.teardown,
             failures
         )
         self._attempt_teardown(
@@ -2523,6 +2584,21 @@ class Trainer:
         if not exception_notified:
             self._notify_exception(module, datamodule, primary_exception)
         return primary_exception
+
+    def _revert_layer_sync(self) -> None:
+        layer_sync = self.strategy.layer_sync
+        synchronized_model = self._layer_sync_model
+        if synchronized_model is None or layer_sync is None:
+            return
+        reverted_model: torch.nn.Module = layer_sync.revert(synchronized_model)
+        if not isinstance(reverted_model, Module):
+            raise TypeError(
+                f"LayerSync.revert must return Module, got {type(reverted_model).__name__}."
+            )
+        reverted_model._trainer = self
+        self.module = reverted_model
+        self.strategy.model = reverted_model
+        self._layer_sync_model = None
 
     def _attempt_teardown(
         self,

@@ -26,7 +26,7 @@ from typing import cast
 
 import torch
 
-from syntheticmind.utilities.types import CheckpointDict
+from syntheticmind.utilities.types import CheckpointDict, MapLocation
 
 __all__: list[str] = ["save_checkpoint", "load_checkpoint"]
 
@@ -55,7 +55,7 @@ def save_checkpoint(checkpoint: CheckpointDict, filepath: Path) -> None:
 
 def load_checkpoint(
     filepath: Path,
-    map_location: str | torch.device = "cpu",
+    map_location: MapLocation = "cpu",
     weights_only: bool | None = None
 ) -> CheckpointDict:
     # Deserializes a checkpoint payload, raising FileNotFoundError with the

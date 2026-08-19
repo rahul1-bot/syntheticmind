@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import socket
 from typing import TYPE_CHECKING, ClassVar
 
 from syntheticmind.utilities.exceptions import MisconfigurationError
@@ -23,31 +22,13 @@ class _DistributedEnvironment:
         "WORLD_SIZE",
         "OMP_NUM_THREADS"
     )
-    _external_rank_keys: ClassVar[tuple[str, ...]] = (
-        "LOCAL_RANK",
-        "RANK",
-        "WORLD_SIZE"
-    )
-    _required_external_keys: ClassVar[tuple[str, ...]] = (
-        "MASTER_ADDR",
-        "MASTER_PORT",
-        "LOCAL_RANK",
-        "RANK",
-        "WORLD_SIZE"
-    )
-
     def __init__(self, strategy: DDPStrategy) -> None:
         self._strategy: DDPStrategy = strategy
 
-    @classmethod
-    def _find_free_port(cls) -> int:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-            listener.bind(("127.0.0.1", 0))
-            return int(listener.getsockname()[1])
-
     def local_values(self) -> dict[str, str]:
-        master_address: str = os.environ.get("MASTER_ADDR", "127.0.0.1")
-        master_port: str = os.environ.get("MASTER_PORT", str(self._find_free_port()))
+        cluster_environment = self._strategy.cluster_environment
+        master_address: str = cluster_environment.main_address
+        master_port: str = str(cluster_environment.main_port)
         if not master_address.strip():
             raise MisconfigurationError("MASTER_ADDR must not be empty.")
         try:
@@ -79,9 +60,11 @@ class _DistributedEnvironment:
         return {
             "MASTER_ADDR": master_address,
             "MASTER_PORT": str(numeric_port),
-            "NODE_RANK": "0",
-            "GROUP_RANK": "0",
-            "WORLD_SIZE": str(self._strategy.num_processes),
+            "NODE_RANK": str(cluster_environment.node_rank()),
+            "GROUP_RANK": str(cluster_environment.node_rank()),
+            "WORLD_SIZE": str(
+                self._strategy.num_nodes * self._strategy.num_processes
+            ),
             "OMP_NUM_THREADS": str(thread_count)
         }
 
@@ -92,7 +75,10 @@ class _DistributedEnvironment:
     ) -> dict[str, str]:
         rank_environment: dict[str, str] = dict(environment)
         rank_environment["LOCAL_RANK"] = str(local_rank)
-        rank_environment["RANK"] = str(local_rank)
+        node_rank: int = int(environment["NODE_RANK"])
+        rank_environment["RANK"] = str(
+            node_rank * self._strategy.num_processes + local_rank
+        )
         return rank_environment
 
     def capture(self) -> dict[str, str | None]:
@@ -109,17 +95,4 @@ class _DistributedEnvironment:
 
     @property
     def creates_processes_externally(self) -> bool:
-        present_rank_keys: list[str] = [
-            key for key in self._external_rank_keys if key in os.environ
-        ]
-        if not present_rank_keys:
-            return False
-        missing_keys: list[str] = [
-            key for key in self._required_external_keys if key not in os.environ
-        ]
-        if missing_keys:
-            raise MisconfigurationError(
-                f"The distributed environment is incomplete. Present rank variables: "
-                f"{present_rank_keys}; missing required variables: {missing_keys}."
-            )
-        return True
+        return self._strategy.cluster_environment.creates_processes_externally

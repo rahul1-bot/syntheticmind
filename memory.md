@@ -228,3 +228,14 @@
     5. Logging suppression must occur before ordinary hook-context and prediction validation so inherited model code becomes a warning no-operation consistently across every execution context.
     6. A missing progress bar requires a minimal run signal to distinguish deliberate quiet execution from a hung process. The signal must remain rank-zero, stable in redirected output, and independent of experiment logging.
     7. The standard plugin boundary is broader than precision alone. Its next audit must distinguish universal extension concepts from framework-owned branding before adding checkpoint-I/O, cluster-environment, or layer-synchronization capabilities.
+
+| Memory | Plugin Composition and Lifecycle | Date: 19 August 2026 | Time: 05:46 PM | Name: Ghost |
+
+    1. `CheckpointIO`, `ClusterEnvironment`, and `LayerSync` are descriptive extension contracts rather than Lightning-owned terminology. The default environment must therefore carry SyntheticMind-owned language while retaining the standard rank and rendezvous meanings.
+    2. Plugin duplication is defined by capability family, not concrete subclass. Strategy construction records explicitly configured families separately from lazily supplied defaults so Trainer conflict detection does not reject ordinary default composition.
+    3. Checkpoint I/O belongs behind the strategy because automatic callbacks, public saves, restoration, deletion, distributed rank ownership, storage options, and future storage backends must share one extension boundary.
+    4. An asynchronous save must clone mutable tensors and arrays before returning, serialize writes, wait before load or removal, recreate its executor after stage teardown, and report the original write failure even when base teardown also fails.
+    5. Layer synchronization precedes precision conversion and distributed wrapping, but reversal must target the post-conversion model. Retaining only the pre-conversion identity breaks custom precision plugins that return a replacement `Module`.
+    6. Cluster environments are runtime topology authorities. Local launch may set rank and world size, while externally managed execution must retain its supplied ranks and rendezvous values and be checked against the configured device and node topology.
+    7. The standard map-location contract includes callable and mapping forms in addition to device and string values. Narrowing this parameter would silently break custom checkpoint consumers even when ordinary CPU restoration passes.
+    8. Default remote protocol support and concrete scheduler environments are separate integrations above the core extension contract and must remain explicit gaps until executable behavior exists.

@@ -39,7 +39,6 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import tempfile
 import time
 import warnings
 from contextlib import AbstractContextManager, nullcontext
@@ -391,9 +390,15 @@ class ModelCheckpoint(Checkpoint):
     def _save_checkpoint(
         self,
         trainer: Trainer,
-        module: Module,
-        filepath: Path,
-        synchronize: bool = True
+        filepath: str | Path
+    ) -> None:
+        self._save_checkpoint_internal(trainer, filepath, synchronize=True)
+
+    def _save_checkpoint_internal(
+        self,
+        trainer: Trainer,
+        filepath: str | Path,
+        synchronize: bool
     ) -> None:
         # Assembles and writes one full-resume checkpoint. Mid-epoch state is
         # read from the training epoch loop: when the batch loop is active,
@@ -403,51 +408,34 @@ class ModelCheckpoint(Checkpoint):
         # save hooks run on the assembled payload, the write is atomic through
         # a same-directory temporary file, and save duration and size are
         # logged as runtime metrics.
-        profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
-            trainer.profiler.profile("save_checkpoint")
-            if trainer._profiler_is_setup
-            else nullcontext()
+        if trainer.module is None:
+            raise RuntimeError("ModelCheckpoint requires an attached Trainer module.")
+        self._last_global_step_saved = trainer.global_step
+        self._last_checkpoint_saved = str(filepath)
+        checkpoint_start_time: float = time.perf_counter()
+        trainer._save_checkpoint(
+            filepath,
+            self.save_weights_only,
+            None,
+            synchronize
         )
-        with profile_context:
-            if trainer.module is not module:
-                raise RuntimeError("ModelCheckpoint received a module not attached to its Trainer.")
-            self._last_global_step_saved = trainer.global_step
-            self._last_checkpoint_saved = str(filepath)
-            checkpoint_start_time: float = time.perf_counter()
-            checkpoint: CheckpointDict = trainer._build_checkpoint(
-                self.save_weights_only
+        checkpoint_path: Path = Path(filepath)
+        if (
+            trainer.is_global_zero
+            and checkpoint_path.is_file()
+            and trainer.loggers
+        ):
+            checkpoint_duration_ms: float = (
+                time.perf_counter() - checkpoint_start_time
+            ) * 1000.0
+            checkpoint_size_mb: float = checkpoint_path.stat().st_size / 1048576.0
+            trainer._log_metrics(
+                {
+                    "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
+                    "runtime/checkpoint_size_mb": checkpoint_size_mb
+                },
+                step=trainer.state.global_step
             )
-            if trainer.is_global_zero:
-                filepath.parent.mkdir(parents=True, exist_ok=True)
-
-                # mkstemp pre-creates the temporary file; the descriptor is closed
-                # immediately because torch.save reopens the path itself.
-                file_descriptor: int
-                tmp_path_str: str
-                file_descriptor, tmp_path_str = tempfile.mkstemp(
-                    dir=str(filepath.parent),
-                    suffix=".tmp"
-                )
-                os.close(file_descriptor)
-                tmp_path: Path = Path(tmp_path_str)
-                try:
-                    torch.save(checkpoint, tmp_path)
-                    tmp_path.replace(filepath)
-                    checkpoint_duration_ms: float = (time.perf_counter() - checkpoint_start_time) * 1000.0
-                    checkpoint_size_mb: float = filepath.stat().st_size / 1048576.0
-                    if trainer.loggers:
-                        trainer._log_metrics(
-                            {
-                                "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
-                                "runtime/checkpoint_size_mb": checkpoint_size_mb
-                            },
-                            step=trainer.state.global_step
-                        )
-                finally:
-                    if tmp_path.exists():
-                        tmp_path.unlink()
-            if synchronize:
-                trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
 
     def _save_partial_checkpoint(self, module: Module, filepath: Path) -> None:
         # Writes a weights-only payload marked partial in its metadata, used
@@ -481,22 +469,7 @@ class ModelCheckpoint(Checkpoint):
                 checkpoint
             )
 
-            # mkstemp pre-creates the temporary file; the descriptor is closed
-            # immediately because torch.save reopens the path itself.
-            file_descriptor: int
-            tmp_path_str: str
-            file_descriptor, tmp_path_str = tempfile.mkstemp(
-                dir=str(filepath.parent),
-                suffix=".tmp"
-            )
-            os.close(file_descriptor)
-            tmp_path: Path = Path(tmp_path_str)
-            try:
-                torch.save(checkpoint, tmp_path)
-                tmp_path.replace(filepath)
-            finally:
-                if tmp_path.exists():
-                    tmp_path.unlink()
+            trainer.strategy.save_checkpoint(checkpoint, filepath)
 
     def _update_top_k(self, score: torch.Tensor, filepath: Path) -> None:
         # Inserts the new checkpoint into the retention set, sorts by score in
@@ -719,7 +692,7 @@ class ModelCheckpoint(Checkpoint):
         )
         previous: str = self.best_model_path
         self.best_model_path = filepath
-        self._save_checkpoint(trainer, module, Path(filepath))
+        self._save_checkpoint(trainer, filepath)
         if self.verbose and trainer.is_global_zero:
             log.info(
                 "Checkpoint saved | epoch={} | step={} | {}",
@@ -731,9 +704,8 @@ class ModelCheckpoint(Checkpoint):
             self.save_top_k == 1
             and previous
             and self._should_remove_checkpoint(trainer, previous, filepath)
-            and trainer.is_global_zero
         ):
-            self._remove_checkpoint(previous)
+            self._remove_checkpoint(trainer, previous)
 
     def _update_best_and_save(
         self,
@@ -764,7 +736,7 @@ class ModelCheckpoint(Checkpoint):
         )
         self.current_score = resolved_current
         self._update_top_k(resolved_current, Path(filepath))
-        self._save_checkpoint(trainer, module, Path(filepath))
+        self._save_checkpoint(trainer, filepath)
         if self.verbose and trainer.is_global_zero:
             log.info(
                 "Checkpoint saved | epoch={} | step={} | {}={} | {}",
@@ -781,9 +753,8 @@ class ModelCheckpoint(Checkpoint):
                 delete_filepath,
                 filepath
             )
-            and trainer.is_global_zero
         ):
-            self._remove_checkpoint(delete_filepath)
+            self._remove_checkpoint(trainer, delete_filepath)
 
     def _save_last_checkpoint(
         self,
@@ -818,38 +789,65 @@ class ModelCheckpoint(Checkpoint):
             and self._last_checkpoint_saved
             and self.save_top_k != 0
         ):
-            if trainer.is_global_zero:
-                self._link_checkpoint(
-                    Path(self._last_checkpoint_saved),
-                    Path(filepath)
-                )
-            if synchronize:
-                trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
-        else:
-            self._save_checkpoint(
+            self._link_checkpoint_internal(
                 trainer,
-                module,
-                Path(filepath),
-                synchronize=synchronize
+                self._last_checkpoint_saved,
+                filepath,
+                synchronize
+            )
+        else:
+            self._save_checkpoint_internal(
+                trainer,
+                filepath,
+                synchronize
             )
         if (
             previous
             and self._should_remove_checkpoint(trainer, previous, filepath)
-            and trainer.is_global_zero
         ):
-            self._remove_checkpoint(previous)
+            self._remove_checkpoint(trainer, previous)
 
     @staticmethod
-    def _link_checkpoint(filepath: Path, linkpath: Path) -> None:
-        if filepath.resolve() == linkpath.resolve():
+    def _link_checkpoint(
+        trainer: Trainer,
+        filepath: str | Path,
+        linkpath: str | Path
+    ) -> None:
+        ModelCheckpoint._link_checkpoint_internal(
+            trainer,
+            filepath,
+            linkpath,
+            True
+        )
+
+    @staticmethod
+    def _link_checkpoint_internal(
+        trainer: Trainer,
+        filepath: str | Path,
+        linkpath: str | Path,
+        synchronize: bool
+    ) -> None:
+        filepath = Path(filepath)
+        linkpath = Path(linkpath)
+        if not trainer.is_global_zero:
+            if synchronize:
+                trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
             return
-        linkpath.parent.mkdir(parents=True, exist_ok=True)
-        if linkpath.is_symlink() or linkpath.is_file():
-            linkpath.unlink()
+        if filepath.resolve() == linkpath.resolve():
+            if synchronize:
+                trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
+            return
         try:
-            linkpath.symlink_to(os.path.relpath(filepath, linkpath.parent))
-        except OSError:
-            shutil.copy2(filepath, linkpath)
+            linkpath.parent.mkdir(parents=True, exist_ok=True)
+            if linkpath.is_symlink() or linkpath.is_file():
+                linkpath.unlink()
+            try:
+                linkpath.symlink_to(os.path.relpath(filepath, linkpath.parent))
+            except OSError:
+                shutil.copy2(filepath, linkpath)
+        finally:
+            if synchronize:
+                trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
 
     def _should_remove_checkpoint(
         self,
@@ -871,11 +869,9 @@ class ModelCheckpoint(Checkpoint):
             return False
         return Path(self.dirpath).absolute() in previous_path.parents
 
-    @staticmethod
-    def _remove_checkpoint(filepath: str) -> None:
-        path: Path = Path(filepath)
-        if path.is_symlink() or path.is_file():
-            path.unlink()
+    def _remove_checkpoint(self, trainer: Trainer, filepath: str) -> None:
+        del self
+        trainer.strategy.remove_checkpoint(filepath)
 
     @property
     def every_n_epochs(self) -> int | None:
@@ -921,11 +917,10 @@ class ModelCheckpoint(Checkpoint):
         )
         try:
             dirpath.mkdir(parents=True, exist_ok=True)
-            self._save_checkpoint(
+            self._save_checkpoint_internal(
                 trainer,
-                module,
                 exception_path,
-                synchronize=False
+                False
             )
             self._save_last_checkpoint(
                 trainer,

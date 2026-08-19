@@ -177,3 +177,11 @@
     3. The mode does not amputate ordinary training semantics: callbacks, optimization, precision, distribution, validation, and wall-clock termination remain available unless their specific service is part of the standard exclusion set.
     4. Minimal stage announcements retain operational visibility without reviving progress rendering or dense framework chatter, and distributed execution emits the announcement from global rank zero only.
     5. Artifact isolation, exception propagation, teardown, explicit callback conflicts, CPU, MPS, and Gloo execution are verified. The next dependency-ordered boundary is the standard `plugins` parameter and the extension families it composes with strategies.
+
+| Strategic Note | Plugin Extension Ownership | Date: 19 August 2026 | Time: 05:46 PM | Name: Ghost |
+
+    1. ✅ SyntheticMind now composes the standard precision, checkpoint-I/O, cluster-environment, and layer-synchronization extension families without adopting Lightning-branded class names or connector architecture.
+    2. Plugin ownership is singular and explicit: a family may be configured through the Trainer or strategy, never both, and every accepted method remains overridable under its established parameter and lifecycle contract.
+    3. Checkpoint persistence now crosses one strategy-owned I/O boundary, including asynchronous snapshots and transactional failure handling; distributed rendezvous and ranks cross one cluster-environment boundary; synchronized layers cross one reversible fit-only boundary.
+    4. Local, MPS, forked, spawned, subprocess, and externally launched execution verify that plugin composition survives the supported process models rather than merely passing constructor inspection.
+    5. Remote default storage and managed scheduler environments remain truthful future work. The next dependency-ordered Trainer boundary is `reload_dataloaders_every_n_epochs`.
