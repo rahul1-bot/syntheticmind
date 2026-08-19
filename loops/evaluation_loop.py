@@ -32,6 +32,7 @@
 
 import time
 from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Literal
 
 import torch
@@ -177,6 +178,8 @@ class EvaluationLoop(Loop):
                 if max_batches is not None and batch_idx >= max_batches:
                     break
 
+                batch: Batch = trainer.precision_plugin.convert_input(batch)
+
                 if self.stage == "validate":
                     with module._hook_context("on_validation_batch_start"):
                         for callback in callbacks:
@@ -205,12 +208,18 @@ class EvaluationLoop(Loop):
                     with module._hook_context("on_after_batch_transfer"):
                         batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
 
-                if self.stage == "validate":
-                    with module._hook_context("validation_step"):
-                        outputs: StepOutput = strategy.validation_step(model, batch, batch_idx)
-                else:
-                    with module._hook_context("test_step"):
-                        outputs: StepOutput = strategy.test_step(model, batch, batch_idx)
+                step_context: AbstractContextManager[None] = (
+                    trainer.precision_plugin.val_step_context()
+                    if self.stage == "validate"
+                    else trainer.precision_plugin.test_step_context()
+                )
+                with step_context:
+                    if self.stage == "validate":
+                        with module._hook_context("validation_step"):
+                            outputs: StepOutput = strategy.validation_step(model, batch, batch_idx)
+                    else:
+                        with module._hook_context("test_step"):
+                            outputs: StepOutput = strategy.test_step(model, batch, batch_idx)
 
                 if self.stage == "validate":
                     with module._hook_context("on_validation_batch_end"):

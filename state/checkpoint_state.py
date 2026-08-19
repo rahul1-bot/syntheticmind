@@ -26,6 +26,7 @@
 # Author: Rahul Sawhney
 
 import random
+from typing import cast
 
 import numpy as np
 import torch
@@ -33,6 +34,7 @@ import torch
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.optimizer import _SchedulerInstance
+from syntheticmind.precision.precision import Precision
 from syntheticmind.utilities.types import CheckpointDict, CheckpointValue, StateDict
 
 __all__: list[str] = ["CheckpointState"]
@@ -58,7 +60,8 @@ class CheckpointState:
         total_batch_idx: int = -1,
         epoch_rng_state: CheckpointDict | None = None,
         strategy_name: str = "SingleDeviceStrategy",
-        world_size: int = 1
+        world_size: int = 1,
+        precision_plugin: Precision | None = None
     ) -> CheckpointDict:
         # Assembles the payload from live objects. Progress counters and model
         # weights always travel; optimizer state travels in list form plus the
@@ -105,6 +108,14 @@ class CheckpointState:
             if datamodule_state:
                 checkpoint["datamodule_state_dict"] = datamodule_state
 
+        if precision_plugin is not None:
+            precision_state: StateDict = precision_plugin.state_dict()
+            if precision_state:
+                checkpoint[type(precision_plugin).__qualname__] = cast(
+                    CheckpointValue,
+                    precision_state
+                )
+
         checkpoint["metadata"] = {
             "torch_version": torch.__version__,
             "strategy": strategy_name,
@@ -122,7 +133,8 @@ class CheckpointState:
         scheduler: _SchedulerInstance | None,
         schedulers: list[_SchedulerInstance] | None,
         callbacks: list[Callback],
-        datamodule: DataModule | None = None
+        datamodule: DataModule | None = None,
+        precision_plugin: Precision | None = None
     ) -> tuple[int, int, int, int, CheckpointDict | None]:
         # Rehydrates live objects from the payload and returns the resume
         # coordinates (epoch, global step, completed batches, epoch RNG state).
@@ -174,6 +186,13 @@ class CheckpointState:
         datamodule_state_raw: CheckpointValue | None = checkpoint.get("datamodule_state_dict")
         if datamodule is not None and isinstance(datamodule_state_raw, dict):
             datamodule.load_state_dict(datamodule_state_raw)
+
+        if precision_plugin is not None:
+            precision_state_raw: CheckpointValue | None = checkpoint.get(
+                type(precision_plugin).__qualname__
+            )
+            if isinstance(precision_state_raw, dict):
+                precision_plugin.load_state_dict(cast(StateDict, precision_state_raw))
 
         epoch_value: CheckpointValue | None = checkpoint.get("epoch", 0)
         global_step_value: CheckpointValue | None = checkpoint.get("global_step", 0)

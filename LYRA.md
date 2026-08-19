@@ -115,3 +115,12 @@
     4. Distributed failures are terminal to the affected local job, broken process groups are destroyed, launch mutations are restored when control returns, and worker observers prevent blocked collectives from leaving zombie processes.
     5. The unsized gradient-accumulation tail now synchronizes dense gradients, including parameters absent on an individual rank, before stepping. Sparse tail synchronization remains an explicit limitation rather than silent corruption.
     6. The next dependency-ordered boundary is the standard precision contract and its interaction with optimizers, strategies, devices, checkpoint restoration, and user-visible Trainer semantics.
+
+| Strategic Note | Precision Ownership and Execution | Date: 19 August 2026 | Time: 03:01 PM | Name: Ghost |
+
+    1. ✅ The universal Trainer precision contract is now one executable subsystem rather than precision strings interpreted independently by loops, optimizers, and devices.
+    2. SyntheticMind retains descriptive, framework-owned precision classes while preserving the standard method, parameter, default, hook-order, inheritance, and state semantics required by downstream overrides.
+    3. True and mixed precision operate across all public stages; custom backward methods, precision-connected wrappers, automatic and manual optimization, scaler checkpointing, clipping, skipped steps, fused optimizers, and distributed parent-state recovery share the same authority.
+    4. The current PyTorch autocast cache defect around nested `no_grad` and `inference_mode` contexts is guarded explicitly, preventing a cached gradient-disabled cast from poisoning a later gradient-enabled forward in the same precision context.
+    5. FP8 Transformer Engine configuration and optional dependency boundaries are represented truthfully, while CUDA and real FP8 execution remain hardware-unverified and may not be claimed from CPU, MPS, or mocked evidence.
+    6. The next dependency-ordered boundary is Trainer execution context: standard inference-mode selection, anomaly detection, benchmarking, and deterministic-algorithm semantics must be reconciled before higher strategy and integration layers expand.

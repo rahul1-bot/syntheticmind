@@ -270,8 +270,11 @@ class ModelCheckpoint(Callback):
             total_batch_idx=total_batch_idx,
             epoch_rng_state=epoch_rng_state if is_mid_epoch else None,
             strategy_name=type(trainer.strategy).__name__,
-            world_size=getattr(trainer.strategy, "world_size", 1)
+            world_size=getattr(trainer.strategy, "world_size", 1),
+            precision_plugin=trainer.precision_plugin
         )
+
+        trainer.precision_plugin.on_save_checkpoint(checkpoint)
 
         with module._hook_context("on_save_checkpoint"):
             for cb in trainer.callbacks:

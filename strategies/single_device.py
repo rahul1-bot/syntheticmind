@@ -15,7 +15,7 @@
 #
 # Author: Rahul Sawhney
 
-from typing import override
+from typing import cast, override
 
 import torch
 from torch import nn
@@ -40,6 +40,7 @@ class SingleDeviceStrategy(Strategy):
         # Binds the root device and moves the model onto it; the model is
         # returned unwrapped because no strategy container is needed.
         self._device: torch.device = device
+        self._module: nn.Module | None = model
         self._model: nn.Module | None = model.to(device)
         return self._model
 
@@ -49,7 +50,15 @@ class SingleDeviceStrategy(Strategy):
     ) -> StepOutput:
         # Guards the module type, then delegates to the model's training_step.
         if not isinstance(model, Module):
-            raise TypeError(f"Expected Module, got {type(model).__name__}")
+            return cast(
+                StepOutput,
+                self._forward_redirection(
+                    model,
+                    "training_step",
+                    batch,
+                    batch_idx
+                )
+            )
         output: StepOutput = model.training_step(batch, batch_idx)
         return output
 
@@ -59,7 +68,15 @@ class SingleDeviceStrategy(Strategy):
     ) -> StepOutput:
         # Guards the module type, then delegates to the model's validation_step.
         if not isinstance(model, Module):
-            raise TypeError(f"Expected Module, got {type(model).__name__}")
+            return cast(
+                StepOutput,
+                self._forward_redirection(
+                    model,
+                    "validation_step",
+                    batch,
+                    batch_idx
+                )
+            )
         output: StepOutput = model.validation_step(batch, batch_idx)
         return output
 
@@ -69,7 +86,15 @@ class SingleDeviceStrategy(Strategy):
     ) -> StepOutput:
         # Guards the module type, then delegates to the model's test_step.
         if not isinstance(model, Module):
-            raise TypeError(f"Expected Module, got {type(model).__name__}")
+            return cast(
+                StepOutput,
+                self._forward_redirection(
+                    model,
+                    "test_step",
+                    batch,
+                    batch_idx
+                )
+            )
         output: StepOutput = model.test_step(batch, batch_idx)
         return output
 
@@ -79,17 +104,26 @@ class SingleDeviceStrategy(Strategy):
     ) -> ModelOutput:
         # Guards the module type, then delegates to the model's predict_step.
         if not isinstance(model, Module):
-            raise TypeError(f"Expected Module, got {type(model).__name__}")
+            return cast(
+                ModelOutput,
+                self._forward_redirection(
+                    model,
+                    "predict_step",
+                    batch,
+                    batch_idx
+                )
+            )
         output: ModelOutput = model.predict_step(batch, batch_idx)
         return output
 
     @override
     def backward(
         self,
-        loss: torch.Tensor,
+        closure_loss: torch.Tensor,
+        optimizer: torch.optim.Optimizer | None = None,
         *args: object,
         **kwargs: object
-    ) -> None:
+    ) -> torch.Tensor:
         # Plain autograd backward; nothing to synchronize in single-process
         # execution.
-        loss.backward(*args, **kwargs)
+        return self._precision_backward(closure_loss, optimizer, *args, **kwargs)

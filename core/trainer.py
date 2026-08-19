@@ -83,6 +83,8 @@ from syntheticmind.loops.fit_loop import FitLoop
 from syntheticmind.loops.prediction_loop import PredictionLoop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.loops.validation_schedule import ValidationSchedule
+from syntheticmind.precision.precision import Precision
+from syntheticmind.precision.resolver import PrecisionResolver
 from syntheticmind.state.checkpoint_state import CheckpointState
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
@@ -99,7 +101,8 @@ from syntheticmind.utilities.types import (
     ClipAlgorithm,
     HyperparameterDict,
     ModelOutput,
-    Precision,
+    PrecisionInput,
+    PrecisionType,
     RunningStage,
     TrainerStage,
 )
@@ -222,7 +225,7 @@ class Trainer:
         strategy: str | Strategy = "auto",
         devices: int | str | list[int] = "auto",
         num_nodes: int = 1,
-        precision: Precision = "32-true",
+        precision: PrecisionInput | None = None,
         logger: Logger | None = None,
         callbacks: list[Callback] | None = None,
         fast_dev_run: int | bool = False,
@@ -246,6 +249,7 @@ class Trainer:
         gradient_clip_algorithm: str | None = None,
         deterministic: bool = False,
         use_distributed_sampler: bool = True,
+        plugins: Precision | list[Precision] | None = None,
         sync_batchnorm: bool = False,
         reload_dataloaders_every_n_epochs: int = 0,
         resume_from_checkpoint: str | Path | None = None,
@@ -446,7 +450,6 @@ class Trainer:
                 "norm" if normalized_gradient_clip_algorithm == "norm" else "value"
             )
 
-        self.precision: Precision = precision
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
@@ -509,6 +512,13 @@ class Trainer:
             self.parallel_devices,
             device_topology.num_nodes
         )
+        self._precision_plugin: Precision = PrecisionResolver.resolve(
+            precision,
+            self.accelerator.name(),
+            plugins,
+            self.strategy.configured_precision_plugin
+        )
+        self.strategy._attach_precision_plugin(self._precision_plugin)
 
         self.callbacks: list[Callback] = list(callbacks) if callbacks is not None else []
         from syntheticmind.callbacks.progress_bar import ProgressBarCallback
@@ -588,7 +598,7 @@ class Trainer:
             min_steps=min_steps,
             max_steps=effective_max_steps,
             accumulate_grad_batches=accumulate_grad_batches,
-            precision=precision,
+            precision=self.precision,
             gradient_clip_val=self.gradient_clip_val,
             gradient_clip_algorithm=self.gradient_clip_algorithm,
             log_every_n_steps=log_every_n_steps
@@ -785,14 +795,7 @@ class Trainer:
             # built around the converted layers, and the module's device
             # mirror is stamped once placement is final.
             device: torch.device = self._resolve_device()
-            self.accelerator.setup_device(device)
-            self._configure_model(module)
-
-            if self.sync_batchnorm and self.strategy.is_distributed:
-                module: Module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
-
-            self.strategy.setup(module, device)
-            module._device: torch.device = device
+            module = self._setup_model(module, device)
 
             # Materialize the module's declarative optimization contract. The
             # declaration is normalized to parallel definition lists first, so
@@ -817,6 +820,13 @@ class Trainer:
             )
             self.optimizers: list[torch.optim.Optimizer] = optimizer_initialization[0]
             self.lr_scheduler_configs: list[LRSchedulerConfig] = optimizer_initialization[1]
+            module, self.optimizers, self.lr_scheduler_configs = (
+                self._connect_precision_plugin(
+                    module,
+                    self.optimizers,
+                    self.lr_scheduler_configs
+                )
+            )
             self._synthetic_optimizers: list[SyntheticOptimizer] = [
                 SyntheticOptimizer._to_synthetic_optimizer(optimizer, self, module)
                 for optimizer in self.optimizers
@@ -1018,10 +1028,8 @@ class Trainer:
             self._total_val_batches: int | None = self._safe_len(self.val_dataloader) if self.val_dataloader is not None else None
 
             device: torch.device = self._resolve_device()
-            self.accelerator.setup_device(device)
-            self._configure_model(module)
-            self.strategy.setup(module, device)
-            module._device: torch.device = device
+            module = self._setup_model(module, device)
+            module, _, _ = self._connect_precision_plugin(module, [], [])
 
             with module._hook_context("setup"):
                 for callback in self.callbacks:
@@ -1112,10 +1120,8 @@ class Trainer:
             self._total_test_batches: int | None = self._safe_len(self.test_dataloader) if self.test_dataloader is not None else None
 
             device: torch.device = self._resolve_device()
-            self.accelerator.setup_device(device)
-            self._configure_model(module)
-            self.strategy.setup(module, device)
-            module._device: torch.device = device
+            module = self._setup_model(module, device)
+            module, _, _ = self._connect_precision_plugin(module, [], [])
 
             with module._hook_context("setup"):
                 for callback in self.callbacks:
@@ -1219,10 +1225,8 @@ class Trainer:
             self._total_predict_batches: int | None = self._safe_len(self.predict_dataloader)
 
             device: torch.device = self._resolve_device()
-            self.accelerator.setup_device(device)
-            self._configure_model(module)
-            self.strategy.setup(module, device)
-            module._device: torch.device = device
+            module = self._setup_model(module, device)
+            module, _, _ = self._connect_precision_plugin(module, [], [])
 
             with module._hook_context("setup"):
                 for callback in self.callbacks:
@@ -1369,6 +1373,57 @@ class Trainer:
             return
         with module._hook_context(hook_name):
             hook()
+
+    def _setup_model(self, module: Module, device: torch.device) -> Module:
+        self.accelerator.setup_device(device)
+        with self.precision_plugin.module_init_context():
+            self._configure_model(module)
+        converted_model: torch.nn.Module = self.precision_plugin.convert_module(module)
+        if not isinstance(converted_model, Module):
+            raise TypeError(
+                f"Precision.convert_module must return Module, got {type(converted_model).__name__}."
+            )
+        resolved_module: Module = converted_model
+        if self.sync_batchnorm and self.strategy.is_distributed:
+            synchronized_model: torch.nn.Module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(
+                resolved_module
+            )
+            if not isinstance(synchronized_model, Module):
+                raise TypeError(
+                    f"SyncBatchNorm conversion must preserve Module, got {type(synchronized_model).__name__}."
+                )
+            resolved_module: Module = synchronized_model
+        resolved_module._trainer = self
+        self.module = resolved_module
+        self.strategy.setup(resolved_module, device)
+        resolved_module._device = device
+        return resolved_module
+
+    def _connect_precision_plugin[SchedulerT](
+        self,
+        module: Module,
+        optimizers: list[torch.optim.Optimizer],
+        lr_schedulers: list[SchedulerT]
+    ) -> tuple[Module, list[torch.optim.Optimizer], list[SchedulerT]]:
+        strategy_model: torch.nn.Module | None = self.strategy.model
+        if strategy_model is None:
+            raise RuntimeError("Strategy has no model available for precision setup.")
+        connected_model: torch.nn.Module
+        connected_optimizers: list[torch.optim.Optimizer]
+        connected_lr_schedulers: list[SchedulerT]
+        connected_model, connected_optimizers, connected_lr_schedulers = (
+            self.precision_plugin.connect(
+                strategy_model,
+                optimizers,
+                lr_schedulers
+            )
+        )
+        if not isinstance(connected_model, torch.nn.Module):
+            raise TypeError(
+                f"Precision.connect must return torch.nn.Module, got {type(connected_model).__name__}."
+            )
+        self.strategy.model = connected_model
+        return module, connected_optimizers, connected_lr_schedulers
 
     def _call_on_validation_model_zero_grad(self, module: Module) -> None:
         with module._hook_context("on_validation_model_zero_grad"):
@@ -1635,6 +1690,7 @@ class Trainer:
         # training epoch loop. The module and callback load hooks fire last so
         # they observe the fully restored payload.
         checkpoint: CheckpointDict = load_checkpoint(path, map_location=self.strategy.root_device)
+        self.precision_plugin.on_load_checkpoint(checkpoint)
         assert self.optimizer is not None
         epoch: int
         global_step: int
@@ -1648,7 +1704,8 @@ class Trainer:
             scheduler=self.scheduler,
             schedulers=self.schedulers,
             callbacks=self.callbacks,
-            datamodule=self.datamodule
+            datamodule=self.datamodule,
+            precision_plugin=self.precision_plugin
         )
         self.state.load_state_dict({"current_epoch": epoch, "global_step": global_step})
         module._current_epoch: int = epoch
@@ -1718,6 +1775,11 @@ class Trainer:
         failures: list[_TeardownFailure] = []
         progress_callbacks: list[tuple[int, ProgressBarCallback]] = []
         self._attempt_teardown("strategy.teardown", self.strategy.teardown, failures)
+        self._attempt_teardown(
+            "precision_plugin.teardown",
+            self.precision_plugin.teardown,
+            failures
+        )
         self._attempt_teardown(
             "datamodule.teardown",
             lambda: datamodule.teardown(stage),
@@ -1907,6 +1969,18 @@ class Trainer:
     @property
     def num_devices(self) -> int:
         return len(self.parallel_devices)
+
+    @property
+    def precision_plugin(self) -> Precision:
+        return self._precision_plugin
+
+    @property
+    def precision(self) -> PrecisionType:
+        return self._precision_plugin.precision
+
+    @property
+    def scaler(self) -> torch.GradScaler | None:
+        return self._precision_plugin.scaler
 
     @property
     def is_global_zero(self) -> bool:

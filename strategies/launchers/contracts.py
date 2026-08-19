@@ -77,6 +77,7 @@ class _WorkerOutput(BaseModel):
     last_progress_bar_stage: RunningStage | None
     callback_states: list[StateDict]
     datamodule_state: StateDict
+    precision_plugin_state: StateDict
     validation_metrics: dict[str, float]
     test_metrics: dict[str, float]
     total_train_batches: int | None

@@ -37,7 +37,7 @@ import builtins
 import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, ClassVar, Literal, overload, override
+from typing import TYPE_CHECKING, ClassVar, Literal, cast, overload, override
 
 import torch
 from pydantic import BaseModel, ConfigDict
@@ -607,6 +607,15 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
             raise RuntimeError("Trainer fit loop is not initialized.")
         epoch_loop.manual_backward(trainer, self, loss, *args, **kwargs)
 
+    def backward(
+        self,
+        loss: torch.Tensor,
+        *args: object,
+        **kwargs: object
+    ) -> None:
+        backward: Callable[..., None] = cast(Callable[..., None], loss.backward)
+        backward(*args, **kwargs)
+
     def clip_gradients(
         self,
         optimizer: torch.optim.Optimizer,
@@ -894,6 +903,18 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         # Casts to float16 and records the resulting dtype in the mirror.
         result: Module = super().half()
         result._dtype: torch.dtype = torch.float16
+        return result
+
+    @override
+    def double(self) -> Module:
+        result: Module = super().double()
+        result._dtype = torch.float64
+        return result
+
+    @override
+    def bfloat16(self) -> Module:
+        result: Module = super().bfloat16()
+        result._dtype = torch.bfloat16
         return result
 
     @property

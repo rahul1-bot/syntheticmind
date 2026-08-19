@@ -23,11 +23,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 from torch import nn
 
+from syntheticmind.precision.precision import Precision
 from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
 
 if TYPE_CHECKING:
@@ -46,14 +48,18 @@ class Strategy(ABC):
         self,
         accelerator: Accelerator | None = None,
         parallel_devices: list[torch.device] | None = None,
-        num_nodes: int = 1
+        num_nodes: int = 1,
+        precision_plugin: Precision | None = None
     ) -> None:
         # Starts with no model attached and the CPU as the provisional root
         # device until setup binds the real placement.
         self._model: nn.Module | None = None
+        self._module: nn.Module | None = None
         self._accelerator: Accelerator | None = accelerator
         self._parallel_devices: list[torch.device] = list(parallel_devices or [])
         self._num_nodes: int = num_nodes
+        self._precision_plugin: Precision = precision_plugin or Precision()
+        self._configured_precision_plugin: Precision | None = precision_plugin
         self._device: torch.device = (
             self._parallel_devices[0]
             if self._parallel_devices
@@ -111,16 +117,42 @@ class Strategy(ABC):
         # Executes one prediction step through the strategy's execution context.
         raise NotImplementedError
 
-    @abstractmethod
     def backward(
         self,
-        loss: torch.Tensor,
+        closure_loss: torch.Tensor,
+        optimizer: torch.optim.Optimizer | None = None,
         *args: object,
         **kwargs: object
-    ) -> None:
+    ) -> torch.Tensor:
         # Runs the backward pass, including any gradient synchronization the
         # strategy requires.
-        raise NotImplementedError
+        return self._precision_backward(
+            closure_loss,
+            optimizer,
+            *args,
+            **kwargs
+        )
+
+    def optimizer_step(
+        self,
+        optimizer: torch.optim.Optimizer,
+        closure: Callable[[], object],
+        model: nn.Module | None = None,
+        **kwargs: object
+    ) -> object:
+        from syntheticmind.core.module import Module
+
+        resolved_model: nn.Module | None = model or self._module
+        if not isinstance(resolved_model, Module):
+            raise TypeError(
+                f"Strategy optimizer_step requires Module, got {type(resolved_model).__name__}."
+            )
+        return self.precision_plugin.optimizer_step(
+            optimizer,
+            model=resolved_model,
+            closure=closure,
+            **kwargs
+        )
 
     def teardown(self) -> None:
         # Releases strategy-owned resources after a run; default is a no-op.
@@ -159,6 +191,94 @@ class Strategy(ABC):
     def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
         pass
 
+    def pre_backward(self, closure_loss: torch.Tensor) -> None:
+        del closure_loss
+
+    def post_backward(self, closure_loss: torch.Tensor) -> None:
+        del closure_loss
+
+    def _forward_redirection(
+        self,
+        model: nn.Module,
+        step_name: Literal[
+            "training_step",
+            "validation_step",
+            "test_step",
+            "predict_step"
+        ],
+        batch: Batch,
+        batch_idx: int
+    ) -> object:
+        from syntheticmind.core.module import Module
+
+        module: nn.Module | None = self._module
+        if not isinstance(module, Module):
+            raise TypeError(
+                f"Strategy step execution requires Module, got {type(module).__name__}."
+            )
+        step: Callable[[Batch, int], object] = cast(
+            Callable[[Batch, int], object],
+            getattr(module, step_name)
+        )
+        if model is module:
+            return step(batch, batch_idx)
+        original_forward: Callable[..., object] = module.forward
+
+        def redirected_forward(
+            *args: object,
+            **kwargs: object
+        ) -> ModelOutput:
+            module.forward = original_forward
+            if kwargs or len(args) != 2 or not isinstance(args[1], int):
+                raise TypeError(
+                    "Strategy step redirection requires positional batch and batch_idx arguments."
+                )
+            redirected_batch: Batch = cast(Batch, args[0])
+            redirected_batch_idx: int = args[1]
+            return cast(
+                ModelOutput,
+                step(redirected_batch, redirected_batch_idx)
+            )
+
+        module.forward = redirected_forward
+        try:
+            return model(batch, batch_idx)
+        finally:
+            module.forward = original_forward
+
+    def _precision_backward(
+        self,
+        closure_loss: torch.Tensor,
+        optimizer: torch.optim.Optimizer | None,
+        *args: object,
+        **kwargs: object
+    ) -> torch.Tensor:
+        from syntheticmind.core.module import Module
+
+        module: nn.Module | None = self._module
+        if not isinstance(module, Module):
+            raise TypeError(
+                f"Strategy backward requires Module, got {type(module).__name__}."
+            )
+        self.pre_backward(closure_loss)
+        prepared_loss: torch.Tensor = self.precision_plugin.pre_backward(
+            closure_loss,
+            module
+        )
+        self.precision_plugin.backward(
+            prepared_loss,
+            module,
+            optimizer,
+            *args,
+            **kwargs
+        )
+        detached_loss: torch.Tensor = self.precision_plugin.post_backward(
+            prepared_loss,
+            module
+        )
+        self.post_backward(detached_loss)
+        return detached_loss
+
     @property
     def is_distributed(self) -> bool:
         # Whether this strategy coordinates multiple processes; base default is
@@ -172,6 +292,30 @@ class Strategy(ABC):
     @property
     def accelerator(self) -> Accelerator | None:
         return self._accelerator
+
+    @property
+    def precision_plugin(self) -> Precision:
+        return self._precision_plugin
+
+    @precision_plugin.setter
+    def precision_plugin(self, precision_plugin: Precision) -> None:
+        if not isinstance(precision_plugin, Precision):
+            raise TypeError(
+                f"precision_plugin must be a Precision instance, got {type(precision_plugin).__name__}."
+            )
+        self._precision_plugin: Precision = precision_plugin
+        self._configured_precision_plugin = precision_plugin
+
+    def _attach_precision_plugin(self, precision_plugin: Precision) -> None:
+        if not isinstance(precision_plugin, Precision):
+            raise TypeError(
+                f"precision_plugin must be a Precision instance, got {type(precision_plugin).__name__}."
+            )
+        self._precision_plugin = precision_plugin
+
+    @property
+    def configured_precision_plugin(self) -> Precision | None:
+        return self._configured_precision_plugin
 
     @property
     def parallel_devices(self) -> list[torch.device]:
@@ -214,6 +358,10 @@ class Strategy(ABC):
     def model(self) -> nn.Module | None:
         # The strategy-managed model object, or None before setup.
         return self._model
+
+    @model.setter
+    def model(self, model: nn.Module | None) -> None:
+        self._model = model
 
     def __repr__(self) -> str:
         # Compact identity line for logs and interactive debugging.

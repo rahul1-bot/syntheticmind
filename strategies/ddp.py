@@ -35,7 +35,7 @@ from __future__ import annotations
 import atexit
 import os
 from collections.abc import Callable
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, cast, override
 
 import torch
 import torch.distributed as dist
@@ -43,6 +43,7 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
 from syntheticmind.core.module import Module
+from syntheticmind.precision.precision import Precision
 from syntheticmind.strategies.launcher import _ProcessLauncher, ProcessStartMethod
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
@@ -63,14 +64,16 @@ class DDPStrategy(Strategy):
         accelerator: Accelerator | None = None,
         parallel_devices: list[torch.device] | None = None,
         process_group_backend: str | None = None,
-        start_method: ProcessStartMethod = "popen"
+        start_method: ProcessStartMethod = "popen",
+        precision_plugin: Precision | None = None
     ) -> None:
         # Records the requested communication backend. The local rank is
         # resolved later, during environment setup, from the launcher-provided
         # environment variables.
         super().__init__(
             accelerator=accelerator,
-            parallel_devices=parallel_devices
+            parallel_devices=parallel_devices,
+            precision_plugin=precision_plugin
         )
         if process_group_backend is not None and not isinstance(
             process_group_backend,
@@ -206,6 +209,7 @@ class DDPStrategy(Strategy):
         # only for CUDA devices, because the CPU-based gloo path expects no
         # device_ids argument.
         self._device: torch.device = device
+        self._module: nn.Module | None = model
         placed_model: nn.Module = model.to(device)
         self._model: nn.Module | None = DistributedDataParallel(
             placed_model,
@@ -242,7 +246,15 @@ class DDPStrategy(Strategy):
                 unwrapped.forward: Callable[..., object] = original_forward  # type: ignore[assignment]
             return output
         if not isinstance(model, Module):
-            raise TypeError(f"Expected Module, got {type(model).__name__}")
+            return cast(
+                StepOutput,
+                self._forward_redirection(
+                    model,
+                    "training_step",
+                    batch,
+                    batch_idx
+                )
+            )
         return model.training_step(batch, batch_idx)
 
     @override
@@ -254,7 +266,15 @@ class DDPStrategy(Strategy):
         # DistributedDataParallel forward path is intentionally bypassed.
         unwrapped: nn.Module = model.module if isinstance(model, DistributedDataParallel) else model
         if not isinstance(unwrapped, Module):
-            raise TypeError(f"Expected Module, got {type(unwrapped).__name__}")
+            return cast(
+                StepOutput,
+                self._forward_redirection(
+                    model,
+                    "validation_step",
+                    batch,
+                    batch_idx
+                )
+            )
         return unwrapped.validation_step(batch, batch_idx)
 
     @override
@@ -265,7 +285,15 @@ class DDPStrategy(Strategy):
         # validation-step rationale for bypassing the wrapper.
         unwrapped: nn.Module = model.module if isinstance(model, DistributedDataParallel) else model
         if not isinstance(unwrapped, Module):
-            raise TypeError(f"Expected Module, got {type(unwrapped).__name__}")
+            return cast(
+                StepOutput,
+                self._forward_redirection(
+                    model,
+                    "test_step",
+                    batch,
+                    batch_idx
+                )
+            )
         return unwrapped.test_step(batch, batch_idx)
 
     @override
@@ -276,20 +304,29 @@ class DDPStrategy(Strategy):
         # validation-step rationale for bypassing the wrapper.
         unwrapped: nn.Module = model.module if isinstance(model, DistributedDataParallel) else model
         if not isinstance(unwrapped, Module):
-            raise TypeError(f"Expected Module, got {type(unwrapped).__name__}")
+            return cast(
+                ModelOutput,
+                self._forward_redirection(
+                    model,
+                    "predict_step",
+                    batch,
+                    batch_idx
+                )
+            )
         return unwrapped.predict_step(batch, batch_idx)
 
     @override
     def backward(
         self,
-        loss: torch.Tensor,
+        closure_loss: torch.Tensor,
+        optimizer: torch.optim.Optimizer | None = None,
         *args: object,
         **kwargs: object
-    ) -> None:
+    ) -> torch.Tensor:
         # Executes the standard autograd backward pass. Gradient averaging
         # across ranks is performed by the DistributedDataParallel hooks armed
         # during the training-step forward, not by this method.
-        loss.backward(*args, **kwargs)
+        return self._precision_backward(closure_loss, optimizer, *args, **kwargs)
 
     @override
     def barrier(self) -> None:

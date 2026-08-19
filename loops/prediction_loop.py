@@ -117,6 +117,8 @@ class PredictionLoop(Loop):
                 if max_batches is not None and batch_idx >= max_batches:
                     break
 
+                batch: Batch = trainer.precision_plugin.convert_input(batch)
+
                 with module._hook_context("on_predict_batch_start"):
                     for callback in callbacks:
                         callback.on_predict_batch_start(trainer, module, batch, batch_idx, 0)
@@ -139,8 +141,9 @@ class PredictionLoop(Loop):
                     with module._hook_context("on_after_batch_transfer"):
                         batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
 
-                with module._hook_context("predict_step"):
-                    outputs: ModelOutput = strategy.predict_step(model, batch, batch_idx)
+                with trainer.precision_plugin.predict_step_context():
+                    with module._hook_context("predict_step"):
+                        outputs: ModelOutput = strategy.predict_step(model, batch, batch_idx)
                 if self.return_predictions:
                     all_predictions.append(outputs)
 

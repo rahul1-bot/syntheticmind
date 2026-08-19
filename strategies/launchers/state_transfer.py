@@ -57,6 +57,7 @@ class _WorkerStateTransfer:
             last_progress_bar_stage=trainer._last_progress_bar_stage,
             callback_states=[callback.state_dict() for callback in trainer.callbacks],
             datamodule_state=datamodule.state_dict(),
+            precision_plugin_state=trainer.precision_plugin.state_dict(),
             validation_metrics=dict(trainer.validate_loop.epoch_metrics),
             test_metrics=dict(trainer.test_loop.epoch_metrics),
             total_train_batches=trainer._total_train_batches,
@@ -104,6 +105,7 @@ class _WorkerStateTransfer:
         ):
             callback.load_state_dict(callback_state)
         datamodule.load_state_dict(worker_output.datamodule_state)
+        trainer.precision_plugin.load_state_dict(worker_output.precision_plugin_state)
         trainer.validate_loop.epoch_metrics = dict(worker_output.validation_metrics)
         trainer.test_loop.epoch_metrics = dict(worker_output.test_metrics)
         trainer._total_train_batches = worker_output.total_train_batches

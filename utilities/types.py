@@ -31,7 +31,8 @@ import torch
 __all__: list[str] = [
     "TrainerStage",
     "RunningStage",
-    "Precision",
+    "PrecisionInput",
+    "PrecisionType",
     "ClipAlgorithm",
     "SchedulerInterval",
     "Reduction",
@@ -57,7 +58,34 @@ type TrainerStage = Literal["fit", "validate", "test", "predict"]
 
 type RunningStage = Literal["training", "validating", "testing", "predicting", "sanity_checking"]
 
-type Precision = Literal["32-true", "16-mixed", "bf16-mixed"]
+type PrecisionInput = (
+    Literal[64, 32, 16]
+    | Literal[
+        "64",
+        "32",
+        "16",
+        "bf16",
+        "16-true",
+        "16-mixed",
+        "bf16-true",
+        "bf16-mixed",
+        "32-true",
+        "64-true",
+        "transformer-engine",
+        "transformer-engine-float16"
+    ]
+)
+
+type PrecisionType = Literal[
+    "16-true",
+    "16-mixed",
+    "bf16-true",
+    "bf16-mixed",
+    "32-true",
+    "64-true",
+    "transformer-engine",
+    "transformer-engine-float16"
+]
 
 type ClipAlgorithm = Literal["norm", "value"]
 

@@ -49,14 +49,13 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
-from torch.amp import GradScaler, autocast  # type: ignore[attr-defined]
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.core.optimizer import SyntheticOptimizer
+from syntheticmind.core.optimizer import SyntheticOptimizer, do_nothing_closure
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.loop import Loop
@@ -66,7 +65,13 @@ from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.metric_accumulator import MetricAccumulator
 from syntheticmind.utilities.model_helpers import is_overridden
-from syntheticmind.utilities.types import Batch, CheckpointDict, ClipAlgorithm, StepOutput
+from syntheticmind.utilities.types import (
+    Batch,
+    CheckpointDict,
+    ClipAlgorithm,
+    PrecisionType,
+    StepOutput
+)
 
 if TYPE_CHECKING:
     from syntheticmind.core.trainer import Trainer
@@ -159,7 +164,7 @@ class TrainingEpochLoop(Loop):
         min_steps: int | None = None,
         max_steps: int = -1,
         accumulate_grad_batches: int = 1,
-        precision: str = "32-true",
+        precision: PrecisionType = "32-true",
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: ClipAlgorithm | None = None,
         log_every_n_steps: int = 10
@@ -172,12 +177,12 @@ class TrainingEpochLoop(Loop):
         self.min_steps: int | None = min_steps
         self.max_steps: int = max_steps
         self.accumulate_grad_batches: int = accumulate_grad_batches
-        self.precision: str = precision
+        self.precision: PrecisionType = precision
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
         self.validation_ran_this_epoch: bool = False
-        self._grad_scaler: GradScaler | None = None
+        self._grad_scaler: torch.GradScaler | None = None
         self._gradients_unscaled: bool = False
         self._completed_batches: int = 0
         self._total_batches_processed: int = 0
@@ -231,8 +236,7 @@ class TrainingEpochLoop(Loop):
         if self._max_steps_reached(state):
             return
 
-        if self.precision == "16-mixed" and device.type == "cuda" and self._grad_scaler is None:
-            self._grad_scaler: GradScaler | None = GradScaler("cuda")
+        self._grad_scaler: torch.GradScaler | None = trainer.scaler
 
         total_batches: int | None = self._safe_len(train_dataloader)
         max_batches: int | None = self._resolve_limit_batches(total_batches)
@@ -269,6 +273,8 @@ class TrainingEpochLoop(Loop):
             batch_idx: int = batch_idx + 1
             if max_batches is not None and batch_idx >= max_batches:
                 break
+
+            batch: Batch = trainer.precision_plugin.convert_input(batch)
             # Mid-epoch resume: the already-completed prefix is consumed and
             # discarded, so the dataloader reproduces the original batch
             # sequence and execution continues at the first incomplete batch.
@@ -435,15 +441,15 @@ class TrainingEpochLoop(Loop):
                 True
             )
 
-    def _make_autocast_context(self, device: torch.device) -> autocast | nullcontext[None]:
+    def _make_autocast_context(
+        self,
+        device: torch.device
+    ) -> AbstractContextManager[None]:
         # Returns the autocast context matching the configured precision policy:
         # float16 autocast for 16-mixed, bfloat16 autocast for bf16-mixed, and a
         # null context for full precision.
-        if self.precision == "16-mixed":
-            return autocast(device.type, dtype=torch.float16)
-        if self.precision == "bf16-mixed":
-            return autocast(device.type, dtype=torch.bfloat16)
-        return nullcontext()
+        del device
+        return self.trainer.precision_plugin.train_step_context()
 
     def _run_training_step(
         self,
@@ -452,14 +458,18 @@ class TrainingEpochLoop(Loop):
         model: nn.Module,
         batch: Batch,
         batch_idx: int
-    ) -> object:
+    ) -> StepOutput:
         # Executes the training step through the strategy inside the precision
         # context. The module's current-hook marker is set for the duration of
         # the step so Module.log can resolve its logging rule, and it is cleared
         # in a finally block so a raising step cannot leave a stale marker.
         with self._make_autocast_context(self.trainer.strategy.root_device):
             with module._hook_context("training_step"):
-                outputs: object = strategy.training_step(model, batch, batch_idx)
+                outputs: StepOutput = strategy.training_step(
+                    model,
+                    batch,
+                    batch_idx
+                )
         return outputs
 
     def _make_automatic_closure(
@@ -528,15 +538,13 @@ class TrainingEpochLoop(Loop):
         # optimizer that currently holds a gradient. Parameters without
         # gradients are excluded so norm computation reflects only live
         # gradients.
-        params: list[torch.nn.Parameter] = [
-            p for g in optimizer.param_groups for p in g["params"] if p.grad is not None
-        ]
-        if not params:
-            return
-        if self.gradient_clip_algorithm == "norm":
-            torch.nn.utils.clip_grad_norm_(params, self.gradient_clip_val)  # type: ignore[arg-type]
-        elif self.gradient_clip_algorithm == "value":
-            torch.nn.utils.clip_grad_value_(params, self.gradient_clip_val)  # type: ignore[arg-type]
+        gradient_clip_val: int | float = self.gradient_clip_val or 0.0
+        gradient_clip_algorithm: ClipAlgorithm = self.gradient_clip_algorithm or "norm"
+        self.trainer.precision_plugin.clip_gradients(
+            optimizer,
+            clip_val=gradient_clip_val,
+            gradient_clip_algorithm=gradient_clip_algorithm
+        )
 
     def clip_gradients(
         self,
@@ -574,8 +582,6 @@ class TrainingEpochLoop(Loop):
         self.gradient_clip_val: int | float | None = resolved_gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = validated_gradient_clip_algorithm
         try:
-            if self._grad_scaler is not None and not self._gradients_unscaled:
-                self._grad_scaler.unscale_(optimizer)
             self._clip_gradients(optimizer)
         finally:
             self.gradient_clip_val: int | float | None = original_gradient_clip_val
@@ -593,21 +599,7 @@ class TrainingEpochLoop(Loop):
         # hooks fire before the corresponding module hooks. With an active
         # GradScaler the loss is scaled before backward; otherwise backward is
         # delegated to the strategy so distributed synchronization applies.
-        callbacks: list[Callback] = trainer.callbacks
-        with module._hook_context("on_before_backward"):
-            for callback in callbacks:
-                callback.on_before_backward(trainer, module, loss)
-            module.on_before_backward(loss)
-
-        if self._grad_scaler is not None:
-            self._grad_scaler.scale(loss).backward(*args, **kwargs)
-        else:
-            trainer.strategy.backward(loss, *args, **kwargs)
-
-        with module._hook_context("on_after_backward"):
-            for callback in callbacks:
-                callback.on_after_backward(trainer, module)
-            module.on_after_backward()
+        trainer.strategy.backward(loss, None, *args, **kwargs)
 
     def optimizer_step(
         self,
@@ -729,36 +721,15 @@ class TrainingEpochLoop(Loop):
         # clipping. When a GradScaler is active, gradients are unscaled before
         # clipping and the step runs through the scaler, which skips the update
         # on overflow and adjusts the scale afterward.
+        del automatic
         step_kwargs: dict[str, object] = {} if kwargs is None else kwargs
-        if self._grad_scaler is not None:
-            if isinstance(optimizer, torch.optim.LBFGS):
-                raise MisconfigurationError(
-                    "16-mixed precision and the LBFGS optimizer are not compatible."
-                )
-            closure_result: object | None = closure() if closure is not None else None
-            if closure_result is None and automatic:
-                self._gradients_unscaled: bool = True
-                try:
-                    self._call_before_optimizer_step(trainer, module, optimizer, automatic)
-                finally:
-                    self._gradients_unscaled: bool = False
-                return closure_result
-            self._grad_scaler.unscale_(optimizer)
-            self._gradients_unscaled: bool = True
-            try:
-                self._call_before_optimizer_step(trainer, module, optimizer, automatic)
-            finally:
-                self._gradients_unscaled: bool = False
-            output: object = self._grad_scaler.step(optimizer, **step_kwargs)
-            self._grad_scaler.update()
-        else:
-            def wrapped_closure() -> object | None:
-                closure_result: object | None = closure() if closure is not None else None
-                self._call_before_optimizer_step(trainer, module, optimizer, automatic)
-                return closure_result
-
-            output: object = optimizer.step(closure=wrapped_closure, **step_kwargs)
-        return output
+        resolved_closure: Callable[[], object] = closure or do_nothing_closure
+        return trainer.strategy.optimizer_step(
+            optimizer,
+            resolved_closure,
+            model=module,
+            **step_kwargs
+        )
 
     def _call_before_optimizer_step(
         self,
