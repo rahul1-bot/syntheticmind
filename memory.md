@@ -35,7 +35,15 @@
     6. Existing source comments are temporarily grandfathered. The current phase neither cleans them nor introduces new source-code comments.
     7. Inheritance order and method-resolution order are public behavior whenever users subclass the harness. Cooperative initialization, `super()` chains, override discovery, signatures, defaults, and return types must be verified together rather than reviewing method names in isolation.
     8. Industry-standard machine-learning key terms and naming conventions are mandatory at every public boundary. An internal abstraction may be cleaner than Lightning's implementation, but it may not force users to translate an invented vocabulary for an established concept.
-    9. The Callback inheritance surface remains the immediate compatibility gap: standard callbacks name the model parameter `pl_module`, and validation and test epoch-end hooks do not receive a project-specific `metrics` argument. Built-in callbacks must consume `trainer.callback_metrics` under those standard signatures.
+
+| Memory | Callback Extension Contract | Date: 19 August 2026 | Time: 09:32 AM | Name: Ghost |
+
+    1. The SyntheticMind `Callback` method surface now contains every method in the pinned PyTorch Lightning base contract with identical positional parameter names and defaults; the local `__repr__` remains a harmless additional method.
+    2. Every public callback hook uses the standard `pl_module` model parameter. Validation and test epoch-end hooks receive only `trainer` and `pl_module`, and reduced values are read through `trainer.callback_metrics` instead of a project-specific positional mapping.
+    3. Evaluation publishes reduced metrics before ordinary epoch-end callbacks, merges metrics logged by the module epoch-end hook, and republishes them before monitoring callbacks. This preserves the standard signature while allowing EarlyStopping and ModelCheckpoint to observe module-contributed values.
+    4. Callback state identity follows the qualified-class-name convention, parameterized keys use the standard class-qualified dictionary representation, and `_legacy_state_key` preserves the established compatibility surface.
+    5. Python 3.14 callback modules require deferred annotations because `Trainer` is imported only during type checking to avoid circular imports. Without deferred annotations, standard `inspect.signature()` calls evaluate the missing runtime name and fail, obstructing extension discovery and override tooling.
+    6. Source comparison checked the complete base surface, structural inspection checked seventy-one built-in overrides, and CPU executions covered fit, validation, test, prediction, EarlyStopping, ModelCheckpoint, callback metrics, state keys, and runtime signature inspection.
 
 | Memory | Evidence Escalation and Ledger Discipline | Date: 19 August 2026 | Time: 08:21 AM | Name: Ghost |
 

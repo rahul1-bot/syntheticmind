@@ -14,6 +14,8 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 import time
 from typing import TYPE_CHECKING, override
 
@@ -43,12 +45,12 @@ class TimerCallback(Callback):
         self._total_val_time: float = 0.0
 
     @override
-    def on_fit_start(self, trainer: Trainer, module: Module) -> None:
+    def on_fit_start(self, trainer: Trainer, pl_module: Module) -> None:
         # Marks the beginning of the fit for the end-of-run total.
         self._fit_start: float = time.perf_counter()
 
     @override
-    def on_fit_end(self, trainer: Trainer, module: Module) -> None:
+    def on_fit_end(self, trainer: Trainer, pl_module: Module) -> None:
         # Reports the total fit duration together with the accumulated
         # training and validation components, from rank zero only.
         if not is_rank_zero():
@@ -61,28 +63,26 @@ class TimerCallback(Callback):
         )
 
     @override
-    def on_train_epoch_start(self, trainer: Trainer, module: Module) -> None:
+    def on_train_epoch_start(self, trainer: Trainer, pl_module: Module) -> None:
         # Marks the beginning of the training epoch.
         self._epoch_start: float = time.perf_counter()
 
     @override
-    def on_train_epoch_end(self, trainer: Trainer, module: Module) -> None:
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
         # Accumulates the epoch duration into the training total and reports
         # it from rank zero.
         elapsed: float = time.perf_counter() - self._epoch_start
         self._total_train_time += elapsed
         if is_rank_zero():
-            log.info(f"Epoch {module.current_epoch} training: {elapsed:.1f}s")
+            log.info(f"Epoch {pl_module.current_epoch} training: {elapsed:.1f}s")
 
     @override
-    def on_validation_epoch_start(self, trainer: Trainer, module: Module) -> None:
+    def on_validation_epoch_start(self, trainer: Trainer, pl_module: Module) -> None:
         # Marks the beginning of the validation pass.
         self._epoch_start: float = time.perf_counter()
 
     @override
-    def on_validation_epoch_end(
-        self, trainer: Trainer, module: Module, metrics: dict[str, float]
-    ) -> None:
+    def on_validation_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
         # Accumulates the pass duration into the validation total and reports
         # it from rank zero.
         elapsed: float = time.perf_counter() - self._epoch_start

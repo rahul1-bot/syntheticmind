@@ -16,6 +16,8 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, override
 
 import torch
@@ -43,7 +45,7 @@ class NanInfGuard(Callback):
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Validates the batch outcome: the loss value is extracted (tensor or
         # scalar) and tested for finiteness, and when enabled every named
@@ -55,10 +57,10 @@ class NanInfGuard(Callback):
         if not torch.isfinite(torch.tensor(loss_value)):
             raise ValueError(
                 f"Non-finite loss detected at batch {batch_idx}, "
-                f"epoch {module.current_epoch}, step {module.global_step}: {loss_value}"
+                f"epoch {pl_module.current_epoch}, step {pl_module.global_step}: {loss_value}"
             )
         if self.check_parameters:
-            for name, param in module.named_parameters():
+            for name, param in pl_module.named_parameters():
                 if param.grad is not None and not torch.isfinite(param.grad).all():
                     raise ValueError(
                         f"Non-finite gradient in parameter '{name}' at batch {batch_idx}"

@@ -20,6 +20,8 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, override
 
 import torch
@@ -49,13 +51,13 @@ class ProgressBarCallback(Callback):
         self._test_bar: tqdm | None = None  # type: ignore[type-arg]
 
     @override
-    def on_train_epoch_start(self, trainer: Trainer, module: Module) -> None:
+    def on_train_epoch_start(self, trainer: Trainer, pl_module: Module) -> None:
         # Opens the persistent training bar for the epoch, labeled with the
         # epoch position and sized from the trainer's cached batch total.
         if not is_rank_zero():
             return
         total: int | None = trainer._total_train_batches
-        epoch: int = module.current_epoch
+        epoch: int = pl_module.current_epoch
         max_epochs: int = trainer.max_epochs
         self._train_bar: tqdm | None = tqdm(
             total=total,
@@ -66,7 +68,7 @@ class ProgressBarCallback(Callback):
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Advances the training bar and refreshes its postfix with the
         # progress-bar-visible metrics currently buffered on the module,
@@ -75,7 +77,7 @@ class ProgressBarCallback(Callback):
             return
         self._train_bar.update(1)
         postfix: dict[str, str] = {}
-        for name, metric in module.logged_metrics.items():
+        for name, metric in pl_module.logged_metrics.items():
             if metric.progress_bar:
                 value: torch.Tensor | float = metric.value
                 if isinstance(value, torch.Tensor):
@@ -85,7 +87,7 @@ class ProgressBarCallback(Callback):
             self._train_bar.set_postfix(postfix)
 
     @override
-    def on_train_epoch_end(self, trainer: Trainer, module: Module) -> None:
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
         # Closes the training bar at the epoch boundary, leaving its final
         # state on screen as the epoch record.
         if self._train_bar is not None:
@@ -93,7 +95,7 @@ class ProgressBarCallback(Callback):
             self._train_bar: tqdm | None = None
 
     @override
-    def on_validation_epoch_start(self, trainer: Trainer, module: Module) -> None:
+    def on_validation_epoch_start(self, trainer: Trainer, pl_module: Module) -> None:
         # Opens the transient validation bar sized from the cached validation
         # batch total; it clears itself from the terminal when closed.
         if not is_rank_zero():
@@ -108,7 +110,7 @@ class ProgressBarCallback(Callback):
 
     @override
     def on_validation_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Advances the validation bar by one batch.
@@ -116,19 +118,19 @@ class ProgressBarCallback(Callback):
             self._val_bar.update(1)
 
     @override
-    def on_validation_epoch_end(
-        self, trainer: Trainer, module: Module, metrics: dict[str, float]
-    ) -> None:
+    def on_validation_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
         # Stamps the reduced validation metrics as the closing postfix and
         # closes the bar.
         if self._val_bar is not None:
-            if metrics:
-                self._val_bar.set_postfix({k: f"{v:.4f}" for k, v in metrics.items()})
+            if trainer.callback_metrics:
+                self._val_bar.set_postfix(
+                    {k: f"{v:.4f}" for k, v in trainer.callback_metrics.items()}
+                )
             self._val_bar.close()
             self._val_bar: tqdm | None = None
 
     @override
-    def on_test_epoch_start(self, trainer: Trainer, module: Module) -> None:
+    def on_test_epoch_start(self, trainer: Trainer, pl_module: Module) -> None:
         # Opens the persistent test bar sized from the cached test batch
         # total.
         if not is_rank_zero():
@@ -143,7 +145,7 @@ class ProgressBarCallback(Callback):
 
     @override
     def on_test_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Advances the test bar by one batch.
@@ -151,13 +153,13 @@ class ProgressBarCallback(Callback):
             self._test_bar.update(1)
 
     @override
-    def on_test_epoch_end(
-        self, trainer: Trainer, module: Module, metrics: dict[str, float]
-    ) -> None:
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
         # Stamps the reduced test metrics as the closing postfix and closes
         # the bar.
         if self._test_bar is not None:
-            if metrics:
-                self._test_bar.set_postfix({k: f"{v:.4f}" for k, v in metrics.items()})
+            if trainer.callback_metrics:
+                self._test_bar.set_postfix(
+                    {k: f"{v:.4f}" for k, v in trainer.callback_metrics.items()}
+                )
             self._test_bar.close()
             self._test_bar: tqdm | None = None

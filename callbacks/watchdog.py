@@ -17,6 +17,8 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 import time
 from typing import TYPE_CHECKING, override
 
@@ -52,7 +54,7 @@ class WatchdogCallback(Callback):
 
     @override
     def on_train_batch_start(
-        self, trainer: Trainer, module: Module, batch: Batch, batch_idx: int
+        self, trainer: Trainer, pl_module: Module, batch: Batch, batch_idx: int
     ) -> None:
         # Measures the gap since the previous heartbeat, reports a stall when
         # it exceeds the timeout, and stamps the new heartbeat. The gap
@@ -70,7 +72,7 @@ class WatchdogCallback(Callback):
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Stamps the heartbeat after the step and optimizer handling, so the
         # next batch-start measurement isolates the inter-batch segment.

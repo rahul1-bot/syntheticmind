@@ -21,6 +21,8 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, override
 
 import torch
@@ -50,7 +52,7 @@ class DataLeakageGuard(Callback):
         self._test_ids: set[str] = set()
 
     @override
-    def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
+    def setup(self, trainer: Trainer, pl_module: Module, stage: TrainerStage) -> None:
         # Clears the identifier sets at stage setup so observations from a
         # previous run cannot produce false overlaps in this one.
         self._train_ids.clear()
@@ -59,14 +61,14 @@ class DataLeakageGuard(Callback):
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Accumulates the batch's sample identifiers into the training set.
         self._collect_ids(batch, self._train_ids)
 
     @override
     def on_validation_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Accumulates the batch's identifiers into the validation set and
@@ -82,7 +84,7 @@ class DataLeakageGuard(Callback):
 
     @override
     def on_test_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Accumulates the batch's identifiers into the test set and aborts on

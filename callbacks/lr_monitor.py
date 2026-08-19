@@ -13,6 +13,8 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, override
 
 from syntheticmind.callbacks.callback import Callback
@@ -38,7 +40,7 @@ class LearningRateMonitor(Callback):
 
     @override
     def on_train_epoch_end(
-        self, trainer: Trainer, module: Module
+        self, trainer: Trainer, pl_module: Module
     ) -> None:
         # Reads the learning rate of every parameter group from the primary
         # optimizer and emits the values from rank zero, using the plain lr
@@ -48,7 +50,7 @@ class LearningRateMonitor(Callback):
         if trainer.optimizer is None or trainer.logger is None:
             return
 
-        current_step: int = module.global_step
+        current_step: int = pl_module.global_step
         lr_metrics: dict[str, float] = {}
         for idx, group in enumerate(trainer.optimizer.param_groups):
             lr: float = group.get("lr", 0.0)

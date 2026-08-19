@@ -12,6 +12,8 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, override
 
 import torch
@@ -38,14 +40,14 @@ class DeviceStatsMonitor(Callback):
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Reads the current device's allocated and reserved memory and emits
         # both in megabytes, gated on rank zero, the step cadence, CUDA
         # availability, and logger presence.
         if not is_rank_zero():
             return
-        if module.global_step % self.log_every_n_steps != 0:
+        if pl_module.global_step % self.log_every_n_steps != 0:
             return
         if not torch.cuda.is_available():
             return
@@ -55,5 +57,5 @@ class DeviceStatsMonitor(Callback):
         if trainer.logger is not None:
             trainer.logger.log_metrics(
                 {"device/memory_allocated_mb": allocated_mb, "device/memory_reserved_mb": reserved_mb},
-                step=module.global_step
+                step=pl_module.global_step
             )
