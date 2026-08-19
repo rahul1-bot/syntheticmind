@@ -1,28 +1,16 @@
-| Progress Complete | Repository Bootstrap | Date: 19 August 2026 | Time: 04:34 AM | Name: Ghost |
+| Progress Baseline | Verified Starting State | Date: 19 August 2026 | Time: 08:21 AM | Name: Ghost |
 
-    1. ✅ The local SyntheticMind directory has been initialized as an independent Git repository with `main` as the stable branch.
-    2. ✅ A private GitHub repository named `syntheticmind` has been created under the authenticated `rahul1-bot` account and configured as `origin`.
-    3. ✅ The entire `docs/` tree is excluded from project history so local guidelines and third-party reference checkouts remain workstation-only material.
-    4. ✅ The initial project baseline, root ledgers, and ignore rules have been committed and pushed to `main` and `origin/main`.
-    5. ✅ Local `dev` was created from the exact `main` baseline and published as `origin/dev` with upstream tracking.
-    6. ✅ `main`, `origin/main`, `dev`, and `origin/dev` were synchronized during repository bootstrap, and `dev` became the active working branch.
+    1. ✅ The private repository is configured with stable `main` and active `dev` branches, and completed development phases are synchronized to `origin/dev`.
+    2. ✅ The controlling PyTorch Lightning comparison is the local revision `fcef404516264798b6c582ef556eaa17e5c29bfb`, described as `2.6.0-174-gfcef40451`.
+    3. ✅ The governing generic Python guidelines are located at `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md` and were previously verified with SHA-256 digest `0062fd44fd22b9a5d1e54bbe8cc9deca38c0406a1aafdffdb28bc02036801db6`.
+    4. ✅ Focused probes established real Trainer defects in optimization-step accounting, validation cadence and running-stage restoration, distributed accumulation tails, distributed dataloader reconstruction, lifecycle symmetry, and parameter semantics.
+    5. SyntheticMind begins the capability program without a project-native test suite. Focused verification must be introduced alongside implementation without replicating PyTorch Lightning's upstream suite.
 
-| Progress Complete | Trainer Hardening Review | Date: 19 August 2026 | Time: 04:48 AM | Name: Ghost |
+| Progress Active | Recursive Core Capability Program | Date: 19 August 2026 | Time: 08:21 AM | Name: Ghost |
 
-    1. ✅ The complete SyntheticMind Trainer execution path was compared against local PyTorch Lightning revision `fcef404516264798b6c582ef556eaa17e5c29bfb`, described as `2.6.0-174-gfcef40451`.
-    2. ✅ The local generic Python guidelines were confirmed byte-for-byte identical to the previously reviewed canonical file through SHA-256 digest `0062fd44fd22b9a5d1e54bbe8cc9deca38c0406a1aafdffdb28bc02036801db6`.
-    3. ✅ Focused CPU executions confirmed incorrect manual-optimization global-step accounting, repeated global-step validation during gradient accumulation, stale validation running-stage state, and lifecycle end hooks firing without their matching start or setup hooks.
-    4. ✅ A two-rank Gloo execution confirmed parameter divergence after the unsized iterable-dataset accumulation tail because the final backward pass remained under `no_sync()` before the tail optimizer step.
-    5. ✅ Distributed dataloader reconstruction was confirmed to discard an existing `BatchSampler` and change the effective batch shape.
-    6. ✅ Parameter probes confirmed divergent semantics for `max_epochs=-1`, `limit_train_batches=0.0`, `deterministic=True`, invalid gradient-clipping configuration, negative reload cadence, and unsupported device counts.
-    7. ✅ The repository contains no SyntheticMind test files; `python -m pytest -q --ignore=docs` collected no tests.
-    8. No Trainer implementation change was made. The next action requires alignment on the severity-ordered hardening tranche before code is modified.
-
-| Progress Active | PyTorch Lightning Capability Parity Planning | Date: 19 August 2026 | Time: 05:19 AM | Name: Ghost |
-
-    1. ✅ The end-state requirement has been fixed as full user-facing capability parity with core PyTorch Lightning, excluding Fabric from the current boundary and deferring public documentation, release machinery, and upstream test-suite porting.
-    2. ✅ Exact machine-learning terminology, parameter semantics, variable meanings, method contracts, inherited hooks, and lifecycle behavior have been established as compatibility requirements wherever SyntheticMind represents the same concept.
-    3. ✅ `docs/architecture/` and `docs/issues/` exist as local planning surfaces and remain workstation-only under the complete `docs/` ignore policy.
-    4. The project remains in brainstorming and architecture-definition mode. No harness implementation change is authorized by this decision record.
-    5. The required work order is capability boundary, architecture inventory, evidence-backed issue catalogue, compatibility matrix, dependency ordering, foundational implementation, and layer-by-layer verification.
-    6. The next discussion must define the first ordered subsystem and its acceptance boundary before source code is changed.
+    1. ✅ The active objective is full user-facing capability parity with core PyTorch Lightning while excluding Fabric, documentation creation, release machinery, and replication of the upstream PyTorch Lightning test suite.
+    2. ✅ The ignored `external/` research boundary is established for carefully selected third-party source references required to resolve concrete engineering uncertainty.
+    3. The current implementation phase is the foundational `core/` contract layer, beginning with `core/hooks.py` and its checkpoint-hook companion `core/saving.py`.
+    4. Subsequent `core/` work proceeds through `optimizer.py`, `datamodule.py`, `module.py`, `trainer.py`, and package exports only after each preceding contract is understood, implemented, and verified.
+    5. Existing source comments remain untouched, and no new source-code comments are introduced during the current phase.
+    6. Every completed phase requires focused verification, diff review, a local `dev` commit, a push to `origin/dev`, and confirmation that both branch references match before work advances.
