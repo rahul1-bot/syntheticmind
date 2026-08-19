@@ -262,10 +262,10 @@ class ModelCheckpoint(Callback):
             world_size=getattr(trainer.strategy, "world_size", 1)
         )
 
-        module.on_save_checkpoint(checkpoint)
-
-        for cb in trainer.callbacks:
-            cb.on_save_checkpoint(trainer, module, checkpoint)
+        with module._hook_context("on_save_checkpoint"):
+            for cb in trainer.callbacks:
+                cb.on_save_checkpoint(trainer, module, checkpoint)
+            module.on_save_checkpoint(checkpoint)
 
         # mkstemp pre-creates the temporary file; the descriptor is closed
         # immediately because torch.save reopens the path itself.
@@ -308,7 +308,8 @@ class ModelCheckpoint(Callback):
                 "partial": True
             }
         }
-        module.on_save_checkpoint(checkpoint)
+        with module._hook_context("on_save_checkpoint"):
+            module.on_save_checkpoint(checkpoint)
 
         # mkstemp pre-creates the temporary file; the descriptor is closed
         # immediately because torch.save reopens the path itself.

@@ -33,6 +33,7 @@ from syntheticmind.core.module import Module
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
+from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.types import Batch, ModelOutput
 
 if TYPE_CHECKING:
@@ -72,17 +73,26 @@ class PredictionLoop(Loop):
 
         state.set_running_stage("predicting")
         module._running_stage: str | None = "predicting"
-        module.on_predict_model_eval()
-
-        for callback in callbacks:
-            callback.on_predict_start(trainer, module)
-        module.on_predict_start()
-        for callback in callbacks:
-            callback.on_predict_epoch_start(trainer, module)
-        module.on_predict_epoch_start()
-
         total_batches: int | None = self._safe_len(predict_dataloader)
         max_batches: int | None = self._resolve_limit_batches(total_batches)
+        if max_batches == 0:
+            module._reset_logged_metrics()
+            return []
+
+        module_mode: ModuleMode = ModuleMode()
+        module_mode.capture(module)
+        with module._hook_context("on_predict_model_eval"):
+            module.on_predict_model_eval()
+
+        with module._hook_context("on_predict_start"):
+            for callback in callbacks:
+                callback.on_predict_start(trainer, module)
+            module.on_predict_start()
+        with module._hook_context("on_predict_epoch_start"):
+            for callback in callbacks:
+                callback.on_predict_epoch_start(trainer, module)
+            module.on_predict_epoch_start()
+
         all_predictions: list[ModelOutput] = []
 
         with torch.inference_mode():
@@ -107,38 +117,47 @@ class PredictionLoop(Loop):
                 if max_batches is not None and batch_idx >= max_batches:
                     break
 
-                for callback in callbacks:
-                    callback.on_predict_batch_start(trainer, module, batch, batch_idx, 0)
-                module.on_predict_batch_start(batch, batch_idx, 0)
+                with module._hook_context("on_predict_batch_start"):
+                    for callback in callbacks:
+                        callback.on_predict_batch_start(trainer, module, batch, batch_idx, 0)
+                    module.on_predict_batch_start(batch, batch_idx, 0)
 
                 dm: DataModule | None = trainer.datamodule
-                if dm is not None and type(dm).on_before_batch_transfer is not DataModule.on_before_batch_transfer:
+                if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
                     batch: Batch = dm.on_before_batch_transfer(batch, dataloader_idx=0)
                 else:
-                    batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
-                if dm is not None and type(dm).transfer_batch_to_device is not DataModule.transfer_batch_to_device:
+                    with module._hook_context("on_before_batch_transfer"):
+                        batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
+                if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
                     batch: Batch = dm.transfer_batch_to_device(batch, device, dataloader_idx=0)
                 else:
-                    batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
-                if dm is not None and type(dm).on_after_batch_transfer is not DataModule.on_after_batch_transfer:
+                    with module._hook_context("transfer_batch_to_device"):
+                        batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
                     batch: Batch = dm.on_after_batch_transfer(batch, dataloader_idx=0)
                 else:
-                    batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
+                    with module._hook_context("on_after_batch_transfer"):
+                        batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
 
-                outputs: ModelOutput = strategy.predict_step(model, batch, batch_idx)
+                with module._hook_context("predict_step"):
+                    outputs: ModelOutput = strategy.predict_step(model, batch, batch_idx)
                 if self.return_predictions:
                     all_predictions.append(outputs)
 
-                for callback in callbacks:
-                    callback.on_predict_batch_end(trainer, module, outputs, batch, batch_idx, 0)
-                module.on_predict_batch_end(outputs, batch, batch_idx, 0)
+                with module._hook_context("on_predict_batch_end"):
+                    for callback in callbacks:
+                        callback.on_predict_batch_end(trainer, module, outputs, batch, batch_idx, 0)
+                    module.on_predict_batch_end(outputs, batch, batch_idx, 0)
 
-        module.on_predict_epoch_end()
-        for callback in callbacks:
-            callback.on_predict_epoch_end(trainer, module)
-        module.on_predict_end()
-        for callback in callbacks:
-            callback.on_predict_end(trainer, module)
+        with module._hook_context("on_predict_epoch_end"):
+            for callback in callbacks:
+                callback.on_predict_epoch_end(trainer, module)
+            module.on_predict_epoch_end()
+        with module._hook_context("on_predict_end"):
+            for callback in callbacks:
+                callback.on_predict_end(trainer, module)
+            module.on_predict_end()
+        module_mode.restore(module)
 
         module._reset_logged_metrics()
         return all_predictions

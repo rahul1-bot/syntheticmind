@@ -37,6 +37,8 @@ from loguru import logger as log
 from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
 
 from syntheticmind.callbacks.callback import Callback
+from syntheticmind.callbacks.early_stopping import EarlyStopping
+from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.evaluation_loop import EvaluationLoop
 from syntheticmind.loops.loop import Loop
@@ -75,6 +77,22 @@ class FitLoop(Loop):
         assert module is not None
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
+        monitoring_callbacks: list[Callback] = [
+            callback for callback in callbacks if isinstance(callback, (EarlyStopping, ModelCheckpoint))
+        ]
+        non_monitoring_callbacks: list[Callback] = [
+            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, ModelCheckpoint))
+        ]
+        assert self.epoch_loop is not None
+        total_train_batches: int | None = trainer._total_train_batches
+        max_train_batches: int | None = self.epoch_loop._resolve_limit_batches(total_train_batches)
+        if state.current_epoch >= self.max_epochs or max_train_batches == 0:
+            return
+
+        with module._hook_context("on_train_start"):
+            for callback in callbacks:
+                callback.on_train_start(trainer, module)
+            module.on_train_start()
 
         for epoch in range(state.current_epoch, self.max_epochs):
             if self.should_stop:
@@ -117,34 +135,36 @@ class FitLoop(Loop):
             module._running_stage: str | None = "training"
             module.train()
 
-            for callback in callbacks:
-                callback.on_train_epoch_start(trainer, module)
-            module._current_fx_name: str | None = "on_train_epoch_start"
-            module.on_train_epoch_start()
-            module._current_fx_name: str | None = None
+            with module._hook_context("on_train_epoch_start"):
+                for callback in callbacks:
+                    callback.on_train_epoch_start(trainer, module)
+                module.on_train_epoch_start()
 
-            assert self.epoch_loop is not None
             self.epoch_loop.run()
 
-            module._current_fx_name: str | None = "on_train_epoch_end"
-            module.on_train_epoch_end()
-            module._current_fx_name: str | None = None
+            val_dataloader: DataLoader | None = trainer.val_dataloader  # type: ignore[type-arg]
+            if val_dataloader is not None and self.epoch_loop.validate_at_epoch_end:
+                trainer._call_on_validation_model_zero_grad(module)
+                validate_loop: EvaluationLoop = trainer.validate_loop
+                validate_loop.run()
+                state.set_running_stage("training")
+                module._running_stage: str | None = "training"
+
+            with module._hook_context("on_train_epoch_end"):
+                for callback in non_monitoring_callbacks:
+                    callback.on_train_epoch_end(trainer, module)
+            with module._hook_context("on_train_epoch_end"):
+                module.on_train_epoch_end()
             self._flush_hook_metrics(module, trainer, state)
-            for callback in callbacks:
-                callback.on_train_epoch_end(trainer, module)
+            with module._hook_context("on_train_epoch_end"):
+                for callback in monitoring_callbacks:
+                    callback.on_train_epoch_end(trainer, module)
 
             module._reset_logged_metrics()
 
             # Epoch-end validation runs with cleared gradients so it never
             # observes stale training gradients, and the module returns to
             # training mode afterwards.
-            val_dataloader: DataLoader | None = trainer.val_dataloader  # type: ignore[type-arg]
-            if val_dataloader is not None and self.epoch_loop.validate_at_epoch_end:
-                trainer._call_on_validation_model_zero_grad(module)
-                validate_loop: EvaluationLoop = trainer.validate_loop
-                validate_loop.run()
-                module.on_validation_model_train()
-                module._running_stage: str | None = "training"
 
             # Epoch-interval schedulers advance after epoch-end validation
             # because the plateau family consumes a monitored validation
@@ -183,6 +203,11 @@ class FitLoop(Loop):
             if state.should_stop:
                 self.should_stop: bool = True
                 log.info("Training stopped early by callback")
+
+        with module._hook_context("on_train_end"):
+            for callback in callbacks:
+                callback.on_train_end(trainer, module)
+            module.on_train_end()
 
     def _flush_hook_metrics(self, module: Module, trainer: Trainer, state: TrainerState) -> None:
         # Emits metrics logged inside the module's on_train_epoch_end hook.

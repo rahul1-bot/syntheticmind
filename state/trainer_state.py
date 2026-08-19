@@ -100,6 +100,8 @@ class TrainerState:
         # interruption outranks completion so it stays visible after teardown.
         if self._status != "interrupted":
             self._status: TrainerStatus = "finished"
+        self._stage: TrainerStage | None = None
+        self._running_stage: RunningStage | None = None
 
     def interrupt(self) -> None:
         # Records a user or system interruption while leaving counters intact

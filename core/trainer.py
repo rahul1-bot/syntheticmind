@@ -77,6 +77,7 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.checkpoint import load_checkpoint
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.optimizers import build_optimizer
 from syntheticmind.utilities.schedulers import build_scheduler
 from syntheticmind.utilities.seed import SeedManager
@@ -435,6 +436,9 @@ class Trainer:
         module._trainer: Trainer | None = self
         module._current_epoch: int = 0
         module._global_step: int = 0
+        module_mode: ModuleMode = ModuleMode()
+        module_mode.capture(module)
+        fit_completed: bool = False
 
         # An explicit per-call checkpoint path overrides the constructor-level
         # resume path; with both absent the run starts fresh.
@@ -521,7 +525,8 @@ class Trainer:
             # declaration is normalized to parallel definition lists first, so
             # single-optimizer and multi-optimizer modules flow through one
             # build path.
-            optimization_configuration: OptimizationConfiguration = module.configure_optimizers()
+            with module._hook_context("configure_optimizers"):
+                optimization_configuration: OptimizationConfiguration = module.configure_optimizers()
             optimizer_config_value: OptimizerDefinition | list[OptimizerDefinition] = (
                 optimization_configuration.optimizer
             )
@@ -647,8 +652,9 @@ class Trainer:
             # checkpoint state later.
             self._validate_callback_state_keys()
 
-            for callback in self.callbacks:
-                callback.setup(self, module, "fit")
+            with module._hook_context("setup"):
+                for callback in self.callbacks:
+                    callback.setup(self, module, "fit")
 
             # The run configuration is announced to the logger from rank zero
             # only, keeping multi-process runs single-writer.
@@ -665,9 +671,10 @@ class Trainer:
             # sanity pass runs inside the fit stage but before training
             # starts, surfacing validation-path defects before the first
             # training epoch is paid for; it discards every trace of itself.
-            for callback in self.callbacks:
-                callback.on_fit_start(self, module)
-            module.on_fit_start()
+            with module._hook_context("on_fit_start"):
+                for callback in self.callbacks:
+                    callback.on_fit_start(self, module)
+                module.on_fit_start()
 
             if self.val_dataloader is not None and self.num_sanity_val_steps > 0:
                 self._sanity_check_validation(module)
@@ -678,17 +685,15 @@ class Trainer:
             self.state.set_running_stage("training")
             module._running_stage: str | None = "training"
 
-            for callback in self.callbacks:
-                callback.on_train_start(self, module)
-            module.on_train_start()
-
             self.fit_loop.run()
 
             # End hooks mirror the start order reversed: the module first,
             # then the callbacks.
-            module.on_train_end()
-            for callback in self.callbacks:
-                callback.on_train_end(self, module)
+            with module._hook_context("on_fit_end"):
+                for callback in self.callbacks:
+                    callback.on_fit_end(self, module)
+                module.on_fit_end()
+            fit_completed: bool = True
         # Interrupts and failures funnel through one handler that marks the
         # trainer state interrupted, offers the exception to the callback,
         # datamodule, and strategy hooks, and re-raises.
@@ -697,15 +702,14 @@ class Trainer:
         except Exception as exception:
             self._handle_exception(module, datamodule, exception, "Training")
         finally:
+            if not fit_completed:
+                module_mode.restore(module)
             # Unwind unconditionally, success or failure: end-of-fit hooks,
             # component teardown, and logger finalization all execute so a
             # failed run still releases its resources and flushes its records.
-            module.on_fit_end()
-            for callback in self.callbacks:
-                callback.on_fit_end(self, module)
-
-            for callback in self.callbacks:
-                callback.teardown(self, module, "fit")
+            with module._hook_context("teardown"):
+                for callback in self.callbacks:
+                    callback.teardown(self, module, "fit")
             datamodule.teardown("fit")
             self.strategy.teardown()
 
@@ -746,7 +750,9 @@ class Trainer:
         self.datamodule: DataModule | None = datamodule
         module._trainer: Trainer | None = self
 
-        was_training: bool = module.training
+        module_mode: ModuleMode = ModuleMode()
+        module_mode.capture(module)
+        stage_completed: bool = False
         metrics: dict[str, float] = {}
         try:
             self.strategy.setup_environment()
@@ -777,17 +783,22 @@ class Trainer:
             self.strategy.setup(module, device)
             module._device: torch.device = device
 
-            for callback in self.callbacks:
-                callback.setup(self, module, "validate")
+            with module._hook_context("setup"):
+                for callback in self.callbacks:
+                    callback.setup(self, module, "validate")
 
             metrics: dict[str, float] = self.validate_loop.run()
+            stage_completed: bool = True
         except KeyboardInterrupt as exc:
             self._handle_exception(module, datamodule, exc, "Validation")
         except Exception as exception:
             self._handle_exception(module, datamodule, exception, "Validation")
         finally:
-            for callback in self.callbacks:
-                callback.teardown(self, module, "validate")
+            if not stage_completed:
+                module_mode.restore(module)
+            with module._hook_context("teardown"):
+                for callback in self.callbacks:
+                    callback.teardown(self, module, "validate")
             datamodule.teardown("validate")
             self.strategy.teardown()
             if self.logger is not None:
@@ -795,7 +806,6 @@ class Trainer:
             module._running_stage: str | None = None
             module._current_fx_name: str | None = None
             self.state.finish()
-            module.train(was_training)
 
         return metrics
 
@@ -823,7 +833,9 @@ class Trainer:
         self.datamodule: DataModule | None = datamodule
         module._trainer: Trainer | None = self
 
-        was_training: bool = module.training
+        module_mode: ModuleMode = ModuleMode()
+        module_mode.capture(module)
+        stage_completed: bool = False
         metrics: dict[str, float] = {}
         try:
             self.strategy.setup_environment()
@@ -854,17 +866,22 @@ class Trainer:
             self.strategy.setup(module, device)
             module._device: torch.device = device
 
-            for callback in self.callbacks:
-                callback.setup(self, module, "test")
+            with module._hook_context("setup"):
+                for callback in self.callbacks:
+                    callback.setup(self, module, "test")
 
             metrics: dict[str, float] = self.test_loop.run()
+            stage_completed: bool = True
         except KeyboardInterrupt as exc:
             self._handle_exception(module, datamodule, exc, "Testing")
         except Exception as exception:
             self._handle_exception(module, datamodule, exception, "Testing")
         finally:
-            for callback in self.callbacks:
-                callback.teardown(self, module, "test")
+            if not stage_completed:
+                module_mode.restore(module)
+            with module._hook_context("teardown"):
+                for callback in self.callbacks:
+                    callback.teardown(self, module, "test")
             datamodule.teardown("test")
             self.strategy.teardown()
             if self.logger is not None:
@@ -872,7 +889,6 @@ class Trainer:
             module._running_stage: str | None = None
             module._current_fx_name: str | None = None
             self.state.finish()
-            module.train(was_training)
 
         return metrics
 
@@ -907,7 +923,9 @@ class Trainer:
         self.datamodule: DataModule | None = datamodule
         module._trainer: Trainer | None = self
 
-        was_training: bool = module.training
+        module_mode: ModuleMode = ModuleMode()
+        module_mode.capture(module)
+        stage_completed: bool = False
         predictions: list[ModelOutput] = []
         try:
             self.strategy.setup_environment()
@@ -936,18 +954,23 @@ class Trainer:
             self.strategy.setup(module, device)
             module._device: torch.device = device
 
-            for callback in self.callbacks:
-                callback.setup(self, module, "predict")
+            with module._hook_context("setup"):
+                for callback in self.callbacks:
+                    callback.setup(self, module, "predict")
 
             self.predict_loop.return_predictions: bool = return_predictions
             predictions: list[ModelOutput] = self.predict_loop.run()
+            stage_completed: bool = True
         except KeyboardInterrupt as exc:
             self._handle_exception(module, datamodule, exc, "Prediction")
         except Exception as exception:
             self._handle_exception(module, datamodule, exception, "Prediction")
         finally:
-            for callback in self.callbacks:
-                callback.teardown(self, module, "predict")
+            if not stage_completed:
+                module_mode.restore(module)
+            with module._hook_context("teardown"):
+                for callback in self.callbacks:
+                    callback.teardown(self, module, "predict")
             datamodule.teardown("predict")
             self.strategy.teardown()
             if self.logger is not None:
@@ -955,7 +978,6 @@ class Trainer:
             module._running_stage: str | None = None
             module._current_fx_name: str | None = None
             self.state.finish()
-            module.train(was_training)
 
         return predictions
 
@@ -1009,8 +1031,8 @@ class Trainer:
         self.predict_loop.trainer: Trainer = self
 
     def _configure_model(self, module: Module) -> None:
-        has_legacy_override: bool = type(module).configure_sharded_model is not ModelHooks.configure_sharded_model
-        has_configure_override: bool = type(module).configure_model is not ModelHooks.configure_model
+        has_legacy_override: bool = is_overridden("configure_sharded_model", module, ModelHooks)
+        has_configure_override: bool = is_overridden("configure_model", module, ModelHooks)
         if has_legacy_override and has_configure_override:
             module_name: str = type(module).__name__
             raise MisconfigurationError(
@@ -1032,18 +1054,12 @@ class Trainer:
             hook: Callable[[], None] = module.configure_model
         else:
             return
-        module._current_fx_name: str | None = hook_name
-        try:
+        with module._hook_context(hook_name):
             hook()
-        finally:
-            module._current_fx_name: str | None = None
 
     def _call_on_validation_model_zero_grad(self, module: Module) -> None:
-        module._current_fx_name: str | None = "on_validation_model_zero_grad"
-        try:
+        with module._hook_context("on_validation_model_zero_grad"):
             module.on_validation_model_zero_grad()
-        finally:
-            module._current_fx_name: str | None = None
 
     def _resolve_accelerator(self, accelerator: str | Accelerator) -> Accelerator:
         # Resolves the accelerator argument: a live instance passes through
@@ -1165,8 +1181,9 @@ class Trainer:
         # sanity results cannot influence monitoring or checkpointing.
         log.info(f"Running {self.num_sanity_val_steps} sanity validation batches")
 
-        for callback in self.callbacks:
-            callback.on_sanity_check_start(self, module)
+        with module._hook_context("on_sanity_check_start"):
+            for callback in self.callbacks:
+                callback.on_sanity_check_start(self, module)
 
         self.state.set_running_stage("sanity_checking")
         module._running_stage: str | None = "sanity_checking"
@@ -1184,10 +1201,10 @@ class Trainer:
         module._reset_logged_metrics()
         self._callback_metrics.clear()
 
-        for callback in self.callbacks:
-            callback.on_sanity_check_end(self, module)
+        with module._hook_context("on_sanity_check_end"):
+            for callback in self.callbacks:
+                callback.on_sanity_check_end(self, module)
 
-        module.on_validation_model_train()
         module._running_stage: str | None = "training"
 
     def _restore_checkpoint(self, path: Path, module: Module) -> None:
@@ -1221,10 +1238,11 @@ class Trainer:
                 self.fit_loop.epoch_loop._completed_batches: int = completed_batches
             if epoch_rng_state is not None:
                 self.fit_loop.epoch_loop._resume_rng_state: CheckpointDict | None = epoch_rng_state
-        if hasattr(module, "on_load_checkpoint"):
-            module.on_load_checkpoint(checkpoint)
-        for callback in self.callbacks:
-            callback.on_load_checkpoint(self, module, checkpoint)
+        with module._hook_context("on_load_checkpoint"):
+            if hasattr(module, "on_load_checkpoint"):
+                module.on_load_checkpoint(checkpoint)
+            for callback in self.callbacks:
+                callback.on_load_checkpoint(self, module, checkpoint)
         log.info(f"Resumed from epoch {epoch}, global step {global_step}")
 
     def _handle_exception(
@@ -1240,8 +1258,9 @@ class Trainer:
         # resources, and then re-raises. KeyboardInterrupt re-raises through
         # the bare raise so its traceback is preserved unchanged.
         self.state.interrupt()
-        for callback in self.callbacks:
-            callback.on_exception(self, module, exception)
+        with module._hook_context("on_exception"):
+            for callback in self.callbacks:
+                callback.on_exception(self, module, exception)
         datamodule.on_exception(exception)
         self.strategy.on_exception(exception)
         if isinstance(exception, KeyboardInterrupt):
@@ -1258,7 +1277,7 @@ class Trainer:
         # other inside checkpoints and are rejected instead.
         seen: dict[str, str] = {}
         for cb in self.callbacks:
-            if type(cb).state_dict is not Callback.state_dict or type(cb).load_state_dict is not Callback.load_state_dict:
+            if is_overridden("state_dict", cb, Callback) or is_overridden("load_state_dict", cb, Callback):
                 key: str = cb.state_key
                 if key in seen:
                     raise MisconfigurationError(

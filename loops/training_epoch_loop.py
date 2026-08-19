@@ -61,6 +61,7 @@ from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.metric_accumulator import MetricAccumulator
+from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.utilities.types import Batch, CheckpointDict, StepOutput
 
 if TYPE_CHECKING:
@@ -190,29 +191,29 @@ class TrainingEpochLoop(Loop):
             if batch_idx < skip_batches:
                 continue
 
-            for callback in callbacks:
-                callback.on_train_batch_start(trainer, module, batch, batch_idx)
-            module._current_fx_name: str | None = "on_train_batch_start"
-            try:
+            with module._hook_context("on_train_batch_start"):
+                for callback in callbacks:
+                    callback.on_train_batch_start(trainer, module, batch, batch_idx)
                 hook_response: int | None = module.on_train_batch_start(batch, batch_idx)
-            finally:
-                module._current_fx_name: str | None = None
             if hook_response == -1:
                 break
 
             dm: DataModule | None = trainer.datamodule
-            if dm is not None and type(dm).on_before_batch_transfer is not DataModule.on_before_batch_transfer:
+            if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
                 batch: Batch = dm.on_before_batch_transfer(batch, dataloader_idx=0)
             else:
-                batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
-            if dm is not None and type(dm).transfer_batch_to_device is not DataModule.transfer_batch_to_device:
+                with module._hook_context("on_before_batch_transfer"):
+                    batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
+            if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
                 batch: Batch = dm.transfer_batch_to_device(batch, device, dataloader_idx=0)
             else:
-                batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
-            if dm is not None and type(dm).on_after_batch_transfer is not DataModule.on_after_batch_transfer:
+                with module._hook_context("transfer_batch_to_device"):
+                    batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
+            if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
                 batch: Batch = dm.on_after_batch_transfer(batch, dataloader_idx=0)
             else:
-                batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
+                with module._hook_context("on_after_batch_transfer"):
+                    batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
 
             # Automatic path: the loss is divided by the accumulation factor
             # so the accumulated gradient matches the equivalent large batch,
@@ -247,9 +248,10 @@ class TrainingEpochLoop(Loop):
                 is_accumulating: bool = False
                 self._increment_global_step(state, module)
 
-            for callback in callbacks:
-                callback.on_train_batch_end(trainer, module, outputs, batch, batch_idx)
-            module.on_train_batch_end(outputs, batch, batch_idx)
+            with module._hook_context("on_train_batch_end"):
+                for callback in callbacks:
+                    callback.on_train_batch_end(trainer, module, outputs, batch, batch_idx)
+                module.on_train_batch_end(outputs, batch, batch_idx)
 
             self._dispatch_step_metrics(module, state, log_fn, epoch_accum, epoch_logger_names, is_accumulating)
 
@@ -265,10 +267,12 @@ class TrainingEpochLoop(Loop):
                 if module.automatic_optimization and not is_accumulating:
                     trainer._call_on_validation_model_zero_grad(module)
                 trainer._is_mid_epoch_validation: bool = True
-                trainer.validate_loop.run()
-                trainer._is_mid_epoch_validation: bool = False
+                try:
+                    trainer.validate_loop.run()
+                finally:
+                    trainer._is_mid_epoch_validation: bool = False
                 self.validation_ran_this_epoch: bool = True
-                module.on_validation_model_train()
+                state.set_running_stage("training")
                 module._running_stage: str | None = "training"
 
             if state.should_stop:
@@ -309,11 +313,8 @@ class TrainingEpochLoop(Loop):
         # the step so Module.log can resolve its logging rule, and it is cleared
         # in a finally block so a raising step cannot leave a stale marker.
         with self._make_autocast_context(self.trainer.strategy.root_device):
-            module._current_fx_name: str | None = "training_step"
-            try:
+            with module._hook_context("training_step"):
                 outputs: StepOutput = strategy.training_step(model, batch, batch_idx)
-            finally:
-                module._current_fx_name: str | None = None
         return outputs
 
     @staticmethod
@@ -413,18 +414,20 @@ class TrainingEpochLoop(Loop):
         # GradScaler the loss is scaled before backward; otherwise backward is
         # delegated to the strategy so distributed synchronization applies.
         callbacks: list[Callback] = trainer.callbacks
-        for callback in callbacks:
-            callback.on_before_backward(trainer, module, loss)
-        module.on_before_backward(loss)
+        with module._hook_context("on_before_backward"):
+            for callback in callbacks:
+                callback.on_before_backward(trainer, module, loss)
+            module.on_before_backward(loss)
 
         if self._grad_scaler is not None:
             self._grad_scaler.scale(loss).backward()
         else:
             trainer.strategy.backward(loss)
 
-        for callback in callbacks:
-            callback.on_after_backward(trainer, module)
-        module.on_after_backward()
+        with module._hook_context("on_after_backward"):
+            for callback in callbacks:
+                callback.on_after_backward(trainer, module)
+            module.on_after_backward()
 
     def optimizer_step(
         self,
@@ -478,9 +481,10 @@ class TrainingEpochLoop(Loop):
         # clipping and the step runs through the scaler, which skips the update
         # on overflow and adjusts the scale afterward.
         callbacks: list[Callback] = trainer.callbacks
-        for callback in callbacks:
-            callback.on_before_optimizer_step(trainer, module, optimizer)
-        module.on_before_optimizer_step(optimizer)
+        with module._hook_context("on_before_optimizer_step"):
+            for callback in callbacks:
+                callback.on_before_optimizer_step(trainer, module, optimizer)
+            module.on_before_optimizer_step(optimizer)
 
         if self.gradient_clip_val is not None and self.gradient_clip_val > 0:
             if self._grad_scaler is not None:
@@ -503,9 +507,10 @@ class TrainingEpochLoop(Loop):
         # the module observe gradients in their final post-step state before
         # they are released.
         callbacks: list[Callback] = trainer.callbacks
-        for callback in callbacks:
-            callback.on_before_zero_grad(trainer, module, optimizer)
-        module.on_before_zero_grad(optimizer)
+        with module._hook_context("on_before_zero_grad"):
+            for callback in callbacks:
+                callback.on_before_zero_grad(trainer, module, optimizer)
+            module.on_before_zero_grad(optimizer)
         optimizer.zero_grad()
 
     @staticmethod

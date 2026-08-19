@@ -18,7 +18,7 @@
 
     1. The controlling Lightning comparison revision is `fcef404516264798b6c582ef556eaa17e5c29bfb`; comparison claims must not be attributed to another checkout or release.
     2. SyntheticMind currently defines `global_step` as an optimizer-step count in state documentation but increments it once per manual training batch, irrespective of how many optimizer steps actually execute.
-    3. Mid-fit validation changes the Trainer running stage to validation and restores only the module stage, causing later training callbacks to observe stale state.
+    3. Mid-fit and epoch-end validation must restore both Trainer and Module running-stage state to training before subsequent training hooks execute; the hook-dispatch layer now enforces this paired transition.
     4. Global-step validation cadence can trigger repeatedly on accumulation microbatches because the validation predicate does not prove that a new optimizer step occurred.
     5. Unsized iterable datasets can finish inside a distributed `no_sync()` accumulation window; the subsequent tail optimizer step uses rank-local gradients and produces divergent model parameters.
     6. The distributed dataloader reconstruction path does not preserve custom batch samplers, loader subclasses, or every current PyTorch DataLoader constructor field.
@@ -35,6 +35,7 @@
     6. Existing source comments are temporarily grandfathered. The current phase neither cleans them nor introduces new source-code comments.
     7. Inheritance order and method-resolution order are public behavior whenever users subclass the harness. Cooperative initialization, `super()` chains, override discovery, signatures, defaults, and return types must be verified together rather than reviewing method names in isolation.
     8. Industry-standard machine-learning key terms and naming conventions are mandatory at every public boundary. An internal abstraction may be cleaner than Lightning's implementation, but it may not force users to translate an invented vocabulary for an established concept.
+    9. The Callback inheritance surface remains the immediate compatibility gap: standard callbacks name the model parameter `pl_module`, and validation and test epoch-end hooks do not receive a project-specific `metrics` argument. Built-in callbacks must consume `trainer.callback_metrics` under those standard signatures.
 
 | Memory | Evidence Escalation and Ledger Discipline | Date: 19 August 2026 | Time: 08:21 AM | Name: Ghost |
 

@@ -193,6 +193,15 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         self._current_fx_name: str | None = None
         self._param_requires_grad_state: dict[torch.nn.Parameter, bool] = {}
 
+    @contextmanager
+    def _hook_context(self, hook_name: str) -> Iterator[None]:
+        previous_hook_name: str | None = self._current_fx_name
+        self._current_fx_name: str | None = hook_name
+        try:
+            yield
+        finally:
+            self._current_fx_name: str | None = previous_hook_name
+
     @override
     def forward(self, *args: object, **kwargs: object) -> ModelOutput:
         # The model's tensor computation. Subclasses must override; the

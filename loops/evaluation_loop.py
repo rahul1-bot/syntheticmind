@@ -39,6 +39,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from syntheticmind.callbacks.callback import Callback
+from syntheticmind.callbacks.early_stopping import EarlyStopping
+from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loggers.logger import Logger
@@ -47,6 +49,7 @@ from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.metric_accumulator import MetricAccumulator
+from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.types import Batch, RunningStage, StepOutput
 
 if TYPE_CHECKING:
@@ -90,6 +93,12 @@ class EvaluationLoop(Loop):
         strategy: Strategy = trainer.strategy
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
+        monitoring_callbacks: list[Callback] = [
+            callback for callback in callbacks if isinstance(callback, (EarlyStopping, ModelCheckpoint))
+        ]
+        non_monitoring_callbacks: list[Callback] = [
+            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, ModelCheckpoint))
+        ]
         log_fn: Logger | None = trainer.logger
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model
@@ -100,37 +109,40 @@ class EvaluationLoop(Loop):
         module._running_stage: str | None = running_stage
 
         dataloader: DataLoader = self._get_dataloader()  # type: ignore[type-arg]
-
-        if self.stage == "validate":
-            module.on_validation_model_eval()
-        else:
-            module.on_test_model_eval()
-
-        if self.stage == "validate":
-            for callback in callbacks:
-                callback.on_validation_start(trainer, module)
-            module._current_fx_name: str | None = "on_validation_start"
-            module.on_validation_start()
-            module._current_fx_name: str | None = None
-            for callback in callbacks:
-                callback.on_validation_epoch_start(trainer, module)
-            module._current_fx_name: str | None = "on_validation_epoch_start"
-            module.on_validation_epoch_start()
-            module._current_fx_name: str | None = None
-        else:
-            for callback in callbacks:
-                callback.on_test_start(trainer, module)
-            module._current_fx_name: str | None = "on_test_start"
-            module.on_test_start()
-            module._current_fx_name: str | None = None
-            for callback in callbacks:
-                callback.on_test_epoch_start(trainer, module)
-            module._current_fx_name: str | None = "on_test_epoch_start"
-            module.on_test_epoch_start()
-            module._current_fx_name: str | None = None
-
         total_batches: int | None = self._safe_len(dataloader)
         max_batches: int | None = self._resolve_limit_batches(total_batches)
+        if max_batches == 0:
+            module._reset_logged_metrics()
+            return self.epoch_metrics
+
+        module_mode: ModuleMode = ModuleMode()
+        module_mode.capture(module)
+
+        if self.stage == "validate":
+            with module._hook_context("on_validation_model_eval"):
+                module.on_validation_model_eval()
+        else:
+            with module._hook_context("on_test_model_eval"):
+                module.on_test_model_eval()
+
+        if self.stage == "validate":
+            with module._hook_context("on_validation_start"):
+                for callback in callbacks:
+                    callback.on_validation_start(trainer, module)
+                module.on_validation_start()
+            with module._hook_context("on_validation_epoch_start"):
+                for callback in callbacks:
+                    callback.on_validation_epoch_start(trainer, module)
+                module.on_validation_epoch_start()
+        else:
+            with module._hook_context("on_test_start"):
+                for callback in callbacks:
+                    callback.on_test_start(trainer, module)
+                module.on_test_start()
+            with module._hook_context("on_test_epoch_start"):
+                for callback in callbacks:
+                    callback.on_test_epoch_start(trainer, module)
+                module.on_test_epoch_start()
         epoch_accum: dict[str, MetricAccumulator] = {}
         logger_metric_names: set[str] = set()
 
@@ -157,45 +169,50 @@ class EvaluationLoop(Loop):
                     break
 
                 if self.stage == "validate":
-                    for callback in callbacks:
-                        callback.on_validation_batch_start(trainer, module, batch, batch_idx, 0)
-                    module.on_validation_batch_start(batch, batch_idx, 0)
+                    with module._hook_context("on_validation_batch_start"):
+                        for callback in callbacks:
+                            callback.on_validation_batch_start(trainer, module, batch, batch_idx, 0)
+                        module.on_validation_batch_start(batch, batch_idx, 0)
                 else:
-                    for callback in callbacks:
-                        callback.on_test_batch_start(trainer, module, batch, batch_idx, 0)
-                    module.on_test_batch_start(batch, batch_idx, 0)
+                    with module._hook_context("on_test_batch_start"):
+                        for callback in callbacks:
+                            callback.on_test_batch_start(trainer, module, batch, batch_idx, 0)
+                        module.on_test_batch_start(batch, batch_idx, 0)
 
                 dm: DataModule | None = trainer.datamodule
-                if dm is not None and type(dm).on_before_batch_transfer is not DataModule.on_before_batch_transfer:
+                if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
                     batch: Batch = dm.on_before_batch_transfer(batch, dataloader_idx=0)
                 else:
-                    batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
-                if dm is not None and type(dm).transfer_batch_to_device is not DataModule.transfer_batch_to_device:
+                    with module._hook_context("on_before_batch_transfer"):
+                        batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
+                if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
                     batch: Batch = dm.transfer_batch_to_device(batch, device, dataloader_idx=0)
                 else:
-                    batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
-                if dm is not None and type(dm).on_after_batch_transfer is not DataModule.on_after_batch_transfer:
+                    with module._hook_context("transfer_batch_to_device"):
+                        batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
                     batch: Batch = dm.on_after_batch_transfer(batch, dataloader_idx=0)
                 else:
-                    batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
+                    with module._hook_context("on_after_batch_transfer"):
+                        batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
 
                 if self.stage == "validate":
-                    module._current_fx_name: str | None = "validation_step"
-                    outputs: StepOutput = strategy.validation_step(model, batch, batch_idx)
-                    module._current_fx_name: str | None = None
+                    with module._hook_context("validation_step"):
+                        outputs: StepOutput = strategy.validation_step(model, batch, batch_idx)
                 else:
-                    module._current_fx_name: str | None = "test_step"
-                    outputs: StepOutput = strategy.test_step(model, batch, batch_idx)
-                    module._current_fx_name: str | None = None
+                    with module._hook_context("test_step"):
+                        outputs: StepOutput = strategy.test_step(model, batch, batch_idx)
 
                 if self.stage == "validate":
-                    for callback in callbacks:
-                        callback.on_validation_batch_end(trainer, module, outputs, batch, batch_idx, 0)
-                    module.on_validation_batch_end(outputs, batch, batch_idx, 0)
+                    with module._hook_context("on_validation_batch_end"):
+                        for callback in callbacks:
+                            callback.on_validation_batch_end(trainer, module, outputs, batch, batch_idx, 0)
+                        module.on_validation_batch_end(outputs, batch, batch_idx, 0)
                 else:
-                    for callback in callbacks:
-                        callback.on_test_batch_end(trainer, module, outputs, batch, batch_idx, 0)
-                    module.on_test_batch_end(outputs, batch, batch_idx, 0)
+                    with module._hook_context("on_test_batch_end"):
+                        for callback in callbacks:
+                            callback.on_test_batch_end(trainer, module, outputs, batch, batch_idx, 0)
+                        module.on_test_batch_end(outputs, batch, batch_idx, 0)
 
                 self._accumulate_metrics(module, epoch_accum, logger_metric_names, log_fn, state)
 
@@ -209,31 +226,43 @@ class EvaluationLoop(Loop):
                 log_fn.log_metrics(logger_epoch_metrics, step=state.global_step)
 
         if self.stage == "validate":
-            module._current_fx_name: str | None = "on_validation_epoch_end"
-            module.on_validation_epoch_end()
-            module._current_fx_name: str | None = None
+            with module._hook_context("on_validation_epoch_end"):
+                for callback in non_monitoring_callbacks:
+                    callback.on_validation_epoch_end(trainer, module, self.epoch_metrics)
+            with module._hook_context("on_validation_epoch_end"):
+                module.on_validation_epoch_end()
             self._consume_epoch_end_hook_metrics(module, log_fn, state)
-            for callback in callbacks:
-                callback.on_validation_epoch_end(trainer, module, self.epoch_metrics)
-            module._current_fx_name: str | None = "on_validation_end"
-            module.on_validation_end()
-            module._current_fx_name: str | None = None
-            for callback in callbacks:
-                callback.on_validation_end(trainer, module)
+            self.trainer._callback_metrics.update(self.epoch_metrics)
+            with module._hook_context("on_validation_epoch_end"):
+                for callback in monitoring_callbacks:
+                    callback.on_validation_epoch_end(trainer, module, self.epoch_metrics)
+            with module._hook_context("on_validation_end"):
+                for callback in callbacks:
+                    callback.on_validation_end(trainer, module)
+                module.on_validation_end()
+            if is_overridden("on_validation_model_train", module, Module):
+                with module._hook_context("on_validation_model_train"):
+                    module.on_validation_model_train()
+            else:
+                module_mode.restore(module)
         else:
-            module._current_fx_name: str | None = "on_test_epoch_end"
-            module.on_test_epoch_end()
-            module._current_fx_name: str | None = None
+            with module._hook_context("on_test_epoch_end"):
+                for callback in callbacks:
+                    callback.on_test_epoch_end(trainer, module, self.epoch_metrics)
+            with module._hook_context("on_test_epoch_end"):
+                module.on_test_epoch_end()
             self._consume_epoch_end_hook_metrics(module, log_fn, state)
-            for callback in callbacks:
-                callback.on_test_epoch_end(trainer, module, self.epoch_metrics)
-            module._current_fx_name: str | None = "on_test_end"
-            module.on_test_end()
-            module._current_fx_name: str | None = None
-            for callback in callbacks:
-                callback.on_test_end(trainer, module)
+            self.trainer._callback_metrics.update(self.epoch_metrics)
+            with module._hook_context("on_test_end"):
+                for callback in callbacks:
+                    callback.on_test_end(trainer, module)
+                module.on_test_end()
+            if is_overridden("on_test_model_train", module, Module):
+                with module._hook_context("on_test_model_train"):
+                    module.on_test_model_train()
+            else:
+                module_mode.restore(module)
 
-        self.trainer._callback_metrics.update(self.epoch_metrics)
         module._reset_logged_metrics()
         return self.epoch_metrics
 
