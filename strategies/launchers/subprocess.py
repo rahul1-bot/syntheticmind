@@ -15,6 +15,7 @@ from syntheticmind.strategies.launchers.contracts import StageResult
 from syntheticmind.strategies.launchers.environment import _DistributedEnvironment
 from syntheticmind.strategies.launchers.process_observer import _ChildProcessObserver
 from syntheticmind.strategies.launchers.state_transfer import _StageInvoker
+from syntheticmind.utilities.exceptions import SIGTERMException
 from syntheticmind.utilities.types import TrainerStage
 
 if TYPE_CHECKING:
@@ -67,16 +68,26 @@ class _SubprocessLauncher:
                 datamodule,
                 stage_kwargs
             )
-        except BaseException:
+        except BaseException as exception:
             trainer.state.interrupt()
             self._stop_observer()
             self._terminate_workers()
             self._restore_environment()
+            if trainer.received_sigterm and not isinstance(exception, SIGTERMException):
+                raise SIGTERMException() from exception
             raise
 
     @property
     def processes(self) -> list[subprocess.Popen[bytes]]:
         return [process for process in self._processes if process.poll() is None]
+
+    def kill(self, signum: int) -> None:
+        for process in self._processes:
+            if process.poll() is None:
+                try:
+                    process.send_signal(signum)
+                except ProcessLookupError:
+                    continue
 
     def _start_workers(
         self,

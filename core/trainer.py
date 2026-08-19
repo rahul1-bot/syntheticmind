@@ -105,7 +105,7 @@ from syntheticmind.strategies.single_device import SingleDeviceStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.utilities.filesystem import (
     basename,
     is_file,
@@ -116,6 +116,7 @@ from syntheticmind.utilities.filesystem import (
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.optimizers import _optimizers_to_device
 from syntheticmind.utilities.seed import SeedManager
+from syntheticmind.utilities.signal_connector import _SignalConnector
 from syntheticmind.utilities.torch_flags import configure_torch_flags
 from syntheticmind.utilities.types import (
     CheckpointDict,
@@ -823,6 +824,7 @@ class Trainer:
         self._loggers: list[Logger] = resolved_loggers
         self.profiler: Profiler = _resolve_profiler(profiler)
         self.state: TrainerState = TrainerState()
+        self._signal_connector: _SignalConnector = _SignalConnector(self)
         self._is_mid_epoch_validation: bool = False
         self._validation_schedule: ValidationSchedule = ValidationSchedule(
             effective_val_check_interval,
@@ -984,6 +986,7 @@ class Trainer:
         )
 
         try:
+            self._signal_connector.register_signal_handlers()
             # Initialize the strategy's process context, run single-copy data
             # preparation on global rank zero only, and hold every rank at the
             # barrier so no process enters setup against partially prepared
@@ -1213,6 +1216,7 @@ class Trainer:
             # then the callbacks.
             self._call_callback_hooks(module, "on_fit_end")
             self._call_module_hook(module, "on_fit_end", module.on_fit_end)
+            self._raise_if_sigterm()
             fit_completed: bool = True
         # Interrupts and failures funnel through one handler that marks the
         # trainer state interrupted, offers the exception to the callback,
@@ -1235,7 +1239,7 @@ class Trainer:
             self._active_exception = None
             self._is_mid_epoch_validation = False
             if self.fit_loop.epoch_loop is not None:
-                self.fit_loop.epoch_loop.reset_on_run()
+                self.fit_loop.epoch_loop.reset_on_teardown()
             if cleanup_exception is not None:
                 raise cleanup_exception
 
@@ -1295,6 +1299,7 @@ class Trainer:
             ckpt_path
         )
         try:
+            self._signal_connector.register_signal_handlers()
             self.strategy.setup_environment()
             self._announce_barebones_stage("validate")
             self._setup_profiler("validate", module)
@@ -1402,6 +1407,7 @@ class Trainer:
             ckpt_path
         )
         try:
+            self._signal_connector.register_signal_handlers()
             self.strategy.setup_environment()
             self._announce_barebones_stage("test")
             self._setup_profiler("test", module)
@@ -1543,6 +1549,7 @@ class Trainer:
             ckpt_path
         )
         try:
+            self._signal_connector.register_signal_handlers()
             self.strategy.setup_environment()
             self._announce_barebones_stage("predict")
             self._setup_profiler("predict", module)
@@ -2619,6 +2626,11 @@ class Trainer:
 
         failures: list[_TeardownFailure] = []
         progress_callbacks: list[tuple[int, ProgressBarCallback]] = []
+        self._attempt_teardown(
+            "signal_connector.teardown",
+            self._signal_connector.teardown,
+            failures
+        )
         self._attempt_teardown("strategy.teardown", self.strategy.teardown, failures)
         self._attempt_teardown(
             "checkpoint_io.teardown",
@@ -3125,6 +3137,28 @@ class Trainer:
     def interrupted(self) -> bool:
         # Whether the most recent run terminated through an interruption.
         return self.state.status == "interrupted"
+
+    @property
+    def received_sigterm(self) -> bool:
+        return self._signal_connector.received_sigterm
+
+    @property
+    def is_last_batch(self) -> bool:
+        if self.fit_loop.epoch_loop is None:
+            return False
+        return self.fit_loop.epoch_loop.is_last_batch
+
+    def _raise_if_sigterm(self, synchronize: bool = True) -> None:
+        if not synchronize and self.strategy.is_distributed:
+            return
+        received_sigterm: bool = (
+            self.strategy.reduce_boolean_decision(self.received_sigterm)
+            if synchronize
+            else self.received_sigterm
+        )
+        if received_sigterm:
+            self._signal_connector.received_sigterm = True
+            raise SIGTERMException()
 
     @property
     def training(self) -> bool:

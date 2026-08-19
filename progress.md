@@ -133,3 +133,12 @@
     4. ✅ Multiprocessing parent restoration now reconciles both the user module and strategy-managed model identities after two-process fork execution.
     5. ✅ Python compilation, diff validation, source-comment preservation, signature inspection, and targeted Pyright verification pass without invoking Ruff or another linter.
     6. Meta and sharded initialization remain strategy-bounded future capabilities. Continue with the standard signal-receipt and last-batch runtime contracts before expanding multiple-dataloader support.
+
+| Progress Complete | Signal and Last-Batch Capability | Date: 19 August 2026 | Time: 07:42 PM | Name: Ghost |
+
+    1. ✅ `Trainer.received_sigterm`, `SIGTERMException`, handler composition and restoration, safe-boundary raising, nested launch ownership, worker propagation, and multiprocessing state reconciliation are implemented.
+    2. ✅ A shared data fetcher provides truthful final-batch state for sized and unsized loaders without over-consuming finite limits, and `Trainer.is_last_batch` remains available during hooks, optimization, scheduled validation, and post-fit inspection.
+    3. ✅ Final-batch truth now closes gradient-accumulation windows before execution, prevents a final unsized batch from entering distributed `no_sync`, and preserves final validation placement without an after-exhaustion repair pass.
+    4. ✅ Focused execution covers every public stage, custom signal handlers, callback exception observation, finite and unlimited iterables, early batch exit, accumulated optimization, exact shuffled checkpoint continuation, CPU, MPS, external Gloo, unequal-rank prediction, and local fork, spawn, and subprocess launch.
+    5. Scheduler-specific automatic requeue remains a future cluster integration rather than a false core signal claim.
+    6. Continue with multiple-dataloader capability and the standard `train_dataloader`, `val_dataloaders`, `test_dataloaders`, and `predict_dataloaders` inspection contracts in dependency order.

@@ -45,6 +45,7 @@ from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.batch_limits import resolve_batch_limit
+from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
@@ -133,6 +134,7 @@ class EvaluationLoop(Loop):
                 if max_batches is None
                 else min(max_batches, sanity_steps)
             )
+        trainer._raise_if_sigterm()
         if max_batches == 0:
             module._reset_logged_metrics()
             return self.epoch_metrics
@@ -201,13 +203,19 @@ class EvaluationLoop(Loop):
 
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile(f"setup_{self.stage}_dataloader"):
-            dataloader_iterator: Iterator[Batch] = iter(dataloader)
+            data_fetcher: _DataFetcher = _DataFetcher(
+                dataloader,
+                max_batches,
+                sized=total_batches is not None
+            )
+            dataloader_iterator: Iterator[Batch] = iter(data_fetcher)
         trainer._record_dataloader_iterator_creation_time(
             running_stage,
             time.perf_counter() - dataloader_iterator_start_time
         )
         batch_idx: int = -1
-        while True:
+        while not data_fetcher.done:
+            trainer._raise_if_sigterm()
             dataloader_fetch_start_time: float = time.perf_counter()
             try:
                 dataloader_prefix: str = "val" if self.stage == "validate" else "test"
@@ -222,8 +230,6 @@ class EvaluationLoop(Loop):
                 time.perf_counter() - dataloader_fetch_start_time
             )
             batch_idx += 1
-            if max_batches is not None and batch_idx >= max_batches:
-                break
 
             batch: Batch = trainer.precision_plugin.convert_input(batch)
 
@@ -474,6 +480,7 @@ class EvaluationLoop(Loop):
                 module_mode.restore(module)
 
         module._reset_logged_metrics()
+        trainer._raise_if_sigterm()
         return self.epoch_metrics
 
     def _get_dataloader(self) -> DataLoader:  # type: ignore[type-arg]

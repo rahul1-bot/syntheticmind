@@ -291,3 +291,14 @@
     5. Current single-device and distributed data-parallel strategies should allocate uninitialized real-device storage. Meta tensors and sharded construction have different materialization obligations and belong to future specialized strategy overrides.
     6. Initialization contexts must restore process-global device and dtype state on exceptions. A successful allocation probe alone cannot establish safe reusable context behavior.
     7. Multiprocessing state reconciliation must update every public identity backed by worker state. Restoring only `Trainer.module` leaves `Trainer.model` stale because the latter delegates to strategy ownership.
+
+| Memory | Signal and Final-Batch Semantics | Date: 19 August 2026 | Time: 07:42 PM | Name: Ghost |
+
+    1. A signal handler should perform minimal process-safe work: record receipt, notify locally owned workers once, and preserve any pre-existing callable handler. Framework exceptions belong at controlled loop boundaries where cleanup and distributed coordination remain valid.
+    2. The conventional terminated-process status is `128 + SIGTERM`, which is `143` on the supported runtime. Preserving this value through a `SystemExit` subtype lets callers distinguish requested termination from an ordinary training defect.
+    3. Signal registration is process-global but Trainer stages and launch contexts may nest. A registration depth prevents an inner teardown from restoring the caller's handler while an outer lifecycle still depends on SyntheticMind ownership.
+    4. Distributed logical-OR decisions are safe only when every rank reaches the collective in the same order. Unrepeated prediction partitions can contain different batch counts, so per-batch signal reduction deadlocks even though fit, validation, and test currently iterate equally.
+    5. Truthful last-batch state for an unsized iterable requires one-batch lookahead. Catching `StopIteration` after processing the previous batch is too late for gradient accumulation, `no_sync`, validation cadence, or batch hooks that require the final boundary during execution.
+    6. A finite batch limit must make the limited batch final without reading one additional source item. This matters for stateful streams, expensive generators, remote readers, and exact checkpoint continuation even when the extra item would otherwise be discarded.
+    7. `is_last_batch` is runtime control state rather than presentation metadata. It must be set before `on_train_batch_start`, forced by the standard `-1` early-exit response, retained after fit for inspection, and transferred from multiprocessing workers to their parent.
+    8. Process launchers require bidirectional signal semantics: the dormant parent must forward termination to children, and a child signal exit must return termination state rather than being mislabeled as a generic distributed worker crash.

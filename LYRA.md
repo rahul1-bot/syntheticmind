@@ -229,3 +229,12 @@
     4. Custom strategies retain the inheritance boundary and receive the exact `empty_init` value, allowing future FSDP or model-parallel strategies to replace allocation semantics without changing user code.
     5. CPU, MPS, state restoration, true and mixed precision, composite module construction, and two-process fork execution establish the currently supported runtime contract without a linter.
     6. The next sequential runtime boundary is process-signal receipt and data-fetcher last-batch truth, followed by multiple-dataloader capability rather than public aliases detached from execution.
+
+| Strategic Note | Termination and Batch-Boundary Integrity | Date: 19 August 2026 | Time: 07:42 PM | Name: Ghost |
+
+    1. ✅ SyntheticMind now converts operating-system termination into a cooperative Trainer lifecycle: receipt is recorded immediately, active local workers are notified, and the standard exit status is raised only from a safe execution boundary.
+    2. Signal ownership remains reversible and compatible with user process state. Existing callable handlers are composed, registrations may nest, spawned state is clean, and teardown restores only a handler still owned by SyntheticMind.
+    3. ✅ Final-batch state is now established before user batch hooks and model execution for both sized and unsized data, allowing accumulation, distributed synchronization, validation cadence, and inherited hook inspection to consume one truthful boundary.
+    4. Distributed signal agreement occurs only where every rank is guaranteed to participate. Unequal prediction partitions proved that per-batch collectives are invalid even when the decision itself appears harmless.
+    5. CPU, MPS, two-rank Gloo, unequal distributed prediction, and every supported local process launcher establish the available execution contract; scheduler-managed requeue remains intentionally outside the current core signal capability.
+    6. The next sequential capability is multiple dataloaders, including public plural loader surfaces, deterministic combined iteration, dataloader identity, batch limits, metrics, prediction ordering, and distributed behavior.

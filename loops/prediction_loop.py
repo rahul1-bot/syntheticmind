@@ -31,6 +31,7 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import Module
 from syntheticmind.loops.batch_limits import resolve_batch_limit
+from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
@@ -85,6 +86,7 @@ class PredictionLoop(Loop):
         module._running_stage = "predicting"
         total_batches: int | None = self._safe_len(predict_dataloader)
         max_batches: int | None = self._resolve_limit_batches(total_batches)
+        trainer._raise_if_sigterm()
         if max_batches == 0:
             module._reset_logged_metrics()
             return []
@@ -122,13 +124,19 @@ class PredictionLoop(Loop):
 
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_predict_dataloader"):
-            dataloader_iterator: Iterator[Batch] = iter(predict_dataloader)
+            data_fetcher: _DataFetcher = _DataFetcher(
+                predict_dataloader,
+                max_batches,
+                sized=total_batches is not None
+            )
+            dataloader_iterator: Iterator[Batch] = iter(data_fetcher)
         trainer._record_dataloader_iterator_creation_time(
             "predicting",
             time.perf_counter() - dataloader_iterator_start_time
         )
         batch_idx: int = -1
-        while True:
+        while not data_fetcher.done:
+            trainer._raise_if_sigterm(synchronize=False)
             dataloader_fetch_start_time: float = time.perf_counter()
             try:
                 with trainer.profiler.profile(
@@ -142,8 +150,6 @@ class PredictionLoop(Loop):
                 time.perf_counter() - dataloader_fetch_start_time
             )
             batch_idx += 1
-            if max_batches is not None and batch_idx >= max_batches:
-                break
 
             batch: Batch = trainer.precision_plugin.convert_input(batch)
 
@@ -270,6 +276,7 @@ class PredictionLoop(Loop):
         module_mode.restore(module)
 
         module._reset_logged_metrics()
+        trainer._raise_if_sigterm()
         return all_predictions
 
     @staticmethod

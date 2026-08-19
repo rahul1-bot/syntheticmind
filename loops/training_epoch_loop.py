@@ -57,6 +57,7 @@ from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.core.optimizer import SyntheticOptimizer, do_nothing_closure
 from syntheticmind.loops.batch_limits import resolve_batch_limit
+from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
@@ -189,13 +190,18 @@ class TrainingEpochLoop(Loop):
         self._epoch_start_rng_state: CheckpointDict | None = None
         self._resume_rng_state: CheckpointDict | None = None
         self._resume_checkpoint_rng_state: CheckpointDict | None = None
+        self.is_last_batch: bool = False
 
     def reset_on_run(self) -> None:
         # Clears the mid-epoch resume markers at the start of a new run so a
         # fresh run never replays batch positions recorded by a previous one.
-        self._completed_batches: int = 0
-        self._total_batches_processed: int = 0
-        self._has_entered_batch_loop: bool = False
+        self.reset_on_teardown()
+        self.is_last_batch = False
+
+    def reset_on_teardown(self) -> None:
+        self._completed_batches = 0
+        self._total_batches_processed = 0
+        self._has_entered_batch_loop = False
         self._resume_rng_state = None
         self._resume_checkpoint_rng_state = None
 
@@ -250,14 +256,19 @@ class TrainingEpochLoop(Loop):
         self._has_entered_batch_loop: bool = True
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_train_dataloader"):
-            train_iterator: Iterator[Batch] = iter(train_dataloader)
+            data_fetcher: _DataFetcher = _DataFetcher(
+                train_dataloader,
+                max_batches,
+                sized=total_batches is not None
+            )
+            train_iterator: Iterator[Batch] = iter(data_fetcher)
         trainer._record_dataloader_iterator_creation_time(
             "training",
             time.perf_counter() - dataloader_iterator_start_time
         )
         batch_idx: int = -1
-        dataloader_exhausted: bool = False
-        while True:
+        while not data_fetcher.done:
+            trainer._raise_if_sigterm()
             if self._max_steps_reached(state):
                 break
             if trainer.should_stop and trainer.fit_loop._can_stop_early(state):
@@ -269,15 +280,13 @@ class TrainingEpochLoop(Loop):
                 ):
                     batch: Batch = next(train_iterator)
             except StopIteration:
-                dataloader_exhausted = True
                 break
             trainer._record_dataloader_fetch_time(
                 "training",
                 time.perf_counter() - dataloader_fetch_start_time
             )
             batch_idx: int = batch_idx + 1
-            if max_batches is not None and batch_idx >= max_batches:
-                break
+            self.is_last_batch = data_fetcher.done
 
             batch: Batch = trainer.precision_plugin.convert_input(batch)
             # Mid-epoch resume: the already-completed prefix is consumed and
@@ -306,6 +315,7 @@ class TrainingEpochLoop(Loop):
                 batch_idx
             )
             if hook_response == -1:
+                self.is_last_batch = True
                 break
 
             dm: DataModule | None = trainer.datamodule
@@ -369,7 +379,7 @@ class TrainingEpochLoop(Loop):
                 if module.automatic_optimization:
                     assert optimizer is not None
                     is_accumulating: bool = (batch_idx + 1) % self.accumulate_grad_batches != 0
-                    if max_batches is not None and (batch_idx + 1) >= max_batches:
+                    if self.is_last_batch:
                         is_accumulating: bool = False
 
                     no_sync_ctx: AbstractContextManager[None] = nullcontext()
@@ -427,9 +437,7 @@ class TrainingEpochLoop(Loop):
 
             tail_is_accumulating: bool = is_accumulating
 
-            is_last_batch: bool = (
-                max_batches is not None and batch_idx + 1 >= max_batches
-            )
+            is_last_batch: bool = self.is_last_batch
             if trainer._validation_schedule.should_validate(
                 state.current_epoch,
                 batch_idx,
@@ -500,19 +508,6 @@ class TrainingEpochLoop(Loop):
             epoch_logger_names,
             epoch_progress_bar_names
         )
-        if (
-            dataloader_exhausted
-            and batch_idx >= 0
-            and trainer._validation_schedule.requires_unsized_epoch_end
-            and trainer._validation_schedule.is_epoch_eligible(state.current_epoch)
-        ):
-            self._run_scheduled_validation(
-                trainer,
-                module,
-                state,
-                False,
-                True
-            )
 
     def _make_autocast_context(
         self,

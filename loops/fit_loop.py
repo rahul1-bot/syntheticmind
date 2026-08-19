@@ -85,6 +85,7 @@ class FitLoop(Loop):
         assert self.epoch_loop is not None
         total_train_batches: int | None = trainer._total_train_batches
         max_train_batches: int | None = self.epoch_loop._resolve_limit_batches(total_train_batches)
+        trainer._raise_if_sigterm()
         if (
             self._max_epochs_reached(state)
             or self._max_steps_reached(state)
@@ -105,6 +106,7 @@ class FitLoop(Loop):
         )
 
         while not self._max_epochs_reached(state) and not self._max_steps_reached(state):
+            trainer._raise_if_sigterm()
             if self.should_stop or (trainer.should_stop and self._can_stop_early(state)):
                 break
             epoch: int = state.current_epoch
@@ -126,6 +128,7 @@ class FitLoop(Loop):
             trainer._reset_progress_bar_metrics("training")
             trainer._reset_progress_bar_metrics("validating")
             module.train()
+            self.epoch_loop.is_last_batch = False
 
             trainer._call_callback_hooks(
                 module,
@@ -179,6 +182,7 @@ class FitLoop(Loop):
 
             state.increment_epoch()
             module._current_epoch = state.current_epoch
+            trainer._raise_if_sigterm()
 
             # A stop raised at trainer level (early stopping, strategies)
             # propagates to the loop-local flag, ending the epoch sequence
@@ -192,6 +196,7 @@ class FitLoop(Loop):
             callback_group=callbacks
         )
         trainer._call_module_hook(module, "on_train_end", module.on_train_end)
+        trainer._raise_if_sigterm()
 
     def _max_epochs_reached(self, state: TrainerState) -> bool:
         return self.max_epochs != -1 and state.current_epoch >= self.max_epochs

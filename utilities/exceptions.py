@@ -17,12 +17,15 @@
 #
 # Author: Rahul Sawhney
 
+import signal
+
 __all__: list[str] = [
     "FrameworkError",
     "MisconfigurationError",
     "TrainingInterruptedError",
     "CheckpointError",
     "DistributedError",
+    "SIGTERMException",
 ]
 
 
@@ -64,3 +67,8 @@ class DistributedError(FrameworkError):
     def __init__(self, message: str) -> None:
         # Stamps the distributed prefix so the failure category is visible in logs.
         super().__init__(f"Distributed error: {message}")
+
+
+class SIGTERMException(SystemExit):
+    def __init__(self) -> None:
+        super().__init__(128 + signal.SIGTERM)

@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.multiprocessing as mp
-from torch.multiprocessing.spawn import ProcessContext, start_processes
+from torch.multiprocessing.spawn import (
+    ProcessContext,
+    ProcessExitedException,
+    start_processes
+)
 
 from syntheticmind.accelerators.cpu import CPUAccelerator
 from syntheticmind.strategies.launchers.contracts import (
@@ -22,7 +26,7 @@ from syntheticmind.strategies.launchers.state_transfer import (
     _StageInvoker,
     _WorkerStateTransfer
 )
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.utilities.types import TrainerStage
 
 if TYPE_CHECKING:
@@ -131,6 +135,14 @@ class _MultiprocessingLauncher:
     def processes(self) -> list[mp.Process]:
         return list(self._processes)
 
+    def kill(self, signum: int) -> None:
+        for process in self._processes:
+            if process.pid is not None and process.is_alive():
+                try:
+                    os.kill(process.pid, signum)
+                except ProcessLookupError:
+                    continue
+
     def _validate_launch(
         self,
         trainer: Trainer,
@@ -193,8 +205,15 @@ class _MultiprocessingLauncher:
             self._processes = list(process_context.processes)
             while not process_context.join():
                 pass
-        except BaseException:
+        except BaseException as exception:
             trainer.state.interrupt()
+            process_received_sigterm: bool = (
+                isinstance(exception, ProcessExitedException)
+                and exception.exit_code in {-15, 143}
+            )
+            if trainer.received_sigterm or process_received_sigterm:
+                trainer._signal_connector.received_sigterm = True
+                raise SIGTERMException() from exception
             raise
         finally:
             self._processes.clear()

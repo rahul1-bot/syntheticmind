@@ -55,41 +55,52 @@ class _ProcessLauncher:
         datamodule: DataModule,
         stage_kwargs: dict[str, object]
     ) -> StageResult:
-        if not self.should_launch:
-            return _StageInvoker.invoke(
-                stage,
-                trainer,
-                module,
-                datamodule,
-                stage_kwargs
-            )
-        if self._strategy.num_nodes != 1:
-            raise MisconfigurationError(
-                "Local process launch supports num_nodes=1. Launch multi-node jobs through "
-                "torchrun or a cluster scheduler that exports the distributed environment."
-            )
-        if stage == "predict" and self._start_method != "popen":
-            return_predictions: object = stage_kwargs.get("return_predictions", True)
-            if return_predictions is True:
-                raise MisconfigurationError(
-                    "Returning predictions is not supported by multiprocessing DDP launch. "
-                    "Set return_predictions=False, use strategy='ddp', or launch with torchrun."
+        with trainer._signal_connector.launch_context():
+            trainer._raise_if_sigterm()
+            if not self.should_launch:
+                result: StageResult = _StageInvoker.invoke(
+                    stage,
+                    trainer,
+                    module,
+                    datamodule,
+                    stage_kwargs
                 )
-        if self._start_method == "popen":
-            return self._subprocess_launcher.launch(
-                stage,
-                trainer,
-                module,
-                datamodule,
-                stage_kwargs
-            )
-        return self._multiprocessing_launcher.launch(
-            stage,
-            trainer,
-            module,
-            datamodule,
-            stage_kwargs
-        )
+                trainer._raise_if_sigterm()
+                return result
+            if self._strategy.num_nodes != 1:
+                raise MisconfigurationError(
+                    "Local process launch supports num_nodes=1. Launch multi-node jobs through "
+                    "torchrun or a cluster scheduler that exports the distributed environment."
+                )
+            if stage == "predict" and self._start_method != "popen":
+                return_predictions: object = stage_kwargs.get("return_predictions", True)
+                if return_predictions is True:
+                    raise MisconfigurationError(
+                        "Returning predictions is not supported by multiprocessing DDP launch. "
+                        "Set return_predictions=False, use strategy='ddp', or launch with torchrun."
+                    )
+            if self._start_method == "popen":
+                result = self._subprocess_launcher.launch(
+                    stage,
+                    trainer,
+                    module,
+                    datamodule,
+                    stage_kwargs
+                )
+            else:
+                result = self._multiprocessing_launcher.launch(
+                    stage,
+                    trainer,
+                    module,
+                    datamodule,
+                    stage_kwargs
+                )
+            trainer._raise_if_sigterm()
+            return result
+
+    def kill(self, signum: int) -> None:
+        self._subprocess_launcher.kill(signum)
+        self._multiprocessing_launcher.kill(signum)
 
     @property
     def start_method(self) -> ProcessStartMethod:

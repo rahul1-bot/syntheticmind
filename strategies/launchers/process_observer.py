@@ -54,12 +54,16 @@ class _ChildProcessObserver(threading.Thread):
             f"{return_code}; terminating the local process group.\n"
         )
         sys.stderr.flush()
+        received_sigterm: bool = return_code in {-signal.SIGTERM, 128 + signal.SIGTERM}
         for process in self._subprocesses:
             if process.poll() is None:
-                process.kill()
-        termination_signal: signal.Signals = getattr(
-            signal,
-            "SIGKILL",
+                if received_sigterm:
+                    process.terminate()
+                else:
+                    process.kill()
+        termination_signal: signal.Signals = (
             signal.SIGTERM
+            if received_sigterm
+            else getattr(signal, "SIGKILL", signal.SIGTERM)
         )
         os.kill(self._parent_pid, termination_signal)

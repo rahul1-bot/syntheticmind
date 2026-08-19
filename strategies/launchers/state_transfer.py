@@ -64,6 +64,8 @@ class _WorkerStateTransfer:
             total_val_batches=trainer._total_val_batches,
             total_test_batches=trainer._total_test_batches,
             total_predict_batches=trainer._total_predict_batches,
+            received_sigterm=trainer.received_sigterm,
+            is_last_batch=trainer.is_last_batch,
             global_state=_GlobalState.capture()
         )
 
@@ -114,6 +116,11 @@ class _WorkerStateTransfer:
         trainer._total_val_batches = worker_output.total_val_batches
         trainer._total_test_batches = worker_output.total_test_batches
         trainer._total_predict_batches = worker_output.total_predict_batches
+        trainer._signal_connector.received_sigterm = (
+            trainer.received_sigterm or worker_output.received_sigterm
+        )
+        if trainer.fit_loop.epoch_loop is not None:
+            trainer.fit_loop.epoch_loop.is_last_batch = worker_output.is_last_batch
         worker_output.global_state.restore()
 
     @classmethod
