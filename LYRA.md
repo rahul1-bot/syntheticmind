@@ -124,3 +124,12 @@
     4. The current PyTorch autocast cache defect around nested `no_grad` and `inference_mode` contexts is guarded explicitly, preventing a cached gradient-disabled cast from poisoning a later gradient-enabled forward in the same precision context.
     5. FP8 Transformer Engine configuration and optional dependency boundaries are represented truthfully, while CUDA and real FP8 execution remain hardware-unverified and may not be claimed from CPU, MPS, or mocked evidence.
     6. The next dependency-ordered boundary is Trainer execution context: standard inference-mode selection, anomaly detection, benchmarking, and deterministic-algorithm semantics must be reconciled before higher strategy and integration layers expand.
+
+| Strategic Note | Execution Context Integrity | Date: 19 August 2026 | Time: 03:10 PM | Name: Ghost |
+
+    1. ✅ Standard deterministic, benchmark, inference-mode, and anomaly-detection controls are now executable Trainer behavior rather than inert configuration vocabulary.
+    2. Random seeding and deterministic execution are separate authorities. Reproducing random streams no longer changes performance or deterministic-algorithm policy behind the user's back.
+    3. Evaluation context selection preserves the meaningful distinction between inference mode and no-gradient mode, including gradient re-entry for specialized validation algorithms and the Gloo compatibility boundary.
+    4. Anomaly detection reaches the real backward execution path and restores process state after failure, while deterministic and benchmark settings survive spawned worker transfer.
+    5. CPU, MPS, forked Gloo, and spawned DDP evidence establishes the supported local contract; CUDA-specific deterministic kernels remain bounded by the unavailable NVIDIA runtime.
+    6. The next phase must resume the pinned Trainer capability surface in dependency order and select the earliest unresolved execution collaborator rather than introducing isolated convenience flags.

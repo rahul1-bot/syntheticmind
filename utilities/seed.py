@@ -51,19 +51,23 @@ class SeedManager:
         #         repeatability. Default: ``False``.
         if deterministic:
             os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        cls.seed(seed)
+        torch.use_deterministic_algorithms(deterministic, warn_only=deterministic)
+
+        if deterministic:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+        else:
+            torch.backends.cudnn.deterministic = False
+            torch.backends.cudnn.benchmark = True
+
+    @classmethod
+    def seed(cls, seed: int) -> None:
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-        torch.use_deterministic_algorithms(deterministic, warn_only=deterministic)
         os.environ["PYTHONHASHSEED"] = str(seed)
-
-        if deterministic:
-            torch.backends.cudnn.deterministic: bool = True
-            torch.backends.cudnn.benchmark: bool = False
-        else:
-            torch.backends.cudnn.deterministic: bool = False
-            torch.backends.cudnn.benchmark: bool = True
 
     @classmethod
     def worker_init_fn(cls, worker_id: int) -> None:

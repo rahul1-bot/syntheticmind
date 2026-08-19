@@ -45,7 +45,7 @@ import warnings
 from collections.abc import Callable, Iterator, Sized
 from datetime import timedelta
 from pathlib import Path
-from typing import Never, cast
+from typing import Literal, Never, cast
 
 import torch
 from loguru import logger as log
@@ -96,6 +96,7 @@ from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.optimizers import _optimizers_to_device
 from syntheticmind.utilities.seed import SeedManager
+from syntheticmind.utilities.torch_flags import configure_torch_flags
 from syntheticmind.utilities.types import (
     CheckpointDict,
     ClipAlgorithm,
@@ -247,8 +248,11 @@ class Trainer:
         accumulate_grad_batches: int = 1,
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None,
-        deterministic: bool = False,
+        deterministic: bool | Literal["warn"] | None = None,
+        benchmark: bool | None = None,
+        inference_mode: bool = True,
         use_distributed_sampler: bool = True,
+        detect_anomaly: bool = False,
         plugins: Precision | list[Precision] | None = None,
         sync_batchnorm: bool = False,
         reload_dataloaders_every_n_epochs: int = 0,
@@ -458,7 +462,19 @@ class Trainer:
         self.overfit_batches: int | float = resolved_overfit_batches
         self.use_distributed_sampler: bool = use_distributed_sampler
         self.sync_batchnorm: bool = sync_batchnorm
-        self.deterministic: bool = deterministic
+        if type(inference_mode) is not bool:
+            raise TypeError(
+                f"`inference_mode` must be a bool, got {inference_mode!r}."
+            )
+        if type(detect_anomaly) is not bool:
+            raise TypeError(
+                f"`detect_anomaly` must be a bool, got {detect_anomaly!r}."
+            )
+        configure_torch_flags(deterministic, benchmark)
+
+        self.deterministic: bool | Literal["warn"] | None = deterministic
+        self.inference_mode: bool = inference_mode
+        self._detect_anomaly: bool = detect_anomaly
         self.resume_from_checkpoint: Path | None = (
             Path(resume_from_checkpoint) if resume_from_checkpoint is not None else None
         )
@@ -469,7 +485,7 @@ class Trainer:
             raise MisconfigurationError("log_every_n_steps must be >= 1")
 
         if seed is not None:
-            SeedManager.seed_everything(seed, deterministic=deterministic)
+            SeedManager.seed(seed)
 
         configured_parallel_devices: list[torch.device] | None = None
         resolved_accelerator_input: str | Accelerator = accelerator
@@ -603,9 +619,17 @@ class Trainer:
             gradient_clip_algorithm=self.gradient_clip_algorithm,
             log_every_n_steps=log_every_n_steps
         )
-        self.validate_loop: EvaluationLoop = EvaluationLoop(stage="validate")
-        self.test_loop: EvaluationLoop = EvaluationLoop(stage="test")
-        self.predict_loop: PredictionLoop = PredictionLoop()
+        self.validate_loop: EvaluationLoop = EvaluationLoop(
+            stage="validate",
+            inference_mode=inference_mode
+        )
+        self.test_loop: EvaluationLoop = EvaluationLoop(
+            stage="test",
+            inference_mode=inference_mode
+        )
+        self.predict_loop: PredictionLoop = PredictionLoop(
+            inference_mode=inference_mode
+        )
 
         self._connect_loops()
 
@@ -926,7 +950,8 @@ class Trainer:
             self.state.set_running_stage("training")
             module._running_stage: str | None = "training"
 
-            self.fit_loop.run()
+            with torch.autograd.set_detect_anomaly(self._detect_anomaly):
+                self.fit_loop.run()
 
             # End hooks mirror the start order reversed: the module first,
             # then the callbacks.

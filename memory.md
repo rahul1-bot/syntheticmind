@@ -168,3 +168,13 @@
     6. Precision-connected wrappers and the underlying user `Module` have different identities. The strategy-managed wrapper owns forward execution, while hook dispatch, backward overrides, optimizer ownership, checkpoint weights, and public module access remain attached to the underlying `Module`.
     7. Precision-plugin state must travel through ordinary checkpoints and multiprocessing worker reconciliation. A working scaler in a worker process is not sufficient if its scale or custom plugin state disappears when control returns to the parent.
     8. CPU and MPS execution can validate universal float and bfloat behavior, mixed-precision ordering, and process integration. CUDA AMP, NVIDIA fused kernels, and Transformer Engine FP8 require later NVIDIA hardware evidence; configuration mocks cannot establish numerical execution correctness.
+
+| Memory | PyTorch Execution Context Semantics | Date: 19 August 2026 | Time: 03:10 PM | Name: Ghost |
+
+    1. `deterministic=None` is not equivalent to `False`. `None` preserves the process's current deterministic-algorithm state, while explicit `False` disables deterministic algorithms.
+    2. `benchmark=None` preserves the active cuDNN benchmark value unless a truthy deterministic mode requires an unspecified benchmark setting to resolve to `False`. Explicit `benchmark=True` remains explicit and therefore produces a conflict warning rather than being silently overwritten.
+    3. A seed controls random streams; it does not logically control algorithm selection. Coupling the two causes a harmless-looking `seed` parameter to rewrite global performance and correctness policy.
+    4. `torch.inference_mode` and `torch.no_grad` are not cosmetic aliases. No-gradient mode can be locally overridden with `torch.enable_grad`, while inference-mode tensors impose stronger restrictions that are unsuitable for fit validation and current Gloo execution.
+    5. Evaluation context must cover lifecycle hooks, batch transfer, precision contexts, step execution, metric reduction, and end hooks. Wrapping only the step body creates inconsistent extension behavior that users cannot reason about.
+    6. Autograd anomaly detection must surround the closure-driven fit loop because the backward call may occur inside an optimizer closure. Wrapping only `training_step` would miss the operation that exposes the faulty gradient.
+    7. Deterministic flags and RNG state are process-global execution inputs. Spawned workers require explicit restoration, while environment variables such as `CUBLAS_WORKSPACE_CONFIG` propagate through the child process environment.
