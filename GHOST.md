@@ -115,3 +115,13 @@
     6. `ProgressBarCallback.enable`, `ProgressBarCallback.disable`, `is_enabled`, and `is_disabled` provide the standard runtime display controls. Rendering remains restricted to global rank zero and a disabled callback remains silent across later setup calls until explicitly enabled.
     7. Completed-epoch output is deferred until the epoch has passed its module hook and scheduler boundary; a failure within that boundary removes the pending success line. Interruptions and failures clear the active TTY line and emit one compact terminal outcome.
     8. Routine epoch, sanity-check, checkpoint-save, resume, early-stopping, and throughput Loguru information no longer competes with the console. Throughput remains available through the experiment logger, while actionable warning and error paths retain their diagnostic role.
+
+| Architecture Decision | Transactional Stage Teardown | Date: 19 August 2026 | Time: 12:27 PM | Name: Ghost |
+
+    1. Every fit, validation, test, and prediction entry point now dispatches the standard module `setup(stage)` and `teardown(stage)` extension hooks in addition to the existing datamodule and callback lifecycle.
+    2. Stage teardown is one best-effort transaction. Strategy, datamodule, ordinary callbacks, module, logger, and terminal progress cleanup are each attempted even when an earlier component raises.
+    3. The first failure remains the primary exception. Failures from later teardown operations or exception hooks are attached as exception notes so diagnostics are retained without replacing the cause that terminated execution.
+    4. `KeyboardInterrupt`, `SystemExit`, and ordinary runtime exceptions follow the same `BaseException` boundary, preserve their original identity and traceback, and cannot be masked by secondary cleanup failures.
+    5. The progress callback finalizes only after all non-presentation cleanup has succeeded. A teardown failure therefore produces one failed or interrupted outcome and cannot leave a false stage-complete summary.
+    6. Trainer and module stage markers are cleared after every outcome, while interrupted status survives finalization. A Trainer remains reusable after a failed cleanup once the failing collaborator is corrected.
+    7. Focused verification covers normal setup and teardown across all four entry points, simultaneous cleanup and exception-hook failures, runtime-primary preservation, setup failure, fatal base exceptions, terminal outcome truth, logger finalization, repeated Trainer use, and Python compilation without invoking a linter.

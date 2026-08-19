@@ -80,4 +80,13 @@
     10. Unsized loaders retain an unknown horizon and prediction now records its own loader length when available. This distinction is required for honest percentages and estimated completion times.
     11. The concrete renderer is separated from callback lifecycle orchestration. This keeps terminal I/O and formatting independently testable and prevents `ProgressBarCallback` from becoming a combined experiment logger, profiler, timer, and terminal driver.
     12. Successful epoch lines are held pending until a later safe boundary. Failures inside epoch-end and fit-end hooks therefore cannot leave a false completed-epoch or completed-fit claim.
-    13. Trainer cleanup remains a separate unresolved transaction: callback teardown currently precedes datamodule and strategy teardown, so a later cleanup exception can still follow an already emitted stage-complete line. Cleanup must be centralized and made exception-safe before final outcome reporting is fully trustworthy.
+
+| Memory | Exception-Safe Stage Teardown | Date: 19 August 2026 | Time: 12:27 PM | Name: Ghost |
+
+    1. Teardown cannot be implemented as a sequence of unguarded calls because the first failure would skip every later resource owner and can leak distributed, data, callback, module, or logger state.
+    2. Runtime failure and cleanup failure require different ownership. A runtime, setup, interruption, or exit exception remains primary; a teardown-originated failure becomes primary only when stage execution had otherwise succeeded.
+    3. Exception hooks are untrusted extension points and must be isolated individually. One callback, datamodule, or strategy exception hook may fail without preventing the remaining hooks or replacing the original exception.
+    4. Python exception notes preserve secondary failure evidence without fabricating an exception group as the public failure contract. This keeps the first causal exception catchable by its original type while retaining every cleanup diagnosis.
+    5. Presentation cleanup must execute after all resource cleanup because a stage summary is a transactional claim. The terminal may report completion only when strategy, datamodule, ordinary callback, module, and logger teardown have all succeeded.
+    6. Standard module `setup(stage)` and `teardown(stage)` hooks are now real runtime extension points for fit, validation, test, and prediction rather than inherited methods that were present but never dispatched.
+    7. Stage markers must clear after cleanup irrespective of outcome, while interrupted status must survive that clearing. This distinction permits postmortem truth and later Trainer reuse without leaving a live stage attached.

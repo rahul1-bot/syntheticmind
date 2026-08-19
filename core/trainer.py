@@ -44,7 +44,7 @@ import math
 import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Never
 
 import torch
 from loguru import logger as log
@@ -87,9 +87,12 @@ from syntheticmind.utilities.types import (
     ModelOutput,
     Precision,
     RunningStage,
+    TrainerStage,
 )
 
 __all__: list[str] = ["Trainer"]
+
+type _TeardownFailure = tuple[str, BaseException]
 
 
 class _UnrepeatedDistributedSampler(DistributedSampler):
@@ -442,6 +445,7 @@ class Trainer:
         self._last_progress_bar_stage: RunningStage | None = None
         self._dataloader_fetch_time_seconds: dict[RunningStage, float] = {}
         self._dataloader_iterator_creation_time_seconds: dict[RunningStage, float] = {}
+        self._active_exception: BaseException | None = None
 
     def fit(
         self,
@@ -478,6 +482,7 @@ class Trainer:
         # callback metrics, progress counters, or mid-epoch resume markers
         # from an earlier run.
         self.state.set_stage("fit")
+        self._active_exception = None
         self.state.reset_on_run()
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics()
@@ -665,6 +670,7 @@ class Trainer:
             with module._hook_context("setup"):
                 for callback in self.callbacks:
                     callback.setup(self, module, "fit")
+                module.setup("fit")
 
             # The run configuration is announced to the logger from rank zero
             # only, keeping multi-process runs single-writer.
@@ -707,9 +713,7 @@ class Trainer:
         # Interrupts and failures funnel through one handler that marks the
         # trainer state interrupted, offers the exception to the callback,
         # datamodule, and strategy hooks, and re-raises.
-        except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc)
-        except Exception as exception:
+        except BaseException as exception:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not fit_completed:
@@ -717,23 +721,18 @@ class Trainer:
             # Unwind unconditionally, success or failure: end-of-fit hooks,
             # component teardown, and logger finalization all execute so a
             # failed run still releases its resources and flushes its records.
-            with module._hook_context("teardown"):
-                for callback in self.callbacks:
-                    callback.teardown(self, module, "fit")
-            datamodule.teardown("fit")
-            self.strategy.teardown()
-
-            if self.logger is not None:
-                self.logger.finalize()
-
+            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "fit")
             # The module's stage markers are cleared and the epoch loop's
             # resume markers reset, so the module and loops leave fit inert
             # rather than carrying live-run state into later stages.
             module._running_stage: str | None = None
             module._current_fx_name: str | None = None
             self.state.finish()
+            self._active_exception = None
             if self.fit_loop.epoch_loop is not None:
                 self.fit_loop.epoch_loop.reset_on_run()
+            if cleanup_exception is not None:
+                raise cleanup_exception
 
     def validate(
         self,
@@ -755,6 +754,7 @@ class Trainer:
         #     The reduced epoch metrics of the validation pass, keyed by
         #     metric name.
         self.state.set_stage("validate")
+        self._active_exception = None
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("validating")
         self._total_val_batches: int | None = None
@@ -798,26 +798,22 @@ class Trainer:
             with module._hook_context("setup"):
                 for callback in self.callbacks:
                     callback.setup(self, module, "validate")
+                module.setup("validate")
 
             metrics: dict[str, float] = self.validate_loop.run()
             stage_completed: bool = True
-        except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc)
-        except Exception as exception:
+        except BaseException as exception:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
                 module_mode.restore(module)
-            with module._hook_context("teardown"):
-                for callback in self.callbacks:
-                    callback.teardown(self, module, "validate")
-            datamodule.teardown("validate")
-            self.strategy.teardown()
-            if self.logger is not None:
-                self.logger.finalize()
+            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "validate")
             module._running_stage: str | None = None
             module._current_fx_name: str | None = None
             self.state.finish()
+            self._active_exception = None
+            if cleanup_exception is not None:
+                raise cleanup_exception
 
         return metrics
 
@@ -840,6 +836,7 @@ class Trainer:
         #     The reduced epoch metrics of the test pass, keyed by metric
         #     name.
         self.state.set_stage("test")
+        self._active_exception = None
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("testing")
         self._total_test_batches: int | None = None
@@ -883,26 +880,22 @@ class Trainer:
             with module._hook_context("setup"):
                 for callback in self.callbacks:
                     callback.setup(self, module, "test")
+                module.setup("test")
 
             metrics: dict[str, float] = self.test_loop.run()
             stage_completed: bool = True
-        except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc)
-        except Exception as exception:
+        except BaseException as exception:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
                 module_mode.restore(module)
-            with module._hook_context("teardown"):
-                for callback in self.callbacks:
-                    callback.teardown(self, module, "test")
-            datamodule.teardown("test")
-            self.strategy.teardown()
-            if self.logger is not None:
-                self.logger.finalize()
+            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "test")
             module._running_stage: str | None = None
             module._current_fx_name: str | None = None
             self.state.finish()
+            self._active_exception = None
+            if cleanup_exception is not None:
+                raise cleanup_exception
 
         return metrics
 
@@ -932,6 +925,7 @@ class Trainer:
         #     The prediction-step outputs in batch order, or an empty list
         #     when retention is disabled.
         self.state.set_stage("predict")
+        self._active_exception = None
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("predicting")
         self._total_predict_batches: int | None = None
@@ -975,27 +969,23 @@ class Trainer:
             with module._hook_context("setup"):
                 for callback in self.callbacks:
                     callback.setup(self, module, "predict")
+                module.setup("predict")
 
             self.predict_loop.return_predictions: bool = return_predictions
             predictions: list[ModelOutput] = self.predict_loop.run()
             stage_completed: bool = True
-        except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc)
-        except Exception as exception:
+        except BaseException as exception:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
                 module_mode.restore(module)
-            with module._hook_context("teardown"):
-                for callback in self.callbacks:
-                    callback.teardown(self, module, "predict")
-            datamodule.teardown("predict")
-            self.strategy.teardown()
-            if self.logger is not None:
-                self.logger.finalize()
+            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "predict")
             module._running_stage: str | None = None
             module._current_fx_name: str | None = None
             self.state.finish()
+            self._active_exception = None
+            if cleanup_exception is not None:
+                raise cleanup_exception
 
         return predictions
 
@@ -1286,27 +1276,150 @@ class Trainer:
                 module.on_load_checkpoint(checkpoint)
             for callback in self.callbacks:
                 callback.on_load_checkpoint(self, module, checkpoint)
+
     def _handle_exception(
         self,
         module: Module,
         datamodule: DataModule,
         exception: BaseException
-    ) -> None:
+    ) -> Never:
         # Central exception path for every entry point: marks the trainer
         # state interrupted, offers the exception to the callback, datamodule,
         # and strategy exception hooks so they can persist state or release
         # resources, and then re-raises. KeyboardInterrupt re-raises through
         # the bare raise so its traceback is preserved unchanged.
+        self._active_exception = exception
+        self._notify_exception(module, datamodule, exception)
+        raise
+
+    def _notify_exception(
+        self,
+        module: Module,
+        datamodule: DataModule,
+        exception: BaseException
+    ) -> None:
         self.state.interrupt()
-        with module._hook_context("on_exception"):
-            for callback in self.callbacks:
-                callback.on_exception(self, module, exception)
-        datamodule.on_exception(exception)
-        self.strategy.on_exception(exception)
-        if isinstance(exception, KeyboardInterrupt):
-            raise
-        else:
-            raise exception
+        for index, callback in enumerate(self.callbacks):
+            try:
+                with module._hook_context("on_exception"):
+                    callback.on_exception(self, module, exception)
+            except BaseException as hook_exception:
+                self._add_exception_note(
+                    exception,
+                    f"callback[{index}].on_exception",
+                    hook_exception
+                )
+        try:
+            datamodule.on_exception(exception)
+        except BaseException as hook_exception:
+            self._add_exception_note(exception, "datamodule.on_exception", hook_exception)
+        try:
+            self.strategy.on_exception(exception)
+        except BaseException as hook_exception:
+            self._add_exception_note(exception, "strategy.on_exception", hook_exception)
+
+    def _teardown_stage(
+        self,
+        module: Module,
+        datamodule: DataModule,
+        stage: TrainerStage
+    ) -> BaseException | None:
+        from syntheticmind.callbacks.progress_bar import ProgressBarCallback
+
+        failures: list[_TeardownFailure] = []
+        progress_callbacks: list[tuple[int, ProgressBarCallback]] = []
+        self._attempt_teardown("strategy.teardown", self.strategy.teardown, failures)
+        self._attempt_teardown(
+            "datamodule.teardown",
+            lambda: datamodule.teardown(stage),
+            failures
+        )
+        for index, callback in enumerate(self.callbacks):
+            if isinstance(callback, ProgressBarCallback):
+                progress_callbacks.append((index, callback))
+                continue
+            self._attempt_teardown(
+                f"callback[{index}].teardown",
+                lambda callback=callback: self._call_callback_teardown(
+                    callback,
+                    module,
+                    stage
+                ),
+                failures
+            )
+        self._attempt_teardown(
+            "module.teardown",
+            lambda: self._call_module_teardown(module, stage),
+            failures
+        )
+        if self.logger is not None:
+            self._attempt_teardown("logger.finalize", self.logger.finalize, failures)
+
+        exception_notified: bool = False
+        if failures and self._active_exception is None:
+            self._notify_exception(module, datamodule, failures[0][1])
+            exception_notified = True
+
+        for index, callback in progress_callbacks:
+            self._attempt_teardown(
+                f"callback[{index}].teardown",
+                lambda callback=callback: self._call_callback_teardown(
+                    callback,
+                    module,
+                    stage
+                ),
+                failures
+            )
+
+        if not failures:
+            return None
+        if self._active_exception is not None:
+            for label, cleanup_exception in failures:
+                self._add_exception_note(self._active_exception, label, cleanup_exception)
+            return None
+
+        primary_exception: BaseException = failures[0][1]
+        for label, cleanup_exception in failures[1:]:
+            self._add_exception_note(primary_exception, label, cleanup_exception)
+        if not exception_notified:
+            self._notify_exception(module, datamodule, primary_exception)
+        return primary_exception
+
+    def _attempt_teardown(
+        self,
+        label: str,
+        action: Callable[[], None],
+        failures: list[_TeardownFailure]
+    ) -> None:
+        try:
+            action()
+        except BaseException as exception:
+            failures.append((label, exception))
+
+    def _call_callback_teardown(
+        self,
+        callback: Callback,
+        module: Module,
+        stage: TrainerStage
+    ) -> None:
+        with module._hook_context("teardown"):
+            callback.teardown(self, module, stage)
+
+    def _call_module_teardown(self, module: Module, stage: TrainerStage) -> None:
+        with module._hook_context("teardown"):
+            module.teardown(stage)
+
+    def _add_exception_note(
+        self,
+        exception: BaseException,
+        label: str,
+        secondary_exception: BaseException
+    ) -> None:
+        detail: str = " ".join(str(secondary_exception).split())
+        description: str = type(secondary_exception).__name__
+        if detail:
+            description = f"{description}: {detail}"
+        exception.add_note(f"{label} raised while handling the stage failure: {description}")
 
     def _validate_callback_state_keys(self) -> None:
         # Enforces state-key uniqueness across stateful callbacks before
