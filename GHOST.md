@@ -407,3 +407,13 @@
     5. Checkpoint selection occurs before process launch so omitted-model intent and stateful property ownership survive spawn and subprocess boundaries without adding private parameters to the public stage signatures.
     6. Focused verification covers best and last weights, explicit and omitted models, stateful and overridden paths, constructor-level resume precedence, validation, test, prediction, CPU, MPS, spawn DDP, subprocess DDP, stateful-loader continuation, and direct multiple-dataloader regressions.
     7. Registry and HPC checkpoint aliases remain explicitly unavailable because their corresponding product integrations are outside current scope. The next Trainer phase implements the accepted `verbose` evaluation-result contract through the existing minimal terminal system.
+
+| Architecture Decision | Minimal Evaluation Result Rendering | Date: 19 August 2026 | Time: 09:38 PM | Name: Ghost |
+
+    1. The established `verbose` parameter now controls complete standalone validation and test result rendering. `verbose=False` suppresses the result record, while fit-owned validation and sanity checking remain silent because they do not enter the standalone stage boundary.
+    2. SyntheticMind renders one formal record per dataloader through its existing ConsoleRenderer: a stage label followed by deterministically ordered metric-value pairs. Multiple loaders use positional identity without exposing automatic metric suffixes in the display.
+    3. The renderer uses no table borders, color dependency, animation, or dense runtime telemetry. Numeric formatting is shared with the progress system, including concise finite values, scientific notation, and explicit non-finite values.
+    4. Records wrap to terminal width without dropping fields or introducing ellipsis. Non-interactive execution retains the same bounded, plain-text output for logs, captured streams, subprocesses, and continuous-integration systems.
+    5. Rank zero exclusively owns rendering. Parent-side and worker-side execution therefore produce one result record under single-device, spawn, and subprocess strategies without altering returned metric mappings.
+    6. When the progress callback is active, its standalone completion line omits duplicate metrics under `verbose=True`; the subsequent result record owns complete metric presentation while the completion line retains stage duration.
+    7. Focused verification covers deterministic order, silent and empty output, multiple dataloaders, suffix removal, long names, terminal wrapping, finite and non-finite values, progress de-duplication, fit and sanity silence, CPU, MPS, spawn, and subprocess execution.

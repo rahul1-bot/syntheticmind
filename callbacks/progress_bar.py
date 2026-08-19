@@ -429,9 +429,17 @@ class ProgressBarCallback(Callback):
             validation_metrics: dict[str, float] = trainer._get_progress_bar_metrics("validating")
             metrics = validation_metrics or trainer._get_progress_bar_metrics("training")
         elif stage == "validate":
-            metrics = trainer._get_progress_bar_metrics("validating")
+            metrics = (
+                {}
+                if trainer.validate_loop.verbose
+                else trainer._get_progress_bar_metrics("validating")
+            )
         elif stage == "test":
-            metrics = trainer._get_progress_bar_metrics("testing")
+            metrics = (
+                {}
+                if trainer.test_loop.verbose
+                else trainer._get_progress_bar_metrics("testing")
+            )
         else:
             metrics = {}
         parts: list[str] = [f"✓ {stage} complete"]

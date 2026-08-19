@@ -269,3 +269,10 @@
     2. The stateful `trainer.ckpt_path` property, explicit stage override, best ownership, and last-checkpoint fallback now have independent and executable meanings across local and distributed launches.
     3. Vendor registry and HPC aliases were not imitated. SyntheticMind retains the universal `ckpt_path` contract without inheriting external product ownership.
     4. The next phase gives `verbose` its promised runtime effect through concise evaluation-result rendering and keeps internal fit validation silent.
+
+| Strategic Note | Evaluation Output Discipline | Date: 19 August 2026 | Time: 09:38 PM | Name: Ghost |
+
+    1. ✅ Standalone validation and test now honor `verbose` through compact, complete metric records rather than a dense compatibility table.
+    2. Output is deterministic, width-aware, dependency-free, rank-zero-owned, and identical in semantic content across interactive terminals, captured streams, MPS, spawn, and subprocess execution.
+    3. Internal fit validation remains silent, and the progress completion line avoids repeating metrics that the verbose result record already owns.
+    4. The next action is a renewed Trainer semantic audit for runtime contracts not detectable through signature comparison before moving to the next core module.

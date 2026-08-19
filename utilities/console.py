@@ -1,6 +1,7 @@
 import math
 import shutil
 import sys
+import textwrap
 import time
 from typing import TextIO
 
@@ -109,6 +110,43 @@ class ConsoleRenderer:
         except (OSError, ValueError):
             self._enabled = False
 
+    def write_record(self, label: str, fields: list[str]) -> None:
+        record: str = " · ".join((label, *fields))
+        lines: list[str] = textwrap.wrap(
+            record,
+            width=self._terminal_width(),
+            subsequent_indent="  ",
+            break_long_words=True,
+            break_on_hyphens=False
+        )
+        for line in lines or [label]:
+            self.write_permanent(line)
+
+    def write_metrics(
+        self,
+        stage: str,
+        results: list[dict[str, float]]
+    ) -> None:
+        result_count: int = len(results)
+        for result_index, result in enumerate(results):
+            if not result:
+                continue
+            label: str = (
+                f"{stage} results"
+                if result_count == 1
+                else f"{stage} {result_index + 1}/{result_count}"
+            )
+            fields: list[str] = []
+            for name, value in sorted(
+                result.items(),
+                key=lambda item: item[0].split("/dataloader_idx_", 1)[0]
+            ):
+                display_name: str = " ".join(
+                    name.split("/dataloader_idx_", 1)[0].split()
+                )
+                fields.append(f"{display_name} {self.format_metric(value)}")
+            self.write_record(label, fields)
+
     def clear_live(self) -> None:
         if not self._enabled or not self._interactive or not self._active_line:
             return
@@ -120,7 +158,10 @@ class ConsoleRenderer:
             self._enabled = False
 
     def _fit_terminal(self, line: str) -> str:
-        width: int = max(20, shutil.get_terminal_size(fallback=(100, 24)).columns)
+        width: int = self._terminal_width()
         if len(line) <= width:
             return line
         return f"{line[:width - 1]}…"
+
+    def _terminal_width(self) -> int:
+        return max(20, shutil.get_terminal_size(fallback=(100, 24)).columns)

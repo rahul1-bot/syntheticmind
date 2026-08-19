@@ -83,6 +83,7 @@ class EvaluationLoop(Loop):
         super().__init__()
         self.stage: Literal["validate", "test"] = stage
         self.inference_mode: bool = inference_mode
+        self.verbose: bool = True
         self.epoch_metrics: dict[str, float] = {}
         self.results: list[dict[str, float]] = []
 

@@ -343,3 +343,11 @@
     3. Stage-level path arguments outrank stateful property values, while a stateful value outranks constructor fallback. Preserving this precedence prevents a deprecated constructor convenience from silently defeating an explicit later decision.
     4. Parent-side path selection is necessary before local process launch because workers receive a concrete model argument even when the original public stage call omitted it. Passing the resolved path preserves the original semantic intent without contaminating public signatures.
     5. `best` and `last` are selection policies rather than filesystem paths. Best ownership is deterministic through the first ModelCheckpoint callback; last selection may safely degrade to current weights when no saved candidate exists.
+
+| Memory | Terminal Result Ownership | Date: 19 August 2026 | Time: 09:38 PM | Name: Ghost |
+
+    1. A public verbosity parameter requires a visible runtime effect independent of progress-bar enablement. Accepting and validating the argument without rendering results is a false compatibility surface.
+    2. Standalone result presentation belongs after stage teardown so a live progress record is finalized before permanent output begins. Rendering inside the evaluation loop can collide with an active carriage-return line.
+    3. Full metric visibility and low information density are compatible when one dataloader owns one record, fields are deterministically ordered, and records wrap rather than becoming a bordered table.
+    4. Automatic `/dataloader_idx_N` suffixes belong to returned and logged metric identity but are redundant in a display line already labeled with the producing dataloader position.
+    5. Distributed presentation must be rank-zero-owned at the executing stage boundary. A resolved worker path prints exactly once while preserving the unmodified list of metric dictionaries returned to the parent.

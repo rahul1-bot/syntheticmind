@@ -1320,6 +1320,7 @@ class Trainer:
             raise TypeError("`verbose` must be a bool.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
+        self.validate_loop.verbose = verbose
         selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path,
             stage="validate",
@@ -1397,6 +1398,8 @@ class Trainer:
             if cleanup_exception is not None:
                 raise cleanup_exception
 
+        if verbose and self.is_global_zero:
+            ConsoleRenderer().write_metrics("validation", metrics)
         return metrics
 
     def test(
@@ -1434,6 +1437,7 @@ class Trainer:
             raise TypeError("`verbose` must be a bool.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
+        self.test_loop.verbose = verbose
         selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path,
             stage="test",
@@ -1511,6 +1515,8 @@ class Trainer:
             if cleanup_exception is not None:
                 raise cleanup_exception
 
+        if verbose and self.is_global_zero:
+            ConsoleRenderer().write_metrics("test", metrics)
         return metrics
 
     def predict(
