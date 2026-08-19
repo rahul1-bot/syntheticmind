@@ -44,7 +44,7 @@ import math
 import os
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Sized
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from pathlib import Path
 from typing import IO, Literal, Never, cast
@@ -1621,6 +1621,14 @@ class Trainer:
                 raise cleanup_exception
 
         return predictions
+
+    @contextmanager
+    def init_module(
+        self,
+        empty_init: bool | None = None
+    ) -> Iterator[None]:
+        with self.strategy.tensor_init_context(empty_init=empty_init):
+            yield
 
     def _safe_len(
         self,

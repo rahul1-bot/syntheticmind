@@ -220,3 +220,12 @@
     4. Promotional integration suggestions are outside the capability objective and will not consume a core Trainer parameter.
     5. Data-fetcher last-batch state, signal handling, and multiple dataloaders remain explicit gaps; they must be implemented with their complete runtime semantics rather than surfaced as inert compatibility aliases.
     6. The next dependency-ordered audit is the standard `Trainer.init_module` context because precision and strategy initialization authorities are now established.
+
+| Strategic Note | Module Construction Ownership | Date: 19 August 2026 | Time: 07:23 PM | Name: Ghost |
+
+    1. ✅ Module construction now enters one strategy-owned context that combines root-device selection, precision-specific default dtype, and optional empty initialization through the standard `Trainer.init_module` surface.
+    2. Empty initialization avoids initializer mutations and random-stream consumption without claiming meta-device or sharded-allocation behavior that the current strategies do not implement.
+    3. PyTorch 2.9 direct and composite initializer paths are covered explicitly, including module constructors whose initialization does not pass through one public dispatched function.
+    4. Custom strategies retain the inheritance boundary and receive the exact `empty_init` value, allowing future FSDP or model-parallel strategies to replace allocation semantics without changing user code.
+    5. CPU, MPS, state restoration, true and mixed precision, composite module construction, and two-process fork execution establish the currently supported runtime contract without a linter.
+    6. The next sequential runtime boundary is process-signal receipt and data-fetcher last-batch truth, followed by multiple-dataloader capability rather than public aliases detached from execution.

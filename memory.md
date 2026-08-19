@@ -281,3 +281,13 @@
     4. Distributed sampler construction should receive explicit `num_replicas` and `rank` from the strategy contract. Depending only on ambient process-group discovery hides topology ownership and weakens custom strategy compatibility.
     5. A parameter present on a mature Trainer is not automatically an industry convention. The pinned `model_registry` and `suggest_integrations` parameters are respectively a Lightning Cloud product integration and promotional surface, so mechanical adoption would violate SyntheticMind ownership without adding universal core capability.
     6. Last-batch inspection for unsized iterables requires fetcher lookahead or equivalent progress state, and signal receipt requires process-lifecycle ownership. Neither can be implemented truthfully as a derived convenience boolean.
+
+| Memory | Module Initialization Semantics | Date: 19 August 2026 | Time: 07:23 PM | Name: Ghost |
+
+    1. Device, dtype, and empty allocation are module-construction lifecycle concerns and therefore belong behind the strategy rather than as independent Trainer-side global mutations.
+    2. Mixed precision is an execution contract rather than a reduced-precision parameter-storage contract. Its initialization context retains float32, while true precision changes the floating default dtype during construction.
+    3. PyTorch 2.9 does not route every `torch.nn.init` operation through a single dispatch shape. `ones_`, `zeros_`, `eye_`, `dirac_`, sparse initialization, output arguments, indexed assignment, and private helper calls require behavior-based suppression.
+    4. Empty initialization must also preserve the random stream. Preventing final tensor mutation while allowing an initializer's intermediate random permutation still changes subsequent model behavior and is not a correct no-initialization contract.
+    5. Current single-device and distributed data-parallel strategies should allocate uninitialized real-device storage. Meta tensors and sharded construction have different materialization obligations and belong to future specialized strategy overrides.
+    6. Initialization contexts must restore process-global device and dtype state on exceptions. A successful allocation probe alone cannot establish safe reusable context behavior.
+    7. Multiprocessing state reconciliation must update every public identity backed by worker state. Restoring only `Trainer.module` leaves `Trainer.model` stale because the latter delegates to strategy ownership.

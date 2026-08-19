@@ -23,7 +23,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal, TypeVar, cast
 
 import torch
@@ -38,6 +39,7 @@ from syntheticmind.plugins.io import (
 )
 from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.precision.precision import Precision
+from syntheticmind.utilities.model_initialization import _EmptyInit
 from syntheticmind.utilities.types import (
     Batch,
     CheckpointDict,
@@ -242,6 +244,20 @@ class Strategy(ABC):
         from syntheticmind.utilities.data_transfer import move_data_to_device
 
         return move_data_to_device(batch, device)
+
+    @contextmanager
+    def tensor_init_context(
+        self,
+        empty_init: bool | None = None
+    ) -> Iterator[None]:
+        if empty_init is not None and type(empty_init) is not bool:
+            raise TypeError("`empty_init` must be a bool or None.")
+        with (
+            _EmptyInit(enabled=bool(empty_init)),
+            self.root_device,
+            self.precision_plugin.tensor_init_context()
+        ):
+            yield
 
     def barrier(self) -> None:
         # Cross-process synchronization point; a no-op outside distributed

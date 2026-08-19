@@ -78,6 +78,7 @@ class _WorkerStateTransfer:
     ) -> None:
         module.load_state_dict(worker_output.module_state_dict, strict=False)
         trainer.module = module
+        trainer.strategy.model = module
         trainer.datamodule = datamodule
         module._trainer = trainer
         datamodule.trainer = trainer
