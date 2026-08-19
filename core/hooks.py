@@ -32,7 +32,7 @@ import torch
 from pydantic import BaseModel, ConfigDict
 
 from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
+from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput, TrainerStage
 
 __all__: list[str] = ["DataHooks", "ModelHooks", "MetricLoggingRule", "MetricLoggingContract"]
 
@@ -133,11 +133,21 @@ class MetricLoggingContract:
         "on_before_batch_transfer",
         "transfer_batch_to_device",
         "on_after_batch_transfer",
+        "prepare_data",
+        "setup",
+        "teardown",
+        "train_dataloader",
+        "val_dataloader",
+        "test_dataloader",
+        "predict_dataloader",
+        "on_validation_model_zero_grad",
         "on_validation_model_eval",
         "on_validation_model_train",
         "on_test_model_eval",
         "on_test_model_train",
         "on_predict_model_eval",
+        "configure_sharded_model",
+        "configure_model",
         "on_save_checkpoint",
         "on_load_checkpoint",
         "predict_step",
@@ -162,16 +172,42 @@ class MetricLoggingContract:
 
 
 class DataHooks:
+    def __init__(self) -> None:
+        super().__init__()
+        self.prepare_data_per_node: bool = True
+        self.allow_zero_length_dataloader_with_multiple_devices: bool = False
+
+    def prepare_data(self) -> None:
+        pass
+
+    def setup(self, stage: TrainerStage) -> None:
+        pass
+
+    def teardown(self, stage: TrainerStage) -> None:
+        pass
+
+    def train_dataloader(self) -> torch.utils.data.DataLoader:
+        raise MisconfigurationError("train_dataloader() must be implemented before fitting a Module.")
+
+    def val_dataloader(self) -> torch.utils.data.DataLoader:
+        raise MisconfigurationError("val_dataloader() must be implemented before validating a Module.")
+
+    def test_dataloader(self) -> torch.utils.data.DataLoader:
+        raise MisconfigurationError("test_dataloader() must be implemented before testing a Module.")
+
+    def predict_dataloader(self) -> torch.utils.data.DataLoader:
+        raise MisconfigurationError("predict_dataloader() must be implemented before predicting with a Module.")
+
     # Batch-transfer hook trio invoked by every loop around device placement.
     # The loops give a datamodule override of any of these hooks precedence
     # over the module-side implementation, decided per hook, so batch
     # representation logic can live with either the data or the model.
-    def on_before_batch_transfer(self, batch: Batch, dataloader_idx: int = 0) -> Batch:
+    def on_before_batch_transfer(self, batch: Batch, dataloader_idx: int) -> Batch:
         # Invoked on the host-side batch after the batch-start hooks and
         # before device placement; the returned batch is what gets moved.
         return batch
 
-    def transfer_batch_to_device(self, batch: Batch, device: torch.device, dataloader_idx: int = 0) -> Batch:
+    def transfer_batch_to_device(self, batch: Batch, device: torch.device, dataloader_idx: int) -> Batch:
         # Places the batch on the target device. The default delegates to the
         # shared recursive transfer helper; override for batches whose
         # placement the generic traversal cannot express.
@@ -179,7 +215,7 @@ class DataHooks:
 
         return move_data_to_device(batch, device)
 
-    def on_after_batch_transfer(self, batch: Batch, dataloader_idx: int = 0) -> Batch:
+    def on_after_batch_transfer(self, batch: Batch, dataloader_idx: int) -> Batch:
         # Invoked on the device-resident batch immediately before the step;
         # the returned batch is what the step receives.
         return batch
@@ -277,6 +313,9 @@ class ModelHooks:
         # Invoked by the prediction loop after the last prediction batch.
         pass
 
+    def on_validation_model_zero_grad(self) -> None:
+        pass
+
     def on_validation_model_eval(self) -> None:
         # Invoked when a validation pass begins so the module can switch to
         # evaluation mode; Module overrides this with an eval() call.
@@ -301,7 +340,7 @@ class ModelHooks:
         # evaluation mode.
         pass
 
-    def on_train_batch_start(self, batch: Batch, batch_idx: int) -> None:
+    def on_train_batch_start(self, batch: Batch, batch_idx: int) -> int | None:
         # Invoked by the training epoch loop before batch transfer and the
         # training step for each batch.
         pass
@@ -359,4 +398,10 @@ class ModelHooks:
     def on_before_zero_grad(self, optimizer: torch.optim.Optimizer) -> None:
         # Invoked immediately before gradients are cleared after an optimizer
         # step, the last point at which the stepped gradients are readable.
+        pass
+
+    def configure_sharded_model(self) -> None:
+        pass
+
+    def configure_model(self) -> None:
         pass

@@ -88,7 +88,7 @@ class MetricLoggingConfiguration(BaseModel):
     batch_size: int | None = None
 
 
-class Module(nn.Module, ModelHooks, DataHooks, CheckpointHooks):
+class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
     # Base class for every model the harness trains or evaluates. Subclasses
     # implement forward, the step methods, and configure_optimizers; the
     # trainer attaches itself before execution, after which the metric-logging
@@ -480,6 +480,10 @@ class Module(nn.Module, ModelHooks, DataHooks, CheckpointHooks):
                 elif "dtype" in kwargs and isinstance(kwargs["dtype"], torch.dtype):
                     result._dtype: torch.dtype = kwargs["dtype"]
         return result
+
+    @override
+    def on_validation_model_zero_grad(self) -> None:
+        self.zero_grad()
 
     @override
     def on_validation_model_eval(self) -> None:

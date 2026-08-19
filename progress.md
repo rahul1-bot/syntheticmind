@@ -10,7 +10,9 @@
 
     1. ✅ The active objective is full user-facing capability parity with core PyTorch Lightning while excluding Fabric, documentation creation, release machinery, and replication of the upstream PyTorch Lightning test suite.
     2. ✅ The ignored `external/` research boundary is established for carefully selected third-party source references required to resolve concrete engineering uncertainty.
-    3. The current implementation phase is the foundational `core/` contract layer, beginning with `core/hooks.py` and its checkpoint-hook companion `core/saving.py`.
-    4. Subsequent `core/` work proceeds through `optimizer.py`, `datamodule.py`, `module.py`, `trainer.py`, and package exports only after each preceding contract is understood, implemented, and verified.
-    5. Existing source comments remain untouched, and no new source-code comments are introduced during the current phase.
-    6. Every completed phase requires focused verification, diff review, a local `dev` commit, a push to `origin/dev`, and confirmation that both branch references match before work advances.
+    3. ✅ The `ModelHooks`, `DataHooks`, and `CheckpointHooks` public method sets now match the pinned PyTorch Lightning hook surface, including standard data lifecycle hooks, `configure_model`, the deprecated compatibility hook, validation gradient clearing, and the training-batch early-exit return contract.
+    4. ✅ Data-hook defaults, required transfer signatures, model mixin initialization, checkpoint-hook completeness, logging prohibitions, and the reordered model inheritance chain were verified through static analysis, source comparison, focused runtime assertions, and an end-to-end CPU fit smoke.
+    5. The current implementation phase is runtime hook dispatch: implement the `on_train_batch_start` early-exit behavior, route validation gradient clearing through its standard hook, and invoke model configuration with correct override validation and stage frequency.
+    6. Subsequent `core/` work proceeds through `optimizer.py`, `datamodule.py`, the remaining `module.py` contracts, `trainer.py`, and package exports only after each preceding contract is understood, implemented, and verified.
+    7. Existing source comments remain untouched, and no new source-code comments are introduced during the current phase.
+    8. Every completed phase requires focused verification, diff review, a local `dev` commit, a push to `origin/dev`, and confirmation that both branch references match before work advances.
