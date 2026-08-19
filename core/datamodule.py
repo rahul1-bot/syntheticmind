@@ -27,10 +27,11 @@
 # Author: Rahul Sawhney
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
+from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.utilities.types import Batch, StateDict, TrainerStage
 
 if TYPE_CHECKING:
@@ -39,7 +40,10 @@ if TYPE_CHECKING:
 __all__: list[str] = ["DataModule", "DatasetDataModule"]
 
 
-class DataModule:
+class DataModule(HyperparametersMixin):
+    CHECKPOINT_HYPER_PARAMS_KEY: ClassVar[str] = "datamodule_hyper_parameters"
+    CHECKPOINT_HYPER_PARAMS_NAME: ClassVar[str] = "datamodule_hparams_name"
+    CHECKPOINT_HYPER_PARAMS_TYPE: ClassVar[str] = "datamodule_hparams_type"
     # Base data contract consumed by the trainer. Subclasses implement the
     # dataloader factories for the stages they support; every other member has
     # a working default so simple datamodules override only what they need.
@@ -81,6 +85,7 @@ class DataModule:
     #             # Release stage-local resources.
     #             ...
     def __init__(self) -> None:
+        super().__init__()
         self.trainer: Trainer | None = None
 
     def prepare_data(self) -> None:

@@ -202,3 +202,12 @@
     4. Remote object stores cannot be treated as network-mounted local disks. CSV and profiler durability therefore avoids append assumptions, and exporters requiring filenames stage locally before upload.
     5. CPU, MPS, TensorBoard, CSV, checkpoint continuation, profilers, fast development, exception recovery, and two-rank Gloo execution establish the supported contract. Real cloud-provider credentials and CUDA remain explicit verification boundaries.
     6. The next sequential public parameter is `enable_autolog_hparams`; its exact capture boundary, model ownership, logger interactions, inheritance behavior, and disabling semantics must be audited before implementation.
+
+| Strategic Note | Hyperparameter Ownership and Reproducibility | Date: 19 August 2026 | Time: 06:57 PM | Name: Ghost |
+
+    1. ✅ SyntheticMind now captures model and datamodule constructor hyperparameters through the established user-facing inheritance contract rather than fabricating a Trainer-configuration record.
+    2. Automatic publication is independently controllable through `Trainer.enable_autolog_hparams` and `save_hyperparameters(logger=...)`; checkpoint reproducibility remains active even when experiment publication is disabled.
+    3. Initial hyperparameters are isolated from later mutable runtime state, conflicting model and data definitions fail explicitly, and internal `_class_path` metadata never leaks into experiment backends.
+    4. Ordinary mappings, namespaces, inherited constructors, dataclasses, and OmegaConf configurations retain their meaningful behavior while CSV and TensorBoard own the final serialization normalization.
+    5. All public stages, CPU, MPS, local and remote storage, full and weights-only checkpoints, and two-process Gloo execution establish the supported contract. CUDA remains an explicit hardware boundary.
+    6. The next sequential parameter is `model_registry`; its external service ownership, naming, dependency, checkpoint, and failure semantics require audit before SyntheticMind decides whether and how the capability belongs in the private harness.

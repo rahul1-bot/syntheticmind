@@ -281,6 +281,7 @@ class Trainer:
         sync_batchnorm: bool = False,
         reload_dataloaders_every_n_epochs: int = 0,
         default_root_dir: str | Path | None = None,
+        enable_autolog_hparams: bool = True,
         resume_from_checkpoint: str | Path | None = None,
         seed: int | None = None
     ) -> None:
@@ -448,6 +449,11 @@ class Trainer:
             raise MisconfigurationError(
                 "`reload_dataloaders_every_n_epochs` must be >= 0, got "
                 f"{reload_dataloaders_every_n_epochs}."
+            )
+        if type(enable_autolog_hparams) is not bool:
+            raise TypeError(
+                "`enable_autolog_hparams` must be a bool, got "
+                f"{enable_autolog_hparams!r}."
             )
         if (
             log_every_n_steps is not None
@@ -619,6 +625,7 @@ class Trainer:
         self.log_every_n_steps: int = resolved_log_every_n_steps
         self.enable_progress_bar: bool = resolved_enable_progress_bar
         self.enable_model_summary: bool = resolved_enable_model_summary
+        self.enable_autolog_hparams: bool = enable_autolog_hparams
         self.barebones: bool = barebones
         self.num_sanity_val_steps: int | float = resolved_num_sanity_val_steps
         self.fast_dev_run: int | bool = resolved_fast_dev_run
@@ -1172,18 +1179,6 @@ class Trainer:
             self._call_callback_hooks(module, "setup", "fit")
             self._call_module_hook(module, "setup", module.setup, "fit")
 
-            # The run configuration is announced to the logger from rank zero
-            # only, keeping multi-process runs single-writer.
-            if self.loggers and is_rank_zero():
-                config_dict: HyperparameterDict = {
-                    "max_epochs": self.max_epochs,
-                    "max_steps": self.max_steps,
-                    "precision": self.precision,
-                    "accelerator": type(self.accelerator).__name__,
-                    "strategy": type(self.strategy).__name__
-                }
-                self._log_hyperparams(config_dict)
-
             # Start hooks fire callbacks-first, then the module. The optional
             # sanity pass runs inside the fit stage but before training
             # starts, surfacing validation-path defects before the first
@@ -1194,6 +1189,10 @@ class Trainer:
                 "on_fit_start",
                 module.on_fit_start
             )
+
+            # The run configuration is announced to the logger from rank zero
+            # only, keeping multi-process runs single-writer.
+            self._autolog_hyperparameters(module, datamodule)
 
             if (
                 self.enable_validation
@@ -1330,6 +1329,7 @@ class Trainer:
 
             self._call_callback_hooks(module, "setup", "validate")
             self._call_module_hook(module, "setup", module.setup, "validate")
+            self._autolog_hyperparameters(module, datamodule)
 
             metrics: dict[str, float] = self.validate_loop.run()
             stage_completed: bool = True
@@ -1462,6 +1462,7 @@ class Trainer:
 
             self._call_callback_hooks(module, "setup", "test")
             self._call_module_hook(module, "setup", module.setup, "test")
+            self._autolog_hyperparameters(module, datamodule)
 
             metrics: dict[str, float] = self.test_loop.run()
             stage_completed: bool = True
@@ -1602,6 +1603,7 @@ class Trainer:
 
             self._call_callback_hooks(module, "setup", "predict")
             self._call_module_hook(module, "setup", module.setup, "predict")
+            self._autolog_hyperparameters(module, datamodule)
 
             self.predict_loop.return_predictions = return_predictions
             predictions: list[ModelOutput] = self.predict_loop.run()
@@ -2818,6 +2820,85 @@ class Trainer:
     def _log_hyperparams(self, params: HyperparameterDict) -> None:
         for configured_logger in self._loggers:
             configured_logger.log_hyperparams(params)
+
+    def _autolog_hyperparameters(
+        self,
+        module: Module,
+        datamodule: DataModule
+    ) -> None:
+        if (
+            not self.enable_autolog_hparams
+            or not self.loggers
+            or self.fast_dev_run
+        ):
+            return
+        module_hyperparameters: HyperparameterDict | None = (
+            dict(module.hparams_initial) if module._log_hyperparams else None
+        )
+        datamodule_hyperparameters: HyperparameterDict | None = (
+            dict(datamodule.hparams_initial)
+            if datamodule._log_hyperparams
+            else None
+        )
+        merged_hyperparameters: HyperparameterDict | None = None
+        if (
+            module_hyperparameters is not None
+            and datamodule_hyperparameters is not None
+        ):
+            inconsistent_keys: list[object] = []
+            key: object
+            for key in module_hyperparameters.keys() & datamodule_hyperparameters.keys():
+                if key == "_class_path":
+                    continue
+                if not self._hyperparameters_equal(
+                    module_hyperparameters[key],
+                    datamodule_hyperparameters[key]
+                ):
+                    inconsistent_keys.append(key)
+            if inconsistent_keys:
+                raise RuntimeError(
+                    "Cannot merge model and datamodule hyperparameters because "
+                    f"the shared keys {inconsistent_keys!r} have different values."
+                )
+            merged_hyperparameters: HyperparameterDict | None = {
+                **module_hyperparameters,
+                **datamodule_hyperparameters
+            }
+        elif module_hyperparameters is not None:
+            merged_hyperparameters: HyperparameterDict | None = (
+                module_hyperparameters
+            )
+        elif datamodule_hyperparameters is not None:
+            merged_hyperparameters: HyperparameterDict | None = (
+                datamodule_hyperparameters
+            )
+        if merged_hyperparameters is None:
+            return
+        filtered_hyperparameters: HyperparameterDict = {
+            key: value
+            for key, value in merged_hyperparameters.items()
+            if key != "_class_path"
+        }
+        if is_rank_zero():
+            self._log_hyperparams(filtered_hyperparameters)
+
+    def _hyperparameters_equal(self, first: object, second: object) -> bool:
+        if type(first) is not type(second):
+            return False
+        if isinstance(first, torch.Tensor) and isinstance(second, torch.Tensor):
+            return first is second
+        if first is second:
+            return True
+        try:
+            comparison: object = first == second
+        except Exception:
+            return False
+        if isinstance(comparison, bool):
+            return comparison
+        try:
+            return bool(comparison)
+        except (RuntimeError, TypeError, ValueError):
+            return False
 
     @property
     def checkpoint_callback(self) -> Checkpoint | None:

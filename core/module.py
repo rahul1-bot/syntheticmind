@@ -44,6 +44,7 @@ from pydantic import BaseModel, ConfigDict
 from torch import nn
 
 from syntheticmind.core.hooks import DataHooks, MetricLoggingContract, ModelHooks
+from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.core.optimizer import (
     LRSchedulerTypeUnion,
     SyntheticOptimizer,
@@ -93,7 +94,10 @@ class MetricLoggingConfiguration(BaseModel):
     batch_size: int | None = None
 
 
-class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
+class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Module):
+    CHECKPOINT_HYPER_PARAMS_KEY: ClassVar[str] = "hyper_parameters"
+    CHECKPOINT_HYPER_PARAMS_NAME: ClassVar[str] = "hparams_name"
+    CHECKPOINT_HYPER_PARAMS_TYPE: ClassVar[str] = "hparams_type"
     # Base class for every model the harness trains or evaluates. Subclasses
     # implement forward, the step methods, and configure_optimizers; the
     # trainer attaches itself before execution, after which the metric-logging

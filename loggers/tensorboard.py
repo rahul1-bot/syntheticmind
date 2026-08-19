@@ -81,7 +81,7 @@ class TensorBoardLogger(Logger):
         # the hparams plugin; no summary metrics are attached.
         writer: _TensorBoardWriter = self._get_writer()
         writer.add_hparams(
-            {k: str(v) for k, v in params.items()},
+            {str(key): str(value) for key, value in params.items()},
             {}
         )
 

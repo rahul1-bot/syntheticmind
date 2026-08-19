@@ -33,9 +33,15 @@ import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
+from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.core.optimizer import _SchedulerInstance
 from syntheticmind.precision.precision import Precision
-from syntheticmind.utilities.types import CheckpointDict, CheckpointValue, StateDict
+from syntheticmind.utilities.types import (
+    CheckpointDict,
+    CheckpointValue,
+    HyperparameterDict,
+    StateDict
+)
 
 __all__: list[str] = ["CheckpointState"]
 
@@ -78,6 +84,8 @@ class CheckpointState:
             "state_dict": model_state_dict,
             "model_state_dict": model_state_dict,
         }
+        if isinstance(model, HyperparametersMixin):
+            cls._store_hyperparameters(checkpoint, model)
 
         if not weights_only:
             checkpoint["rng_state"] = cls._collect_rng_states()
@@ -139,6 +147,7 @@ class CheckpointState:
             )
 
         if datamodule is not None:
+            cls._store_hyperparameters(checkpoint, datamodule)
             datamodule_state: StateDict = datamodule.state_dict()
             if datamodule_state:
                 checkpoint["datamodule_state_dict"] = cast(
@@ -165,6 +174,42 @@ class CheckpointState:
         }
 
         return checkpoint
+
+    @classmethod
+    def _store_hyperparameters(
+        cls,
+        checkpoint: CheckpointDict,
+        source: HyperparametersMixin
+    ) -> None:
+        source._clean_hparams()
+        if not source.hparams:
+            return
+        checkpoint[source.CHECKPOINT_HYPER_PARAMS_NAME] = source._hparams_name
+        if cls._is_omegaconf_container(source.hparams):
+            checkpoint[source.CHECKPOINT_HYPER_PARAMS_KEY] = cast(
+                CheckpointValue,
+                source.hparams
+            )
+            checkpoint[source.CHECKPOINT_HYPER_PARAMS_TYPE] = cast(
+                CheckpointValue,
+                type(source.hparams)
+            )
+        else:
+            stored_hyperparameters: HyperparameterDict = {
+                key: value for key, value in source.hparams.items()
+            }
+            checkpoint[source.CHECKPOINT_HYPER_PARAMS_KEY] = cast(
+                CheckpointValue,
+                stored_hyperparameters
+            )
+
+    @classmethod
+    def _is_omegaconf_container(cls, value: object) -> bool:
+        try:
+            from omegaconf import Container
+        except ImportError:
+            return False
+        return isinstance(value, Container)
 
     @classmethod
     def restore(

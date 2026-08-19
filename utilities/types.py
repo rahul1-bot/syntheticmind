@@ -133,14 +133,9 @@ type ModelOutput = (
 
 type HyperparameterScalar = bool | int | float | str | None
 
-type HyperparameterValue = (
-    HyperparameterScalar
-    | list[HyperparameterValue]
-    | tuple[HyperparameterValue, ...]
-    | dict[str, HyperparameterValue]
-)
+type HyperparameterValue = object
 
-type HyperparameterDict = dict[str, HyperparameterValue]
+type HyperparameterDict = dict[object, HyperparameterValue]
 
 type StateScalar = bool | int | float | str | None
 

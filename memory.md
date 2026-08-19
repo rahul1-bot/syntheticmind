@@ -261,3 +261,14 @@
     6. Symbolic-link checkpoint aliases are meaningful only on local filesystems. Remote `save_last="link"` must fail explicitly, while ordinary remote last checkpoints remain regular persisted objects.
     7. TensorBoard's current writer directly supports the exercised fsspec memory URI. Optional-backend behavior must still be executed after dependency installation because fallback CSV success does not prove the preferred backend.
     8. Fast development suppression includes auxiliary runtime telemetry. Replacing the experiment logger with a no-operation logger is insufficient if a callback interprets that placeholder as permission to create its own artifact directory.
+
+| Memory | Hyperparameter Capture and Publication Semantics | Date: 19 August 2026 | Time: 06:57 PM | Name: Ghost |
+
+    1. Automatic hyperparameter logging means publishing user-saved model and datamodule construction state. Logging Trainer controls such as epoch limits, precision, accelerator, and strategy under this contract is semantically false even when the resulting record appears useful.
+    2. `save_hyperparameters()` is an inheritance-sensitive capture operation. Constructor frames across the active `super()` chain must be collected in order, while explicit names, one mapping or namespace, dataclass initialization fields, ignore lists, and empty-container calls retain distinct meanings.
+    3. `hparams` is mutable runtime state, while `hparams_initial` is a defensive deep copy of the state recorded by the latest capture operation. Automatic experiment publication consumes the initial mapping so later ordinary mutation cannot rewrite the run's declared construction inputs.
+    4. `save_hyperparameters(logger=False)` suppresses automatic experiment publication for that source but does not suppress checkpoint persistence. The logger flag must change even when the supplied container is empty.
+    5. Model and datamodule mappings merge only when shared keys have the same concrete type and value. Tensors require identity rather than element equality, and `_class_path` is excluded because it is configuration-instantiation metadata rather than an experiment hyperparameter.
+    6. OmegaConf must remain a live container at the user boundary or interpolation semantics are lost. Checkpoints therefore retain the container and its type metadata, while experiment loggers receive backend-safe normalized values.
+    7. Rank-zero persistence does not remove the need for all ranks to own equivalent captured state. Real two-process execution verified that every rank participates in the stage while exactly one rank invokes the logger.
+    8. OmegaConf `2.3.1` was installed through the authorized Python package path to exercise preservation and checkpoint round trips directly rather than claiming optional-configuration support from structural inspection.

@@ -86,7 +86,13 @@ class CSVLogger(Logger):
         # metrics file; non-JSON scalars degrade to their string form.
         import json
         hparams_file: str = join_path(self.log_dir, "hparams.json")
-        write_text(hparams_file, json.dumps(params, indent=2, default=str))
+        serializable_params: dict[str, object] = {
+            str(key): value for key, value in params.items()
+        }
+        write_text(
+            hparams_file,
+            json.dumps(serializable_params, indent=2, default=str)
+        )
 
     @override
     def finalize(self) -> None:
