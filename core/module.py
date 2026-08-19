@@ -1144,7 +1144,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             return schedulers[0]
         return schedulers
 
-    def freeze(self) -> None:
+    def freeze(self) -> Self:
         # Disables gradient tracking for every parameter and switches to
         # evaluation mode, the standard preparation for a frozen component.
         #
@@ -1154,9 +1154,9 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #     model.freeze()
         for param in self.parameters():
             param.requires_grad: bool = False
-        self.eval()
+        return self.eval()
 
-    def unfreeze(self) -> None:
+    def unfreeze(self) -> Self:
         # Re-enables gradient tracking for every parameter and returns to
         # training mode, reversing freeze().
         #
@@ -1165,7 +1165,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #     model.unfreeze()
         for param in self.parameters():
             param.requires_grad: bool = True
-        self.train()
+        return self.train()
 
     @override
     def cuda(self, device: int | torch.device | None = None) -> Module:
@@ -1374,27 +1374,29 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
     @property
     def current_epoch(self) -> int:
         # Epoch counter mirrored from trainer state by the fit loop.
-        return self._current_epoch
+        return self.trainer.current_epoch if self._trainer is not None else 0
 
     @property
     def global_step(self) -> int:
         # Optimizer-step counter mirrored from trainer state by the epoch
         # loop.
-        return self._global_step
+        return self.trainer.global_step if self._trainer is not None else 0
 
     @property
     def global_rank(self) -> int:
         # Global process rank, resolved through the distributed utilities so
         # single-process execution reads as rank zero.
-        from syntheticmind.utilities.distributed import get_rank
-        return get_rank()
+        return self.trainer.global_rank if self._trainer is not None else 0
 
     @property
     def local_rank(self) -> int:
         # Node-local process rank, resolved through the distributed utilities
         # so single-process execution reads as rank zero.
-        from syntheticmind.utilities.distributed import get_local_rank
-        return get_local_rank()
+        return self.trainer.local_rank if self._trainer is not None else 0
+
+    @property
+    def on_gpu(self) -> bool:
+        return self.device.type == "cuda"
 
     @property
     def logged_metrics(self) -> list[LoggedMetric]:

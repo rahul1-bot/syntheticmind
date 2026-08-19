@@ -38,9 +38,15 @@
     4. ✅ Manual and Trainer-produced files, CPU, MPS, unavailable-device fallback, subprocess, spawn, fork, direct two-rank Gloo, and stateful-continuation regressions pass.
     5. ✅ Full Python compilation, signature and inheritance inspection, direct guideline review, exception probes, source-comment preservation, and diff validation pass without a linter or static type checker.
 
-| Progress Todo | Remaining Module Surface Audit | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Progress Complete | Remaining Module Surface and Runtime State | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
 
-    1. Recompute unresolved pinned `Module` methods and properties after checkpoint reconstruction.
-    2. Classify legacy device conveniences, device-mesh ownership, TorchScript, ONNX, and TensorRT export by universality, runtime dependencies, public compatibility, and inheritance impact.
-    3. Select one coherent next boundary and verify it completely before moving deeper into `core/`.
-    4. Commit the next accepted phase on `dev`, push `origin/dev`, and verify exact branch synchronization.
+    1. ✅ The unresolved pinned surface was recomputed after checkpoint reconstruction and separated into runtime-state, model-parallel device-mesh, TorchScript, ONNX, and TensorRT boundaries.
+    2. ✅ `freeze` and `unfreeze` preserve fluent self-return, attached epoch, step, and rank properties use Trainer authority, detached values remain zero, and `on_gpu` retains CUDA-specific meaning.
+    3. ✅ CPU, MPS, detached and attached state, parameter modes, direct two-rank Gloo, subprocess, spawn, fork, compilation, signature inspection, comment preservation, and diff review pass without static-analysis tools.
+
+| Progress Todo | Standard TorchScript Export | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+
+    1. Audit the standard `to_torchscript` public signature and execution contract against the pinned reference and current model initialization surface.
+    2. Implement scripting, tracing, example-input resolution, mode restoration, path serialization, and failure diagnostics without coupling ONNX or TensorRT behavior.
+    3. Verify callable and nested inputs, CPU and applicable MPS behavior, saved artifact reload, training-mode restoration, inherited forwards, malformed configuration, compilation, and source review.
+    4. Commit on `dev`, push `origin/dev`, verify exact synchronization, and continue sequentially.

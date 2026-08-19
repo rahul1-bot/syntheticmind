@@ -47,9 +47,16 @@
     5. Checkpoint-directed external instantiators remain rejected because arbitrary import execution is not a core model-loading capability.
     6. CPU, MPS, unavailable-device, subprocess, spawn, fork, direct Gloo, stateful-continuation, malformed-input, compilation, and manual guideline evidence establish the phase.
 
-| Strategic Note | Immediate Direction | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Strategic Note | Model Runtime State Contract | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
 
-    1. Recompute the remaining pinned `Module` surface before another implementation decision.
-    2. Separate legacy device convenience, device-mesh, TorchScript, ONNX, and TensorRT contracts by dependency and universality.
-    3. Implement and verify the earliest coherent boundary without grouping unrelated export systems or inventing model-parallel state before Strategy ownership exists.
+    1. ✅ Model freezing and unfreezing now preserve fluent inherited usage while applying standard gradient and recursive mode changes.
+    2. Epoch, optimizer-step, and rank inspection now use attached Trainer ownership and neutral detached values rather than leaking ambient distributed process state.
+    3. CUDA-specific `on_gpu` behavior is available without misclassifying MPS placement.
+    4. Local, MPS, direct Gloo, subprocess, spawn, fork, compilation, and direct guideline evidence establish the corrected surface without static-analysis tools.
+
+| Strategic Note | Immediate Direction | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+
+    1. TorchScript is the next universal model capability because it uses the installed PyTorch runtime and has no model-parallel ownership dependency.
+    2. ONNX and TensorRT remain separate later audits with independent dependencies and serialization behavior.
+    3. `device_mesh` remains deferred until a model-parallel Strategy can create and own a real mesh rather than exposing an empty compatibility property.
     4. Preserve the private scope, excluded work, terminology discipline, direct guideline review, executable evidence, and `dev` synchronization requirements.

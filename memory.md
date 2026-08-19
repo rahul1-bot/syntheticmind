@@ -116,3 +116,11 @@
     3. CPU-only success cannot establish accelerator or distributed capability; MPS, launcher-specific, and direct process-group paths are selected according to real ownership boundaries.
     4. Ignored verification programs under `external/` are disposable evidence and never enter the tracked project history.
     5. A completed phase is not synchronized until the accepted commit exists on both local `dev` and `origin/dev` at the same revision.
+
+| Memory | Model Runtime State Authority | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+
+    1. Epoch, optimizer-step, and rank properties are Trainer state while attached and neutral zero values while detached; cached mirrors are transport details rather than public authorities.
+    2. Reading `torch.distributed` directly from a detached model leaks ambient process state into an object that has no Strategy or Trainer ownership.
+    3. Fluent `freeze` and `unfreeze` returns matter because inherited user code may chain evaluation, placement, or export operations after changing parameter state.
+    4. `on_gpu` is a historical CUDA-specific convenience and intentionally remains false for MPS despite both being accelerators.
+    5. Direct process-group and every Trainer launcher path are required to distinguish detached neutrality from attached rank truth.

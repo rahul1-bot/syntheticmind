@@ -81,9 +81,17 @@
     7. Three focused checkpoint services separate payload I/O, hyperparameter reconstruction, and model restoration without copied Lightning internals or new source comments.
     8. Manual, Trainer-produced, CPU, MPS, unavailable-device, subprocess, spawn, fork, stateful-continuation, and direct two-rank Gloo evidence establishes the current contract without static-analysis tools.
 
-| Active Next Step | Remaining Module Surface Audit | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Architecture Decision | Standard Model Runtime State | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
 
-    1. Recompute the unresolved pinned `Module` public surface after checkpoint reconstruction.
-    2. Classify legacy device conveniences, device-mesh ownership, TorchScript, ONNX, and TensorRT export by universality, runtime dependency, and inheritance impact.
-    3. Select and complete the earliest coherent capability rather than grouping unrelated exports or inserting model-parallel behavior before its Strategy dependency exists.
-    4. Preserve the active exclusions and verification policy throughout the next phase.
+    1. `freeze()` and `unfreeze()` now return the same model instance after changing parameter gradient state and recursive module mode, preserving the standard fluent contract.
+    2. `current_epoch`, `global_step`, `global_rank`, and `local_rank` now read the attached Trainer as the runtime authority and return zero while detached.
+    3. Detached modules no longer inherit an unrelated externally initialized process group's ranks, while attached models continue to reflect the configured Strategy across every launcher.
+    4. `on_gpu` now preserves the established CUDA-specific meaning; MPS and CPU placement correctly return false.
+    5. Focused CPU, MPS, parameter-state, detached, attached, direct Gloo, subprocess, spawn, fork, compilation, signature, and diff verification passes without static-analysis tools.
+
+| Active Next Step | Standard TorchScript Export | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+
+    1. Audit the pinned `to_torchscript` signature, method selection, example-input precedence, mode preservation, file output, and inherited override behavior.
+    2. Keep ONNX and TensorRT exports independent because they have separate dependency, serialization, and accelerator contracts.
+    3. Keep `device_mesh` deferred until a model-parallel Strategy owns and initializes that state.
+    4. Preserve all scope, terminology, guideline, evidence, and branch-synchronization policies.
