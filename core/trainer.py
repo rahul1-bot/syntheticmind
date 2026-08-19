@@ -346,11 +346,42 @@ class Trainer:
         self.accelerator: Accelerator = self._resolve_accelerator(accelerator)
         self.strategy: Strategy = self._resolve_strategy(strategy, self.accelerator)
 
-        self.callbacks: list[Callback] = callbacks if callbacks is not None else []
-        if enable_progress_bar:
-            from syntheticmind.callbacks.progress_bar import ProgressBarCallback
+        self.callbacks: list[Callback] = list(callbacks) if callbacks is not None else []
+        from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 
-            if not any(isinstance(c, ProgressBarCallback) for c in self.callbacks):
+        progress_callbacks: list[ProgressBarCallback] = [
+            callback
+            for callback in self.callbacks
+            if isinstance(callback, ProgressBarCallback)
+        ]
+        if len(progress_callbacks) > 1:
+            raise MisconfigurationError(
+                "Only one progress bar callback is supported. Remove duplicate "
+                "ProgressBarCallback instances from callbacks."
+            )
+        if not enable_progress_bar and progress_callbacks:
+            raise MisconfigurationError(
+                "Trainer was configured with enable_progress_bar=False but received "
+                "a ProgressBarCallback in callbacks."
+            )
+        if enable_progress_bar:
+            from syntheticmind.callbacks.timer import TimerCallback
+
+            progress_index: int | None = next(
+                (
+                    index
+                    for index, callback in enumerate(self.callbacks)
+                    if isinstance(callback, ProgressBarCallback)
+                ),
+                None
+            )
+            if not any(isinstance(callback, TimerCallback) for callback in self.callbacks):
+                timer: TimerCallback = TimerCallback()
+                if progress_index is None:
+                    self.callbacks.append(timer)
+                else:
+                    self.callbacks.insert(progress_index, timer)
+            if not progress_callbacks:
                 self.callbacks.append(ProgressBarCallback())
 
         self.logger: Logger | None = logger
@@ -677,9 +708,9 @@ class Trainer:
         # trainer state interrupted, offers the exception to the callback,
         # datamodule, and strategy hooks, and re-raises.
         except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc, "Training")
+            self._handle_exception(module, datamodule, exc)
         except Exception as exception:
-            self._handle_exception(module, datamodule, exception, "Training")
+            self._handle_exception(module, datamodule, exception)
         finally:
             if not fit_completed:
                 module_mode.restore(module)
@@ -771,9 +802,9 @@ class Trainer:
             metrics: dict[str, float] = self.validate_loop.run()
             stage_completed: bool = True
         except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc, "Validation")
+            self._handle_exception(module, datamodule, exc)
         except Exception as exception:
-            self._handle_exception(module, datamodule, exception, "Validation")
+            self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
                 module_mode.restore(module)
@@ -856,9 +887,9 @@ class Trainer:
             metrics: dict[str, float] = self.test_loop.run()
             stage_completed: bool = True
         except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc, "Testing")
+            self._handle_exception(module, datamodule, exc)
         except Exception as exception:
-            self._handle_exception(module, datamodule, exception, "Testing")
+            self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
                 module_mode.restore(module)
@@ -949,9 +980,9 @@ class Trainer:
             predictions: list[ModelOutput] = self.predict_loop.run()
             stage_completed: bool = True
         except KeyboardInterrupt as exc:
-            self._handle_exception(module, datamodule, exc, "Prediction")
+            self._handle_exception(module, datamodule, exc)
         except Exception as exception:
-            self._handle_exception(module, datamodule, exception, "Prediction")
+            self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
                 module_mode.restore(module)
@@ -1193,8 +1224,6 @@ class Trainer:
         # a finally block, and every trace of the sanity pass (epoch metrics,
         # the module's logging buffer, callback metrics) is discarded so
         # sanity results cannot influence monitoring or checkpointing.
-        log.info(f"Running {self.num_sanity_val_steps} sanity validation batches")
-
         with module._hook_context("on_sanity_check_start"):
             for callback in self.callbacks:
                 callback.on_sanity_check_start(self, module)
@@ -1229,7 +1258,6 @@ class Trainer:
         # markers (completed batches and epoch-start random state) into the
         # training epoch loop. The module and callback load hooks fire last so
         # they observe the fully restored payload.
-        log.info(f"Restoring checkpoint from: {path}")
         checkpoint: CheckpointDict = load_checkpoint(path, map_location=self.strategy.root_device)
         assert self.optimizer is not None
         epoch: int
@@ -1258,14 +1286,11 @@ class Trainer:
                 module.on_load_checkpoint(checkpoint)
             for callback in self.callbacks:
                 callback.on_load_checkpoint(self, module, checkpoint)
-        log.info(f"Resumed from epoch {epoch}, global step {global_step}")
-
     def _handle_exception(
         self,
         module: Module,
         datamodule: DataModule,
-        exception: BaseException,
-        stage: str
+        exception: BaseException
     ) -> None:
         # Central exception path for every entry point: marks the trainer
         # state interrupted, offers the exception to the callback, datamodule,
@@ -1279,7 +1304,6 @@ class Trainer:
         datamodule.on_exception(exception)
         self.strategy.on_exception(exception)
         if isinstance(exception, KeyboardInterrupt):
-            log.warning(f"{stage} interrupted by user")
             raise
         else:
             raise exception

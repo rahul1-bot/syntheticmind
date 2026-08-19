@@ -33,7 +33,6 @@
 from typing import TYPE_CHECKING
 
 import torch
-from loguru import logger as log
 from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
 
 from syntheticmind.callbacks.callback import Callback
@@ -122,8 +121,6 @@ class FitLoop(Loop):
                                 )
                         trainer._total_val_batches: int | None = trainer._safe_len(trainer.val_dataloader)
 
-            log.info(f"Epoch {epoch}/{self.max_epochs - 1}")
-
             # DistributedSampler derives its shuffle permutation from the
             # epoch number; seeding it every epoch prevents repeating the
             # first epoch's shuffle order indefinitely.
@@ -134,6 +131,7 @@ class FitLoop(Loop):
             state.set_running_stage("training")
             module._running_stage: str | None = "training"
             trainer._reset_progress_bar_metrics("training")
+            trainer._reset_progress_bar_metrics("validating")
             module.train()
 
             with module._hook_context("on_train_epoch_start"):
@@ -188,7 +186,6 @@ class FitLoop(Loop):
             # cooperatively at the epoch boundary.
             if state.should_stop:
                 self.should_stop: bool = True
-                log.info("Training stopped early by callback")
 
         with module._hook_context("on_train_end"):
             for callback in callbacks:

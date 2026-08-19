@@ -22,7 +22,6 @@ import time
 from typing import TYPE_CHECKING, override
 
 import torch
-from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
@@ -88,8 +87,11 @@ class ThroughputMonitor(Callback):
         if not is_rank_zero():
             return
         epoch_time: float = time.perf_counter() - self._epoch_start_time
-        if epoch_time > 0:
-            log.info(f"Epoch throughput: {self._epoch_samples / epoch_time:.1f} samples/sec")
+        if epoch_time > 0 and trainer.logger is not None:
+            trainer.logger.log_metrics(
+                {"throughput/epoch_samples_per_sec": self._epoch_samples / epoch_time},
+                step=module.global_step
+            )
 
     @staticmethod
     def _infer_batch_size(batch: Batch) -> int:

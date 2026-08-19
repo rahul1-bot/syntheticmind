@@ -54,3 +54,5 @@
     4. The approved renderer uses one active TTY line, one completed-epoch line, and one final stage line. It shows only stage, progress, at most two selected metrics, and honest ETA by default; all detailed telemetry stays in structured experiment outputs.
     5. Non-interactive output remains stable plain text, distributed rendering remains rank-zero only, and unknown dataloader lengths produce counts rather than false percentages or ETA values.
     6. Callback monitoring metrics, experiment logging, profiling telemetry, and terminal-selected metrics remain separate channels. The renderer consumes runtime truth but does not become another authority for it.
+    7. ✅ One renderer now covers fit, validation, testing, and prediction; routine framework information no longer competes with the active line, and completed epochs are deferred across failure-prone hook boundaries before becoming permanent output.
+    8. The remaining console-truth dependency is Trainer cleanup. Final summaries cannot be considered transactionally final until callback, module, datamodule, strategy, and logger teardown failures are handled through one exception-safe lifecycle boundary.

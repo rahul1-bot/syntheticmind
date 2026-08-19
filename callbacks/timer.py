@@ -62,6 +62,8 @@ class TimerCallback(Callback):
         }
         self._last_train_epoch_time: float = 0.0
         self._current_train_epoch_time: float = 0.0
+        self._epoch_start_time: float | None = None
+        self._last_epoch_time: float = 0.0
 
     @override
     def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
@@ -88,6 +90,8 @@ class TimerCallback(Callback):
             self._last_stage_durations[stage] = 0.0
         self._last_train_epoch_time: float = 0.0
         self._current_train_epoch_time: float = 0.0
+        self._epoch_start_time = None
+        self._last_epoch_time = 0.0
         self._start_stage("fit")
 
     @override
@@ -101,6 +105,7 @@ class TimerCallback(Callback):
     def on_train_epoch_start(self, trainer: Trainer, module: Module) -> None:
         # Marks the beginning of the training epoch.
         self._current_train_epoch_time: float = 0.0
+        self._epoch_start_time = time.perf_counter()
         self._resume_training()
 
     @override
@@ -110,6 +115,7 @@ class TimerCallback(Callback):
         self._pause_training()
         self._last_train_epoch_time: float = self._current_train_epoch_time
         self._current_train_epoch_time: float = 0.0
+        self._close_epoch()
 
     @override
     def on_validation_start(self, trainer: Trainer, module: Module) -> None:
@@ -153,6 +159,7 @@ class TimerCallback(Callback):
     @override
     def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
         self._pause_training()
+        self._close_epoch()
         self._stop_stage("validate")
         self._stop_stage("test")
         self._stop_stage("predict")
@@ -190,6 +197,18 @@ class TimerCallback(Callback):
     def _last_stage_duration(self, stage: _TimerStage) -> float:
         return self._last_stage_durations[stage]
 
+    def _train_epoch_time_elapsed(self) -> float:
+        elapsed: float = self._current_train_epoch_time
+        start_time: float | None = self._start_times["train"]
+        if start_time is not None:
+            elapsed += time.perf_counter() - start_time
+        return elapsed
+
+    def _epoch_time_elapsed(self) -> float:
+        if self._epoch_start_time is not None:
+            return time.perf_counter() - self._epoch_start_time
+        return self._last_epoch_time
+
     def _reset_stage(self, stage: _TimerStage) -> None:
         self._start_times[stage] = None
         self._elapsed_times[stage] = 0.0
@@ -206,3 +225,9 @@ class TimerCallback(Callback):
         self._elapsed_times["train"] += duration
         self._current_train_epoch_time += duration
         self._start_times["train"] = None
+
+    def _close_epoch(self) -> None:
+        if self._epoch_start_time is None:
+            return
+        self._last_epoch_time = time.perf_counter() - self._epoch_start_time
+        self._epoch_start_time = None

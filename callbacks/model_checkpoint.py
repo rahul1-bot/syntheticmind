@@ -288,10 +288,6 @@ class ModelCheckpoint(Callback):
                     },
                     step=trainer.state.global_step
                 )
-            log.info(
-                f"Checkpoint saved: {filepath} "
-                f"duration_ms={checkpoint_duration_ms:.2f} size_mb={checkpoint_size_mb:.2f}"
-            )
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -301,7 +297,6 @@ class ModelCheckpoint(Callback):
         # by the exception path when the run failed before the optimizer
         # existed. The write follows the same atomic temporary-file protocol
         # as full checkpoints.
-        checkpoint_start_time: float = time.perf_counter()
         checkpoint: CheckpointDict = {
             "model_state_dict": module.state_dict(),
             "metadata": {
@@ -322,12 +317,6 @@ class ModelCheckpoint(Callback):
         try:
             torch.save(checkpoint, tmp_path)
             tmp_path.replace(filepath)
-            checkpoint_duration_ms: float = (time.perf_counter() - checkpoint_start_time) * 1000.0
-            checkpoint_size_mb: float = filepath.stat().st_size / 1048576.0
-            log.info(
-                f"Partial checkpoint saved: {filepath} "
-                f"duration_ms={checkpoint_duration_ms:.2f} size_mb={checkpoint_size_mb:.2f}"
-            )
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -370,7 +359,6 @@ class ModelCheckpoint(Callback):
                 self._save_checkpoint(trainer, module, exception_path)
             else:
                 self._save_partial_checkpoint(module, exception_path)
-            log.info(f"Exception checkpoint saved: {exception_path}")
         except Exception:
             log.warning("Failed to save exception checkpoint")
 

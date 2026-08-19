@@ -113,10 +113,6 @@ class EarlyStopping(Callback):
             if should_stop:
                 self.stopped_epoch: int = module.current_epoch
                 trainer.state.should_stop: bool = True
-                log.info(
-                    f"EarlyStopping triggered at epoch {self.stopped_epoch}. "
-                    f"Best {self.monitor}: {self.best_score:.6f}"
-                )
 
     def _is_improvement(self, current: float) -> bool:
         # Applies the improvement test in the configured direction, requiring
