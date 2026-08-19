@@ -140,7 +140,7 @@ class FitLoop(Loop):
             # training mode afterwards.
             val_dataloader: DataLoader | None = trainer.val_dataloader  # type: ignore[type-arg]
             if val_dataloader is not None and self.epoch_loop.validate_at_epoch_end:
-                module.zero_grad(set_to_none=True)
+                trainer._call_on_validation_model_zero_grad(module)
                 validate_loop: EvaluationLoop = trainer.validate_loop
                 validate_loop.run()
                 module.on_validation_model_train()

@@ -40,7 +40,8 @@
 # Author: Rahul Sawhney
 
 import math
-from collections.abc import Iterator
+import warnings
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Literal
 
@@ -54,6 +55,7 @@ from syntheticmind.accelerators.cuda import CUDAAccelerator
 from syntheticmind.accelerators.mps import MPSAccelerator
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
+from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import (
     OptimizationConfiguration,
@@ -507,6 +509,7 @@ class Trainer:
             # mirror is stamped once placement is final.
             device: torch.device = self._resolve_device()
             self.accelerator.setup_device(device)
+            self._configure_model(module)
 
             if self.sync_batchnorm and self.strategy.is_distributed:
                 module: Module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
@@ -770,6 +773,7 @@ class Trainer:
 
             device: torch.device = self._resolve_device()
             self.accelerator.setup_device(device)
+            self._configure_model(module)
             self.strategy.setup(module, device)
             module._device: torch.device = device
 
@@ -846,6 +850,7 @@ class Trainer:
 
             device: torch.device = self._resolve_device()
             self.accelerator.setup_device(device)
+            self._configure_model(module)
             self.strategy.setup(module, device)
             module._device: torch.device = device
 
@@ -927,6 +932,7 @@ class Trainer:
 
             device: torch.device = self._resolve_device()
             self.accelerator.setup_device(device)
+            self._configure_model(module)
             self.strategy.setup(module, device)
             module._device: torch.device = device
 
@@ -1001,6 +1007,43 @@ class Trainer:
         self.validate_loop.trainer: Trainer = self
         self.test_loop.trainer: Trainer = self
         self.predict_loop.trainer: Trainer = self
+
+    def _configure_model(self, module: Module) -> None:
+        has_legacy_override: bool = type(module).configure_sharded_model is not ModelHooks.configure_sharded_model
+        has_configure_override: bool = type(module).configure_model is not ModelHooks.configure_model
+        if has_legacy_override and has_configure_override:
+            module_name: str = type(module).__name__
+            raise MisconfigurationError(
+                f"{module_name} overrides both configure_model() and deprecated configure_sharded_model(). "
+                f"Override only configure_model()."
+            )
+        hook_name: str
+        hook: Callable[[], None]
+        if has_legacy_override:
+            warnings.warn(
+                "configure_sharded_model() is deprecated; override configure_model() instead.",
+                DeprecationWarning,
+                stacklevel=3
+            )
+            hook_name: str = "configure_sharded_model"
+            hook: Callable[[], None] = module.configure_sharded_model
+        elif has_configure_override:
+            hook_name: str = "configure_model"
+            hook: Callable[[], None] = module.configure_model
+        else:
+            return
+        module._current_fx_name: str | None = hook_name
+        try:
+            hook()
+        finally:
+            module._current_fx_name: str | None = None
+
+    def _call_on_validation_model_zero_grad(self, module: Module) -> None:
+        module._current_fx_name: str | None = "on_validation_model_zero_grad"
+        try:
+            module.on_validation_model_zero_grad()
+        finally:
+            module._current_fx_name: str | None = None
 
     def _resolve_accelerator(self, accelerator: str | Accelerator) -> Accelerator:
         # Resolves the accelerator argument: a live instance passes through

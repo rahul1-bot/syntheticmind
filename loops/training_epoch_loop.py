@@ -192,7 +192,13 @@ class TrainingEpochLoop(Loop):
 
             for callback in callbacks:
                 callback.on_train_batch_start(trainer, module, batch, batch_idx)
-            module.on_train_batch_start(batch, batch_idx)
+            module._current_fx_name: str | None = "on_train_batch_start"
+            try:
+                hook_response: int | None = module.on_train_batch_start(batch, batch_idx)
+            finally:
+                module._current_fx_name: str | None = None
+            if hook_response == -1:
+                break
 
             dm: DataModule | None = trainer.datamodule
             if dm is not None and type(dm).on_before_batch_transfer is not DataModule.on_before_batch_transfer:
@@ -257,7 +263,7 @@ class TrainingEpochLoop(Loop):
                 and self._should_validate_mid_epoch(batch_idx, max_batches, state)
             ):
                 if module.automatic_optimization and not is_accumulating:
-                    module.zero_grad(set_to_none=True)
+                    trainer._call_on_validation_model_zero_grad(module)
                 trainer._is_mid_epoch_validation: bool = True
                 trainer.validate_loop.run()
                 trainer._is_mid_epoch_validation: bool = False
