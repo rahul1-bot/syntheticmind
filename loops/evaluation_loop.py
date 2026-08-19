@@ -30,10 +30,11 @@
 #
 # Author: Rahul Sawhney
 
+import inspect
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 from torch import nn
@@ -44,15 +45,19 @@ from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
+from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.evaluation import evaluation_context
 from syntheticmind.utilities.metric_accumulator import MetricAccumulator
-from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
+from syntheticmind.utilities.model_helpers import (
+    ModuleMode,
+    is_overridden,
+    is_parameter_in_hook_signature
+)
 from syntheticmind.utilities.types import Batch, RunningStage, StepOutput
 
 if TYPE_CHECKING:
@@ -79,15 +84,16 @@ class EvaluationLoop(Loop):
         self.stage: Literal["validate", "test"] = stage
         self.inference_mode: bool = inference_mode
         self.epoch_metrics: dict[str, float] = {}
+        self.results: list[dict[str, float]] = []
 
-    def run(self) -> dict[str, float]:
+    def run(self) -> list[dict[str, float]]:
         use_inference_mode: bool = (
             self.inference_mode and self.trainer.state.stage != "fit"
         )
         with evaluation_context(use_inference_mode):
             return self._run()
 
-    def _run(self) -> dict[str, float]:
+    def _run(self) -> list[dict[str, float]]:
         # Executes one full evaluation pass. The sequence is: switch the module
         # to evaluation mode through its stage hook, fire the stage-start and
         # epoch-start hook pairs, iterate batches under inference mode with the
@@ -96,6 +102,7 @@ class EvaluationLoop(Loop):
         # epoch-end and stage-end hook pairs, and publish the reduced metrics
         # to the trainer's callback metrics.
         self.epoch_metrics: dict[str, float] = {}
+        self.results: list[dict[str, float]] = []
 
         trainer: Trainer = self.trainer
         module: Module | None = trainer.module
@@ -122,22 +129,35 @@ class EvaluationLoop(Loop):
         if not trainer.sanity_checking:
             trainer._reset_progress_bar_metrics(running_stage)
 
-        dataloader: DataLoader = self._get_dataloader()  # type: ignore[type-arg]
-        if isinstance(dataloader.sampler, DistributedSampler):
-            dataloader.sampler.set_epoch(state.current_epoch)
-        total_batches: int | None = self._safe_len(dataloader)
-        max_batches: int | None = self._resolve_limit_batches(total_batches)
-        if trainer.sanity_checking and trainer.num_sanity_val_steps != float("inf"):
-            sanity_steps: int = int(trainer.num_sanity_val_steps)
-            max_batches = (
-                sanity_steps
-                if max_batches is None
-                else min(max_batches, sanity_steps)
-            )
+        combined_loader: CombinedLoader = self._get_combined_loader()
+        for dataloader in combined_loader.flattened:
+            if (
+                isinstance(dataloader, DataLoader)
+                and isinstance(dataloader.sampler, DistributedSampler)
+            ):
+                dataloader.sampler.set_epoch(state.current_epoch)
+        num_batches: list[int | float] = (
+            trainer.num_val_batches
+            if self.stage == "validate"
+            else trainer.num_test_batches
+        )
+        if trainer.sanity_checking:
+            num_batches = [
+                min(trainer.num_sanity_val_steps, batches)
+                for batches in num_batches
+            ]
+        combined_loader.limits = num_batches
+        total_batches: int | None = combined_loader._length()
+        max_batches: int | None = total_batches
         trainer._raise_if_sigterm()
         if max_batches == 0:
             module._reset_logged_metrics()
-            return self.epoch_metrics
+            return self.results
+
+        sequential: bool = combined_loader.mode == "sequential"
+        num_dataloaders: int = len(combined_loader.flattened)
+        include_dataloader_idx: bool = sequential and num_dataloaders > 1
+        self._verify_dataloader_idx_requirements(module, include_dataloader_idx)
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -197,23 +217,25 @@ class EvaluationLoop(Loop):
                 "on_test_epoch_start",
                 module.on_test_epoch_start
             )
-        epoch_accum: dict[str, MetricAccumulator] = {}
-        logger_metric_names: set[str] = set()
-        progress_bar_metric_names: set[str] = set()
+        result_count: int = num_dataloaders if sequential else 1
+        epoch_accumulators: list[dict[str, MetricAccumulator]] = [
+            {} for _ in range(result_count)
+        ]
+        logger_metric_names: list[set[str]] = [set() for _ in range(result_count)]
+        progress_bar_metric_names: list[set[str]] = [set() for _ in range(result_count)]
 
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile(f"setup_{self.stage}_dataloader"):
-            data_fetcher: _DataFetcher = _DataFetcher(
-                dataloader,
+            data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
+                combined_loader,
                 max_batches,
-                sized=total_batches is not None
+                sized=combined_loader._has_sized_iterables()
             )
-            dataloader_iterator: Iterator[Batch] = iter(data_fetcher)
+            dataloader_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
         trainer._record_dataloader_iterator_creation_time(
             running_stage,
             time.perf_counter() - dataloader_iterator_start_time
         )
-        batch_idx: int = -1
         while not data_fetcher.done:
             trainer._raise_if_sigterm()
             dataloader_fetch_start_time: float = time.perf_counter()
@@ -222,50 +244,66 @@ class EvaluationLoop(Loop):
                 with trainer.profiler.profile(
                     f"[{type(self).__name__}].{dataloader_prefix}_next"
                 ):
-                    batch: Batch = next(dataloader_iterator)
+                    fetched_batch: object
+                    fetched_batch, batch_idx, dataloader_idx = next(dataloader_iterator)
             except StopIteration:
                 break
             trainer._record_dataloader_fetch_time(
                 running_stage,
                 time.perf_counter() - dataloader_fetch_start_time
             )
-            batch_idx += 1
-
+            batch: Batch = cast(Batch, fetched_batch)
             batch: Batch = trainer.precision_plugin.convert_input(batch)
+            hook_dataloader_idx: int | None = (
+                dataloader_idx if include_dataloader_idx else None
+            )
+            batch_hook_arguments: tuple[object, ...] = (
+                (batch, batch_idx)
+                if hook_dataloader_idx is None
+                else (batch, batch_idx, hook_dataloader_idx)
+            )
+            step_hook: object = (
+                module.validation_step
+                if self.stage == "validate"
+                else module.test_step
+            )
+            step_arguments: tuple[object, ...] = batch_hook_arguments
+            if not is_parameter_in_hook_signature(
+                step_hook,
+                "batch_idx",
+                minimum_arguments=2
+            ):
+                step_arguments = (
+                    (batch,)
+                    if hook_dataloader_idx is None
+                    else (batch, hook_dataloader_idx)
+                )
 
             if self.stage == "validate":
                 trainer._call_callback_hooks(
                     module,
                     "on_validation_batch_start",
-                    batch,
-                    batch_idx,
-                    0,
+                    *batch_hook_arguments,
                     callback_group=callbacks
                 )
                 trainer._call_module_hook(
                     module,
                     "on_validation_batch_start",
-                    module.on_validation_batch_start,
-                    batch,
-                    batch_idx,
-                    0
+                    cast(Callable[..., object], module.on_validation_batch_start),
+                    *batch_hook_arguments
                 )
             else:
                 trainer._call_callback_hooks(
                     module,
                     "on_test_batch_start",
-                    batch,
-                    batch_idx,
-                    0,
+                    *batch_hook_arguments,
                     callback_group=callbacks
                 )
                 trainer._call_module_hook(
                     module,
                     "on_test_batch_start",
-                    module.on_test_batch_start,
-                    batch,
-                    batch_idx,
-                    0
+                    cast(Callable[..., object], module.on_test_batch_start),
+                    *batch_hook_arguments
                 )
 
             dm: DataModule | None = trainer.datamodule
@@ -275,7 +313,7 @@ class EvaluationLoop(Loop):
                     "on_before_batch_transfer",
                     dm.on_before_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             else:
                 batch = trainer._call_module_hook(
@@ -283,7 +321,7 @@ class EvaluationLoop(Loop):
                     "on_before_batch_transfer",
                     module.on_before_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
                 batch = trainer._call_datamodule_hook(
@@ -292,7 +330,7 @@ class EvaluationLoop(Loop):
                     dm.transfer_batch_to_device,
                     batch,
                     device,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             else:
                 batch = trainer._call_module_hook(
@@ -301,7 +339,7 @@ class EvaluationLoop(Loop):
                     module.transfer_batch_to_device,
                     batch,
                     device,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
                 batch = trainer._call_datamodule_hook(
@@ -309,7 +347,7 @@ class EvaluationLoop(Loop):
                     "on_after_batch_transfer",
                     dm.on_after_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             else:
                 batch = trainer._call_module_hook(
@@ -317,7 +355,7 @@ class EvaluationLoop(Loop):
                     "on_after_batch_transfer",
                     module.on_after_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
 
             step_context: AbstractContextManager[None] = (
@@ -332,8 +370,7 @@ class EvaluationLoop(Loop):
                             "validation_step",
                             strategy.validation_step,
                             model,
-                            batch,
-                            batch_idx
+                            *step_arguments
                         )
                 else:
                     with module._hook_context("test_step"):
@@ -341,8 +378,7 @@ class EvaluationLoop(Loop):
                             "test_step",
                             strategy.test_step,
                             model,
-                            batch,
-                            batch_idx
+                            *step_arguments
                         )
 
             if self.stage == "validate":
@@ -350,61 +386,66 @@ class EvaluationLoop(Loop):
                     module,
                     "on_validation_batch_end",
                     outputs,
-                    batch,
-                    batch_idx,
-                    0,
+                    *batch_hook_arguments,
                     callback_group=callbacks
                 )
                 trainer._call_module_hook(
                     module,
                     "on_validation_batch_end",
-                    module.on_validation_batch_end,
+                    cast(Callable[..., object], module.on_validation_batch_end),
                     outputs,
-                    batch,
-                    batch_idx,
-                    0
+                    *batch_hook_arguments
                 )
             else:
                 trainer._call_callback_hooks(
                     module,
                     "on_test_batch_end",
                     outputs,
-                    batch,
-                    batch_idx,
-                    0,
+                    *batch_hook_arguments,
                     callback_group=callbacks
                 )
                 trainer._call_module_hook(
                     module,
                     "on_test_batch_end",
-                    module.on_test_batch_end,
+                    cast(Callable[..., object], module.on_test_batch_end),
                     outputs,
-                    batch,
-                    batch_idx,
-                    0
+                    *batch_hook_arguments
                 )
 
+            result_idx: int = dataloader_idx if sequential else 0
             self._accumulate_metrics(
                 module,
-                epoch_accum,
-                logger_metric_names,
-                progress_bar_metric_names,
+                epoch_accumulators[result_idx],
+                logger_metric_names[result_idx],
+                progress_bar_metric_names[result_idx],
                 state,
-                running_stage
+                running_stage,
+                dataloader_idx,
+                include_dataloader_idx
             )
 
-        self.epoch_metrics: dict[str, float] = self._reduce_epoch_metrics(epoch_accum)
+        self.results: list[dict[str, float]] = [
+            self._reduce_epoch_metrics(epoch_accumulator)
+            for epoch_accumulator in epoch_accumulators
+        ]
+        self.epoch_metrics: dict[str, float] = {
+            name: value
+            for result in self.results
+            for name, value in result.items()
+        }
         if not trainer.sanity_checking:
             progress_bar_epoch_metrics: dict[str, float] = {
                 name: value
                 for name, value in self.epoch_metrics.items()
-                if name in progress_bar_metric_names
+                if any(name in names for names in progress_bar_metric_names)
             }
             trainer._update_progress_bar_metrics(running_stage, progress_bar_epoch_metrics)
 
         if trainer.loggers and self.epoch_metrics and DistributedUtils.is_rank_zero():
             logger_epoch_metrics: dict[str, float] = {
-                k: v for k, v in self.epoch_metrics.items() if k in logger_metric_names
+                k: v
+                for k, v in self.epoch_metrics.items()
+                if any(k in names for names in logger_metric_names)
             }
             if logger_epoch_metrics:
                 trainer._log_metrics(logger_epoch_metrics, step=state.global_step)
@@ -421,7 +462,15 @@ class EvaluationLoop(Loop):
                 "on_validation_epoch_end",
                 module.on_validation_epoch_end
             )
+            batch_epoch_metrics: dict[str, float] = dict(self.epoch_metrics)
             self._consume_epoch_end_hook_metrics(module, state, running_stage)
+            hook_epoch_metrics: dict[str, float] = {
+                name: value
+                for name, value in self.epoch_metrics.items()
+                if name not in batch_epoch_metrics or batch_epoch_metrics[name] != value
+            }
+            for result in self.results:
+                result.update(hook_epoch_metrics)
             self.trainer._callback_metrics.update(self.epoch_metrics)
             trainer._call_callback_hooks(
                 module,
@@ -458,7 +507,15 @@ class EvaluationLoop(Loop):
                 "on_test_epoch_end",
                 module.on_test_epoch_end
             )
+            batch_epoch_metrics = dict(self.epoch_metrics)
             self._consume_epoch_end_hook_metrics(module, state, running_stage)
+            hook_epoch_metrics = {
+                name: value
+                for name, value in self.epoch_metrics.items()
+                if name not in batch_epoch_metrics or batch_epoch_metrics[name] != value
+            }
+            for result in self.results:
+                result.update(hook_epoch_metrics)
             self.trainer._callback_metrics.update(self.epoch_metrics)
             trainer._call_callback_hooks(
                 module,
@@ -481,9 +538,53 @@ class EvaluationLoop(Loop):
 
         module._reset_logged_metrics()
         trainer._raise_if_sigterm()
-        return self.epoch_metrics
+        return self.results
 
-    def _get_dataloader(self) -> DataLoader:  # type: ignore[type-arg]
+    def _verify_dataloader_idx_requirements(
+        self,
+        module: Module,
+        include_dataloader_idx: bool
+    ) -> None:
+        prefix: str = "validation" if self.stage == "validate" else "test"
+        for hook_name in (
+            f"{prefix}_step",
+            f"on_{prefix}_batch_start",
+            f"on_{prefix}_batch_end"
+        ):
+            hook: object = getattr(module, hook_name)
+            if not callable(hook):
+                continue
+            parameters: dict[str, inspect.Parameter] = dict(
+                inspect.signature(hook).parameters
+            )
+            has_varargs: bool = any(
+                parameter.kind is inspect.Parameter.VAR_POSITIONAL
+                for parameter in parameters.values()
+            )
+            dataloader_parameter: inspect.Parameter | None = parameters.get(
+                "dataloader_idx"
+            )
+            if (
+                include_dataloader_idx
+                and dataloader_parameter is None
+                and not has_varargs
+            ):
+                raise RuntimeError(
+                    f"Multiple {self.stage} dataloaders require `dataloader_idx` in "
+                    f"{type(module).__qualname__}.{hook_name}()."
+                )
+            if (
+                not include_dataloader_idx
+                and dataloader_parameter is not None
+                and dataloader_parameter.default is inspect.Parameter.empty
+            ):
+                raise RuntimeError(
+                    f"A single {self.stage} dataloader requires "
+                    f"{type(module).__qualname__}.{hook_name}() to remove `dataloader_idx` "
+                    "or give it the default value 0."
+                )
+
+    def _get_combined_loader(self) -> CombinedLoader:
         # Selects the dataloader belonging to the configured stage. The
         # assertions document that the trainer entry points guarantee the
         # corresponding dataloader exists before this loop runs.
@@ -491,30 +592,10 @@ class EvaluationLoop(Loop):
         if self.stage == "validate":
             if trainer.state.stage == "fit":
                 trainer._ensure_val_dataloader()
-            assert trainer.val_dataloader is not None
-            return trainer.val_dataloader
-        assert trainer.test_dataloader is not None
-        return trainer.test_dataloader
-
-    @staticmethod
-    def _safe_len(dataloader: DataLoader) -> int | None:  # type: ignore[type-arg]
-        # Returns the dataloader length, or None for iterable datasets that do
-        # not define one, so limit resolution can distinguish the two cases.
-        try:
-            return len(dataloader)
-        except TypeError:
-            return None
-
-    def _resolve_limit_batches(self, total: int | None) -> int | None:
-        # Resolves the effective batch ceiling for this pass. With a known
-        # total, a float limit selects that fraction of the pass (at least one
-        # batch) and an integer limit is capped at the total. Without a known
-        # total, an integer limit is used directly, a fractional float limit is
-        # rejected as a configuration error, and no limit means unbounded.
-        trainer: Trainer = self.trainer
-        if self.stage == "validate":
-            return resolve_batch_limit(total, trainer.limit_val_batches, "val")
-        return resolve_batch_limit(total, trainer.limit_test_batches, "test")
+            assert trainer._val_combined_loader is not None
+            return trainer._val_combined_loader
+        assert trainer._test_combined_loader is not None
+        return trainer._test_combined_loader
 
     def _accumulate_metrics(
         self,
@@ -523,7 +604,9 @@ class EvaluationLoop(Loop):
         logger_metric_names: set[str],
         progress_bar_metric_names: set[str],
         state: TrainerState,
-        running_stage: RunningStage
+        running_stage: RunningStage,
+        dataloader_idx: int,
+        include_dataloader_idx: bool
     ) -> None:
         # Drains the module's logged-metric buffer after each batch. Metrics
         # marked for distributed synchronization are mean-reduced across ranks
@@ -538,6 +621,11 @@ class EvaluationLoop(Loop):
         step_metrics: dict[str, float] = {}
         progress_bar_step_metrics: dict[str, float] = {}
         for name, metric in logged.items():
+            metric_name: str = (
+                f"{name}/dataloader_idx_{dataloader_idx}"
+                if include_dataloader_idx and metric.add_dataloader_idx
+                else name
+            )
             value: torch.Tensor | float = metric.value
             if metric.sync_distributed and DistributedUtils.is_distributed():
                 if not isinstance(value, torch.Tensor):
@@ -546,17 +634,17 @@ class EvaluationLoop(Loop):
             if isinstance(value, torch.Tensor):
                 value: torch.Tensor | float = value.item()
             if metric.on_step and metric.logger:
-                step_metrics[name] = value
+                step_metrics[metric_name] = value
             if metric.on_step and metric.progress_bar:
-                progress_bar_step_metrics[name] = value
+                progress_bar_step_metrics[metric_name] = value
             if metric.on_epoch:
-                if name not in epoch_accum:
-                    epoch_accum[name] = MetricAccumulator(reduction=metric.reduction)
-                epoch_accum[name].update(value, batch_size=metric.batch_size)
+                if metric_name not in epoch_accum:
+                    epoch_accum[metric_name] = MetricAccumulator(reduction=metric.reduction)
+                epoch_accum[metric_name].update(value, batch_size=metric.batch_size)
                 if metric.logger:
-                    logger_metric_names.add(name)
+                    logger_metric_names.add(metric_name)
                 if metric.progress_bar:
-                    progress_bar_metric_names.add(name)
+                    progress_bar_metric_names.add(metric_name)
 
         if step_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
             self.trainer._log_metrics(step_metrics, step=state.global_step)

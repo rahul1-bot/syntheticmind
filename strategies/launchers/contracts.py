@@ -15,7 +15,12 @@ from syntheticmind.utilities.types import (
 __all__: list[str] = ["ProcessStartMethod"]
 
 type ProcessStartMethod = Literal["popen", "spawn", "fork", "forkserver"]
-type StageResult = None | dict[str, float] | list[ModelOutput]
+type StageResult = (
+    None
+    | list[dict[str, float]]
+    | list[ModelOutput]
+    | list[list[ModelOutput]]
+)
 type NumPyRandomState = tuple[str, np.ndarray, int, int, float]
 
 
@@ -81,9 +86,9 @@ class _WorkerOutput(BaseModel):
     validation_metrics: dict[str, float]
     test_metrics: dict[str, float]
     total_train_batches: int | None
-    total_val_batches: int | None
-    total_test_batches: int | None
-    total_predict_batches: int | None
+    total_val_batches: list[int | None] | None
+    total_test_batches: list[int | None] | None
+    total_predict_batches: list[int | None] | None
     received_sigterm: bool
     is_last_batch: bool
     global_state: _GlobalState

@@ -42,6 +42,7 @@ from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.state.trainer_state import TrainerState
+from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 
 if TYPE_CHECKING:
@@ -83,8 +84,7 @@ class FitLoop(Loop):
             callback for callback in callbacks if not isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         assert self.epoch_loop is not None
-        total_train_batches: int | None = trainer._total_train_batches
-        max_train_batches: int | None = self.epoch_loop._resolve_limit_batches(total_train_batches)
+        max_train_batches: int | None = trainer._total_train_batches
         trainer._raise_if_sigterm()
         if (
             self._max_epochs_reached(state)
@@ -119,9 +119,14 @@ class FitLoop(Loop):
             # DistributedSampler derives its shuffle permutation from the
             # epoch number; seeding it every epoch prevents repeating the
             # first epoch's shuffle order indefinitely.
-            train_dl: DataLoader | None = trainer.train_dataloader  # type: ignore[type-arg]
-            if train_dl is not None and isinstance(train_dl.sampler, DistributedSampler):
-                train_dl.sampler.set_epoch(epoch)
+            combined_loader: CombinedLoader | None = trainer._train_combined_loader
+            if combined_loader is not None:
+                for train_dl in combined_loader.flattened:
+                    if (
+                        isinstance(train_dl, DataLoader)
+                        and isinstance(train_dl.sampler, DistributedSampler)
+                    ):
+                        train_dl.sampler.set_epoch(epoch)
 
             state.set_running_stage("training")
             module._running_stage = "training"

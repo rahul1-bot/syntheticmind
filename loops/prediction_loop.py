@@ -19,24 +19,29 @@
 #
 # Author: Rahul Sawhney
 
+import inspect
 import time
-from collections.abc import Iterator
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import Module
-from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
+from syntheticmind.utilities.combined_loader import CombinedLoader
+from syntheticmind.utilities.data_transfer import move_data_to_device
 from syntheticmind.utilities.evaluation import evaluation_context
-from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
+from syntheticmind.utilities.model_helpers import (
+    ModuleMode,
+    is_overridden,
+    is_parameter_in_hook_signature
+)
 from syntheticmind.utilities.types import Batch, ModelOutput
 
 if TYPE_CHECKING:
@@ -59,11 +64,11 @@ class PredictionLoop(Loop):
         self.return_predictions: bool = return_predictions
         self.inference_mode: bool = inference_mode
 
-    def run(self) -> list[ModelOutput]:
+    def run(self) -> list[ModelOutput] | list[list[ModelOutput]] | None:
         with evaluation_context(self.inference_mode):
             return self._run()
 
-    def _run(self) -> list[ModelOutput]:
+    def _run(self) -> list[ModelOutput] | list[list[ModelOutput]] | None:
         # Executes one full prediction pass. The sequence is: switch the module
         # to evaluation mode through its prediction hook, fire the stage-start
         # and epoch-start hook pairs, iterate batches under inference mode with
@@ -76,20 +81,26 @@ class PredictionLoop(Loop):
         strategy: Strategy = trainer.strategy
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
-        predict_dataloader: DataLoader | None = trainer.predict_dataloader  # type: ignore[type-arg]
-        assert predict_dataloader is not None
+        combined_loader: CombinedLoader | None = trainer._predict_combined_loader
+        assert combined_loader is not None
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model
         assert model is not None
 
         state.set_running_stage("predicting")
         module._running_stage = "predicting"
-        total_batches: int | None = self._safe_len(predict_dataloader)
-        max_batches: int | None = self._resolve_limit_batches(total_batches)
+        num_batches: list[int | float] = trainer.num_predict_batches
+        combined_loader.limits = num_batches
+        total_batches: int | None = combined_loader._length()
+        max_batches: int | None = total_batches
         trainer._raise_if_sigterm()
         if max_batches == 0:
             module._reset_logged_metrics()
-            return []
+            return None
+
+        num_dataloaders: int = len(combined_loader.flattened)
+        include_dataloader_idx: bool = num_dataloaders > 1
+        self._verify_dataloader_idx_requirements(module, include_dataloader_idx)
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -120,21 +131,22 @@ class PredictionLoop(Loop):
             module.on_predict_epoch_start
         )
 
-        all_predictions: list[ModelOutput] = []
+        predictions_by_dataloader: list[list[ModelOutput]] = [
+            [] for _ in range(num_dataloaders)
+        ]
 
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_predict_dataloader"):
-            data_fetcher: _DataFetcher = _DataFetcher(
-                predict_dataloader,
+            data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
+                combined_loader,
                 max_batches,
-                sized=total_batches is not None
+                sized=combined_loader._has_sized_iterables()
             )
-            dataloader_iterator: Iterator[Batch] = iter(data_fetcher)
+            dataloader_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
         trainer._record_dataloader_iterator_creation_time(
             "predicting",
             time.perf_counter() - dataloader_iterator_start_time
         )
-        batch_idx: int = -1
         while not data_fetcher.done:
             trainer._raise_if_sigterm(synchronize=False)
             dataloader_fetch_start_time: float = time.perf_counter()
@@ -142,32 +154,47 @@ class PredictionLoop(Loop):
                 with trainer.profiler.profile(
                     f"[{type(self).__name__}].predict_next"
                 ):
-                    batch: Batch = next(dataloader_iterator)
+                    fetched_batch: object
+                    fetched_batch, batch_idx, dataloader_idx = next(dataloader_iterator)
             except StopIteration:
                 break
             trainer._record_dataloader_fetch_time(
                 "predicting",
                 time.perf_counter() - dataloader_fetch_start_time
             )
-            batch_idx += 1
-
+            batch: Batch = cast(Batch, fetched_batch)
             batch: Batch = trainer.precision_plugin.convert_input(batch)
+            hook_dataloader_idx: int | None = (
+                dataloader_idx if include_dataloader_idx else None
+            )
+            batch_hook_arguments: tuple[object, ...] = (
+                (batch, batch_idx)
+                if hook_dataloader_idx is None
+                else (batch, batch_idx, hook_dataloader_idx)
+            )
+            step_arguments: tuple[object, ...] = batch_hook_arguments
+            if not is_parameter_in_hook_signature(
+                module.predict_step,
+                "batch_idx",
+                minimum_arguments=2
+            ):
+                step_arguments = (
+                    (batch,)
+                    if hook_dataloader_idx is None
+                    else (batch, hook_dataloader_idx)
+                )
 
             trainer._call_callback_hooks(
                 module,
                 "on_predict_batch_start",
-                batch,
-                batch_idx,
-                0,
+                *batch_hook_arguments,
                 callback_group=callbacks
             )
             trainer._call_module_hook(
                 module,
                 "on_predict_batch_start",
-                module.on_predict_batch_start,
-                batch,
-                batch_idx,
-                0
+                cast(Callable[..., object], module.on_predict_batch_start),
+                *batch_hook_arguments
             )
 
             dm: DataModule | None = trainer.datamodule
@@ -177,7 +204,7 @@ class PredictionLoop(Loop):
                     "on_before_batch_transfer",
                     dm.on_before_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             else:
                 batch = trainer._call_module_hook(
@@ -185,7 +212,7 @@ class PredictionLoop(Loop):
                     "on_before_batch_transfer",
                     module.on_before_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
                 batch = trainer._call_datamodule_hook(
@@ -194,7 +221,7 @@ class PredictionLoop(Loop):
                     dm.transfer_batch_to_device,
                     batch,
                     device,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             else:
                 batch = trainer._call_module_hook(
@@ -203,7 +230,7 @@ class PredictionLoop(Loop):
                     module.transfer_batch_to_device,
                     batch,
                     device,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
                 batch = trainer._call_datamodule_hook(
@@ -211,7 +238,7 @@ class PredictionLoop(Loop):
                     "on_after_batch_transfer",
                     dm.on_after_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
             else:
                 batch = trainer._call_module_hook(
@@ -219,7 +246,7 @@ class PredictionLoop(Loop):
                     "on_after_batch_transfer",
                     module.on_after_batch_transfer,
                     batch,
-                    dataloader_idx=0
+                    dataloader_idx=dataloader_idx
                 )
 
             with trainer.precision_plugin.predict_step_context():
@@ -228,29 +255,29 @@ class PredictionLoop(Loop):
                         "predict_step",
                         strategy.predict_step,
                         model,
-                        batch,
-                        batch_idx
+                        *step_arguments
                     )
             if self.return_predictions:
-                all_predictions.append(outputs)
+                predictions_by_dataloader[dataloader_idx].append(
+                    cast(
+                        ModelOutput,
+                        move_data_to_device(cast(Batch, outputs), torch.device("cpu"))
+                    )
+                )
 
             trainer._call_callback_hooks(
                 module,
                 "on_predict_batch_end",
                 outputs,
-                batch,
-                batch_idx,
-                0,
+                *batch_hook_arguments,
                 callback_group=callbacks
             )
             trainer._call_module_hook(
                 module,
                 "on_predict_batch_end",
-                module.on_predict_batch_end,
+                cast(Callable[..., object], module.on_predict_batch_end),
                 outputs,
-                batch,
-                batch_idx,
-                0
+                *batch_hook_arguments
             )
 
         trainer._call_callback_hooks(
@@ -277,25 +304,51 @@ class PredictionLoop(Loop):
 
         module._reset_logged_metrics()
         trainer._raise_if_sigterm()
-        return all_predictions
+        if not self.return_predictions:
+            return None
+        if num_dataloaders == 1:
+            return predictions_by_dataloader[0]
+        return predictions_by_dataloader
 
     @staticmethod
-    def _safe_len(dataloader: DataLoader) -> int | None:  # type: ignore[type-arg]
-        # Returns the dataloader length, or None for iterable datasets that do
-        # not define one, so limit resolution can distinguish the two cases.
-        try:
-            return len(dataloader)
-        except TypeError:
-            return None
-
-    def _resolve_limit_batches(self, total: int | None) -> int | None:
-        # Resolves the effective batch ceiling for this pass. With a known
-        # total, a float limit selects that fraction of the pass (at least one
-        # batch) and an integer limit is capped at the total. Without a known
-        # total, an integer limit is used directly, a fractional float limit is
-        # rejected as a configuration error, and no limit means unbounded.
-        return resolve_batch_limit(
-            total,
-            self.trainer.limit_predict_batches,
-            "predict"
-        )
+    def _verify_dataloader_idx_requirements(
+        module: Module,
+        include_dataloader_idx: bool
+    ) -> None:
+        for hook_name in (
+            "predict_step",
+            "on_predict_batch_start",
+            "on_predict_batch_end"
+        ):
+            hook: object = getattr(module, hook_name)
+            if not callable(hook):
+                continue
+            parameters: dict[str, inspect.Parameter] = dict(
+                inspect.signature(hook).parameters
+            )
+            has_varargs: bool = any(
+                parameter.kind is inspect.Parameter.VAR_POSITIONAL
+                for parameter in parameters.values()
+            )
+            dataloader_parameter: inspect.Parameter | None = parameters.get(
+                "dataloader_idx"
+            )
+            if (
+                include_dataloader_idx
+                and dataloader_parameter is None
+                and not has_varargs
+            ):
+                raise RuntimeError(
+                    f"Multiple predict dataloaders require `dataloader_idx` in "
+                    f"{type(module).__qualname__}.{hook_name}()."
+                )
+            if (
+                not include_dataloader_idx
+                and dataloader_parameter is not None
+                and dataloader_parameter.default is inspect.Parameter.empty
+            ):
+                raise RuntimeError(
+                    f"A single predict dataloader requires "
+                    f"{type(module).__qualname__}.{hook_name}() to remove `dataloader_idx` "
+                    "or give it the default value 0."
+                )

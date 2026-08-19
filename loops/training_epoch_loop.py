@@ -45,22 +45,21 @@ import warnings
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.core.optimizer import SyntheticOptimizer, do_nothing_closure
-from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
+from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.metric_accumulator import MetricAccumulator
@@ -234,8 +233,8 @@ class TrainingEpochLoop(Loop):
         if not optimizers:
             raise RuntimeError("Trainer has no optimizers configured for training.")
         optimizer: torch.optim.Optimizer | None = trainer.optimizer
-        train_dataloader: DataLoader | None = trainer.train_dataloader  # type: ignore[type-arg]
-        assert train_dataloader is not None
+        combined_loader: CombinedLoader | None = trainer._train_combined_loader
+        assert combined_loader is not None
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model
         assert model is not None
@@ -245,8 +244,8 @@ class TrainingEpochLoop(Loop):
 
         self._grad_scaler: torch.GradScaler | None = trainer.scaler
 
-        total_batches: int | None = self._safe_len(train_dataloader)
-        max_batches: int | None = self._resolve_limit_batches(total_batches)
+        total_batches: int | None = combined_loader._length()
+        max_batches: int | None = total_batches
         epoch_accum: dict[str, MetricAccumulator] = {}
         epoch_logger_names: set[str] = set()
         epoch_progress_bar_names: set[str] = set()
@@ -256,12 +255,12 @@ class TrainingEpochLoop(Loop):
         self._has_entered_batch_loop: bool = True
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_train_dataloader"):
-            data_fetcher: _DataFetcher = _DataFetcher(
-                train_dataloader,
+            data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
+                combined_loader,
                 max_batches,
-                sized=total_batches is not None
+                sized=combined_loader._has_sized_iterables()
             )
-            train_iterator: Iterator[Batch] = iter(data_fetcher)
+            train_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
         trainer._record_dataloader_iterator_creation_time(
             "training",
             time.perf_counter() - dataloader_iterator_start_time
@@ -278,7 +277,8 @@ class TrainingEpochLoop(Loop):
                 with trainer.profiler.profile(
                     f"[{type(self).__name__}].train_dataloader_next"
                 ):
-                    batch: Batch = next(train_iterator)
+                    fetched_batch: object
+                    fetched_batch, _, _ = next(train_iterator)
             except StopIteration:
                 break
             trainer._record_dataloader_fetch_time(
@@ -288,6 +288,7 @@ class TrainingEpochLoop(Loop):
             batch_idx: int = batch_idx + 1
             self.is_last_batch = data_fetcher.done
 
+            batch: Batch = cast(Batch, fetched_batch)
             batch: Batch = trainer.precision_plugin.convert_input(batch)
             # Mid-epoch resume: the already-completed prefix is consumed and
             # discarded, so the dataloader reproduces the original batch
@@ -581,27 +582,6 @@ class TrainingEpochLoop(Loop):
             self.accumulate_grad_batches
         )
         return automatic_closure
-
-    @staticmethod
-    def _safe_len(dataloader: DataLoader) -> int | None:  # type: ignore[type-arg]
-        # Returns the dataloader length, or None for iterable datasets that do
-        # not define one, so limit resolution can distinguish the two cases.
-        try:
-            return len(dataloader)
-        except TypeError:
-            return None
-
-    def _resolve_limit_batches(self, total: int | None) -> int | None:
-        # Resolves the effective batch ceiling for this epoch. With a known
-        # total, a float limit selects that fraction of the epoch (at least one
-        # batch) and an integer limit is capped at the total. Without a known
-        # total, an integer limit is used directly, a fractional float limit is
-        # rejected as a configuration error, and no limit means unbounded.
-        return resolve_batch_limit(
-            total,
-            self.trainer.limit_train_batches,
-            "train"
-        )
 
     def _clip_gradients(self, optimizer: torch.optim.Optimizer) -> None:
         # Applies the configured clipping algorithm to every parameter in the

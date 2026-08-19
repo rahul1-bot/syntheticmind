@@ -2,4 +2,6 @@
 #
 # Author: Rahul Sawhney
 
-__all__: list[str] = []
+from syntheticmind.utilities.combined_loader import CombinedLoader
+
+__all__: list[str] = ["CombinedLoader"]

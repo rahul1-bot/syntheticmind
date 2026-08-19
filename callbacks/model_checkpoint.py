@@ -531,7 +531,7 @@ class ModelCheckpoint(Checkpoint):
             return self._save_on_train_epoch_end
         if trainer.check_val_every_n_epoch != 1:
             return False
-        if not trainer.enable_validation or trainer.num_val_batches == 0:
+        if not trainer.enable_validation or not any(trainer.num_val_batches):
             return True
         return trainer.val_check_interval == 1.0
 

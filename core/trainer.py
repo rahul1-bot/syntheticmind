@@ -88,6 +88,7 @@ from syntheticmind.loops.batch_limits import (
     normalize_batch_limit,
     normalize_fast_dev_run,
     normalize_sanity_steps,
+    resolve_batch_limit,
 )
 from syntheticmind.loops.evaluation_loop import EvaluationLoop
 from syntheticmind.loops.fit_loop import FitLoop
@@ -104,6 +105,7 @@ from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.single_device import SingleDeviceStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.console import ConsoleRenderer
+from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.utilities.filesystem import (
@@ -874,14 +876,14 @@ class Trainer:
         self.optimizer: torch.optim.Optimizer | None = None
         self.scheduler: _SchedulerInstance | None = None
         self.scheduler_config: LRSchedulerConfig | None = None
-        self.train_dataloader: torch.utils.data.DataLoader | None = None
-        self.val_dataloader: torch.utils.data.DataLoader | None = None
-        self.test_dataloader: torch.utils.data.DataLoader | None = None
-        self.predict_dataloader: torch.utils.data.DataLoader | None = None
+        self._train_combined_loader: CombinedLoader | None = None
+        self._val_combined_loader: CombinedLoader | None = None
+        self._test_combined_loader: CombinedLoader | None = None
+        self._predict_combined_loader: CombinedLoader | None = None
         self._total_train_batches: int | None = None
-        self._total_val_batches: int | None = None
-        self._total_test_batches: int | None = None
-        self._total_predict_batches: int | None = None
+        self._total_val_batches: list[int | None] | None = None
+        self._total_test_batches: list[int | None] | None = None
+        self._total_predict_batches: list[int | None] | None = None
         self.reload_dataloaders_every_n_epochs: int = reload_dataloaders_every_n_epochs
         self._last_train_dataloader_reload_epoch: int | None = None
         self._last_val_dataloader_reload_epoch: int | None = None
@@ -957,9 +959,9 @@ class Trainer:
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics()
         self._total_train_batches: int | None = None
-        self._total_val_batches: int | None = None
-        self.train_dataloader = None
-        self.val_dataloader = None
+        self._total_val_batches: list[int | None] | None = None
+        self._train_combined_loader: CombinedLoader | None = None
+        self._val_combined_loader: CombinedLoader | None = None
         self._last_train_dataloader_reload_epoch = None
         self._last_val_dataloader_reload_epoch = None
         self.fit_loop.should_stop = False
@@ -1051,7 +1053,7 @@ class Trainer:
                 self.limit_train_batches != 0
                 and is_overridden("training_step", module, Module)
             ):
-                self._request_dataloader("train")
+                self._request_dataloaders("train")
             else:
                 self._total_train_batches = 0
             self._configure_validation_schedule(reset_time=True)
@@ -1060,10 +1062,16 @@ class Trainer:
             # accelerator is a common throughput mistake worth one warning,
             # never an error.
             if is_rank_zero():
-                train_dataloader: torch.utils.data.DataLoader | None = self.train_dataloader
-                if train_dataloader is not None and train_dataloader.num_workers == 0:
-                    if not isinstance(self.accelerator, CPUAccelerator):
-                        log.warning("num_workers=0 with GPU accelerator. Consider increasing for better throughput.")
+                combined_loader: CombinedLoader | None = self._train_combined_loader
+                if combined_loader is not None:
+                    for train_dataloader in combined_loader.flattened:
+                        if (
+                            isinstance(train_dataloader, torch.utils.data.DataLoader)
+                            and train_dataloader.num_workers == 0
+                            and not isinstance(self.accelerator, CPUAccelerator)
+                        ):
+                            log.warning("num_workers=0 with GPU accelerator. Consider increasing for better throughput.")
+                            break
 
             # Resolve the concrete device, hand it to the accelerator, and let
             # the strategy place or wrap the module on it. BatchNorm
@@ -1249,7 +1257,7 @@ class Trainer:
         datamodule: DataModule,
         ckpt_path: str | Path | None = None,
         weights_only: bool | None = None
-    ) -> dict[str, float]:
+    ) -> list[dict[str, float]]:
         # Executes a standalone validation stage and returns its reduced epoch
         # metrics. The module's training-mode flag is captured before the run
         # and restored in the finally block, so evaluating a model mid-workflow
@@ -1269,7 +1277,7 @@ class Trainer:
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
-                dict[str, float],
+                list[dict[str, float]],
                 launcher.launch(
                     "validate",
                     self,
@@ -1285,7 +1293,8 @@ class Trainer:
         self._active_exception = None
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("validating")
-        self._total_val_batches: int | None = None
+        self._total_val_batches: list[int | None] | None = None
+        self._val_combined_loader: CombinedLoader | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer = self
@@ -1294,7 +1303,7 @@ class Trainer:
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
         stage_completed: bool = False
-        metrics: dict[str, float] = {}
+        metrics: list[dict[str, float]] = []
         selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path
         )
@@ -1318,7 +1327,7 @@ class Trainer:
                 datamodule.setup,
                 "validate"
             )
-            self._request_dataloader("val")
+            self._request_dataloaders("val")
 
             device: torch.device = self._resolve_device()
             module = self._setup_model(module, device)
@@ -1335,7 +1344,7 @@ class Trainer:
             self._call_module_hook(module, "setup", module.setup, "validate")
             self._autolog_hyperparameters(module, datamodule)
 
-            metrics: dict[str, float] = self.validate_loop.run()
+            metrics: list[dict[str, float]] = self.validate_loop.run()
             stage_completed: bool = True
         except BaseException as exception:
             self._handle_exception(module, datamodule, exception)
@@ -1358,7 +1367,7 @@ class Trainer:
         datamodule: DataModule,
         ckpt_path: str | Path | None = None,
         weights_only: bool | None = None
-    ) -> dict[str, float]:
+    ) -> list[dict[str, float]]:
         # Executes a standalone test stage and returns its reduced epoch
         # metrics, following the same setup, execution, and teardown skeleton
         # as validate with the test dataloader and test loop.
@@ -1377,7 +1386,7 @@ class Trainer:
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
-                dict[str, float],
+                list[dict[str, float]],
                 launcher.launch(
                     "test",
                     self,
@@ -1393,7 +1402,8 @@ class Trainer:
         self._active_exception = None
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("testing")
-        self._total_test_batches: int | None = None
+        self._total_test_batches: list[int | None] | None = None
+        self._test_combined_loader: CombinedLoader | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer = self
@@ -1402,7 +1412,7 @@ class Trainer:
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
         stage_completed: bool = False
-        metrics: dict[str, float] = {}
+        metrics: list[dict[str, float]] = []
         selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path
         )
@@ -1426,33 +1436,7 @@ class Trainer:
                 datamodule.setup,
                 "test"
             )
-            with self.profiler.profile("setup_test_dataloader"):
-                self.test_dataloader: torch.utils.data.DataLoader | None = (
-                    self._call_datamodule_hook(
-                        datamodule,
-                        "test_dataloader",
-                        datamodule.test_dataloader
-                    )
-                )
-
-            if isinstance(self.test_dataloader, (list, tuple, dict)):
-                raise MisconfigurationError(
-                    "Multiple test dataloaders are not supported. test_dataloader() must return a single DataLoader."
-                )
-
-            if self.overfit_batches:
-                self.test_dataloader = self._prepare_overfit_dataloader(
-                    self.test_dataloader,
-                    "test"
-                )
-
-            if self.use_distributed_sampler and self.strategy.is_distributed:
-                if not isinstance(self.test_dataloader.dataset, IterableDataset):
-                    self.test_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.test_dataloader, shuffle=False)
-                elif is_rank_zero():
-                    log.warning("Skipping DistributedSampler for test dataloader: IterableDataset detected.")
-
-            self._total_test_batches: int | None = self._safe_len(self.test_dataloader) if self.test_dataloader is not None else None
+            self._request_dataloaders("test")
 
             device: torch.device = self._resolve_device()
             module = self._setup_model(module, device)
@@ -1469,7 +1453,7 @@ class Trainer:
             self._call_module_hook(module, "setup", module.setup, "test")
             self._autolog_hyperparameters(module, datamodule)
 
-            metrics: dict[str, float] = self.test_loop.run()
+            metrics: list[dict[str, float]] = self.test_loop.run()
             stage_completed: bool = True
         except BaseException as exception:
             self._handle_exception(module, datamodule, exception)
@@ -1490,10 +1474,10 @@ class Trainer:
         self,
         module: Module,
         datamodule: DataModule,
-        return_predictions: bool = True,
+        return_predictions: bool | None = None,
         ckpt_path: str | Path | None = None,
         weights_only: bool | None = None
-    ) -> list[ModelOutput]:
+    ) -> list[ModelOutput] | list[list[ModelOutput]] | None:
         # Executes a standalone prediction stage and returns the collected
         # step outputs. Distributed execution uses the unrepeated sampler so
         # no rank emits padded duplicate predictions, and the retention flag
@@ -1515,10 +1499,12 @@ class Trainer:
         #     when retention is disabled.
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
+        if return_predictions is not None and type(return_predictions) is not bool:
+            raise TypeError("`return_predictions` must be a bool or None.")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
-                list[ModelOutput],
+                list[ModelOutput] | list[list[ModelOutput]] | None,
                 launcher.launch(
                     "predict",
                     self,
@@ -1535,7 +1521,8 @@ class Trainer:
         self._active_exception = None
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("predicting")
-        self._total_predict_batches: int | None = None
+        self._total_predict_batches: list[int | None] | None = None
+        self._predict_combined_loader: CombinedLoader | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer = self
@@ -1544,7 +1531,7 @@ class Trainer:
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
         stage_completed: bool = False
-        predictions: list[ModelOutput] = []
+        predictions: list[ModelOutput] | list[list[ModelOutput]] | None = None
         selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path
         )
@@ -1568,33 +1555,7 @@ class Trainer:
                 datamodule.setup,
                 "predict"
             )
-            with self.profiler.profile("setup_predict_dataloader"):
-                self.predict_dataloader: torch.utils.data.DataLoader | None = (
-                    self._call_datamodule_hook(
-                        datamodule,
-                        "predict_dataloader",
-                        datamodule.predict_dataloader
-                    )
-                )
-
-            if isinstance(self.predict_dataloader, (list, tuple, dict)):
-                raise MisconfigurationError(
-                    "Multiple predict dataloaders are not supported. predict_dataloader() must return a single DataLoader."
-                )
-
-            if self.overfit_batches:
-                self.predict_dataloader = self._prepare_overfit_dataloader(
-                    self.predict_dataloader,
-                    "predict"
-                )
-
-            if self.use_distributed_sampler and self.strategy.is_distributed:
-                if not isinstance(self.predict_dataloader.dataset, IterableDataset):
-                    self.predict_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_unrepeated_sampler(self.predict_dataloader)
-                elif is_rank_zero():
-                    log.warning("Skipping DistributedSampler for predict dataloader: IterableDataset detected.")
-
-            self._total_predict_batches: int | None = self._safe_len(self.predict_dataloader)
+            self._request_dataloaders("predict")
 
             device: torch.device = self._resolve_device()
             module = self._setup_model(module, device)
@@ -1611,8 +1572,12 @@ class Trainer:
             self._call_module_hook(module, "setup", module.setup, "predict")
             self._autolog_hyperparameters(module, datamodule)
 
-            self.predict_loop.return_predictions = return_predictions
-            predictions: list[ModelOutput] = self.predict_loop.run()
+            self.predict_loop.return_predictions = (
+                launcher is None or launcher.start_method == "popen"
+                if return_predictions is None
+                else return_predictions
+            )
+            predictions = self.predict_loop.run()
             stage_completed: bool = True
         except BaseException as exception:
             self._handle_exception(module, datamodule, exception)
@@ -1639,90 +1604,130 @@ class Trainer:
 
     def _safe_len(
         self,
-        dataloader: torch.utils.data.DataLoader | None
+        dataloader: object
     ) -> int | None:
         # Returns the dataloader length, or None both for an absent dataloader
         # and for iterable datasets that define no length, so callers can
         # treat unknown totals uniformly.
-        if dataloader is None:
+        if not isinstance(dataloader, Sized):
             return None
         try:
             return len(dataloader)
         except TypeError:
             return None
 
-    def _request_dataloader(
+    def _request_dataloaders(
         self,
-        stage: Literal["train", "val"]
-    ) -> torch.utils.data.DataLoader:
+        stage: Literal["train", "val", "test", "predict"]
+    ) -> CombinedLoader:
         datamodule: DataModule | None = self.datamodule
         assert datamodule is not None
-        hook_name: str
-        dataloader_hook: Callable[[], torch.utils.data.DataLoader]
-        if stage == "train":
-            hook_name = "train_dataloader"
-            dataloader_hook = datamodule.train_dataloader
-        else:
-            hook_name = "val_dataloader"
-            dataloader_hook = datamodule.val_dataloader
+        hook_name: str = f"{stage}_dataloader"
+        dataloader_hook: Callable[[], object] = cast(
+            Callable[[], object],
+            getattr(datamodule, hook_name)
+        )
         with self.profiler.profile(f"setup_{stage}_dataloader"):
             dataloader_result: object = self._call_datamodule_hook(
                 datamodule,
                 hook_name,
                 dataloader_hook
             )
-        if isinstance(dataloader_result, (list, tuple, dict)):
-            raise MisconfigurationError(
-                f"Multiple {stage} dataloaders are not supported. "
-                f"{hook_name}() must return a single DataLoader."
+        combined_loader: CombinedLoader = (
+            dataloader_result
+            if isinstance(dataloader_result, CombinedLoader)
+            else CombinedLoader(
+                dataloader_result,
+                "max_size_cycle" if stage == "train" else "sequential"
             )
-        if not isinstance(dataloader_result, torch.utils.data.DataLoader):
-            raise MisconfigurationError(
-                f"{hook_name}() must return a torch.utils.data.DataLoader, got "
-                f"{type(dataloader_result).__qualname__}."
+        )
+        if stage == "predict" and combined_loader.mode != "sequential":
+            raise ValueError(
+                "Trainer.predict() supports CombinedLoader only in sequential mode."
             )
-        dataloader: torch.utils.data.DataLoader = dataloader_result
-        if self.overfit_batches:
-            dataloader = self._prepare_overfit_dataloader(dataloader, stage)
-        if self.use_distributed_sampler and self.strategy.is_distributed:
-            if isinstance(dataloader.dataset, IterableDataset):
-                if is_rank_zero():
-                    log.warning(
-                        f"Skipping DistributedSampler for {stage} dataloader: "
-                        "IterableDataset detected."
+        processed_dataloaders: list[object] = []
+        totals: list[int | None] = []
+        for dataloader in combined_loader.flattened:
+            if not isinstance(dataloader, torch.utils.data.DataLoader):
+                try:
+                    iter(cast(Iterable[object], dataloader))
+                except TypeError as exception:
+                    raise MisconfigurationError(
+                        f"{hook_name}() returned a non-iterable leaf of type "
+                        f"{type(dataloader).__qualname__}."
+                    ) from exception
+            if isinstance(dataloader, torch.utils.data.DataLoader):
+                if self.overfit_batches and (
+                    stage == "train"
+                    or (stage == "val" and self.state.stage == "fit")
+                ):
+                    dataloader = self._prepare_overfit_dataloader(dataloader, stage)
+                if self.use_distributed_sampler and self.strategy.is_distributed:
+                    if isinstance(dataloader.dataset, IterableDataset):
+                        if is_rank_zero():
+                            log.warning(
+                                f"Skipping DistributedSampler for {stage} dataloader: "
+                                "IterableDataset detected."
+                            )
+                    elif stage == "predict":
+                        dataloader = self._wrap_with_unrepeated_sampler(dataloader)
+                    else:
+                        dataloader = self._wrap_with_distributed_sampler(
+                            dataloader,
+                            shuffle=(stage == "train" and not bool(self.overfit_batches))
+                        )
+                if (
+                    self.reload_dataloaders_every_n_epochs > 0
+                    and dataloader.persistent_workers
+                    and dataloader.pin_memory
+                ):
+                    warnings.warn(
+                        "The combination of `persistent_workers=True`, `pin_memory=True`, and "
+                        "`reload_dataloaders_every_n_epochs > 0` can lead to instability due "
+                        "to limitations in PyTorch.",
+                        UserWarning,
+                        stacklevel=3
                     )
-            else:
-                dataloader = self._wrap_with_distributed_sampler(
-                    dataloader,
-                    shuffle=(stage == "train" and not bool(self.overfit_batches))
-                )
-        if (
-            self.reload_dataloaders_every_n_epochs > 0
-            and dataloader.persistent_workers
-            and dataloader.pin_memory
-        ):
-            warnings.warn(
-                "The combination of `persistent_workers=True`, `pin_memory=True`, and "
-                "`reload_dataloaders_every_n_epochs > 0` can lead to instability due "
-                "to limitations in PyTorch.",
-                UserWarning,
-                stacklevel=3
-            )
+            processed_dataloaders.append(dataloader)
+            totals.append(self._safe_len(dataloader))
+        combined_loader.flattened = processed_dataloaders
+        combined_loader.limits = [
+            resolve_batch_limit(total, self._batch_limit_for_stage(stage), stage)
+            for total in totals
+        ]
         self._call_strategy_hook("barrier", self.strategy.barrier)
         if stage == "train":
-            self.train_dataloader = dataloader
-            self._total_train_batches = self._safe_len(dataloader)
+            self._train_combined_loader: CombinedLoader | None = combined_loader
+            self._total_train_batches: int | None = combined_loader._length()
             self._last_train_dataloader_reload_epoch = self.current_epoch
-        else:
-            self.val_dataloader = dataloader
-            self._total_val_batches = self._safe_len(dataloader)
+        elif stage == "val":
+            self._val_combined_loader: CombinedLoader | None = combined_loader
+            self._total_val_batches: list[int | None] | None = totals
             self._last_val_dataloader_reload_epoch = self.current_epoch
-        return dataloader
+        elif stage == "test":
+            self._test_combined_loader: CombinedLoader | None = combined_loader
+            self._total_test_batches: list[int | None] | None = totals
+        else:
+            self._predict_combined_loader: CombinedLoader | None = combined_loader
+            self._total_predict_batches: list[int | None] | None = totals
+        return combined_loader
+
+    def _batch_limit_for_stage(
+        self,
+        stage: Literal["train", "val", "test", "predict"]
+    ) -> int | float:
+        if stage == "train":
+            return self.limit_train_batches
+        if stage == "val":
+            return self.limit_val_batches
+        if stage == "test":
+            return self.limit_test_batches
+        return self.limit_predict_batches
 
     def _ensure_train_dataloader(self) -> None:
         reload_interval: int = self.reload_dataloaders_every_n_epochs
         last_reload_epoch: int | None = self._last_train_dataloader_reload_epoch
-        if self.train_dataloader is not None and (
+        if self._train_combined_loader is not None and (
             reload_interval == 0
             or (
                 last_reload_epoch is not None
@@ -1730,13 +1735,13 @@ class Trainer:
             )
         ):
             return
-        self._request_dataloader("train")
+        self._request_dataloaders("train")
         self._configure_validation_schedule(reset_time=False)
 
     def _ensure_val_dataloader(self) -> None:
         reload_interval: int = self.reload_dataloaders_every_n_epochs
         last_reload_epoch: int | None = self._last_val_dataloader_reload_epoch
-        if self.val_dataloader is not None and (
+        if self._val_combined_loader is not None and (
             reload_interval == 0
             or (
                 last_reload_epoch is not None
@@ -1744,14 +1749,12 @@ class Trainer:
             )
         ):
             return
-        self._request_dataloader("val")
+        self._request_dataloaders("val")
         self._configure_validation_schedule(reset_time=False)
 
     def _configure_validation_schedule(self, reset_time: bool) -> None:
         assert self.fit_loop.epoch_loop is not None
-        max_batches: int | None = self.fit_loop.epoch_loop._resolve_limit_batches(
-            self._total_train_batches
-        )
+        max_batches: int | None = self._total_train_batches
         module: Module | None = self.module
         datamodule: DataModule | None = self.datamodule
         validation_enabled: bool = (
@@ -1761,9 +1764,10 @@ class Trainer:
             and is_overridden("validation_step", module, Module)
             and is_overridden("val_dataloader", datamodule, DataModule)
         )
-        if validation_enabled and self.val_dataloader is not None:
-            validation_enabled = (
-                self.validate_loop._resolve_limit_batches(self._total_val_batches) != 0
+        if validation_enabled and self._total_val_batches is not None:
+            validation_enabled = any(
+                resolve_batch_limit(total, self.limit_val_batches, "val") != 0
+                for total in self._total_val_batches
             )
         self._validation_schedule.configure(
             max_batches,
@@ -2652,6 +2656,32 @@ class Trainer:
             self.strategy.cluster_environment.teardown,
             failures
         )
+        combined_loaders: tuple[tuple[str, CombinedLoader | None], ...] = (
+            (
+                ("train", self._train_combined_loader),
+                ("val", self._val_combined_loader)
+            )
+            if stage == "fit"
+            else (
+                ("val", self._val_combined_loader),
+            )
+            if stage == "validate"
+            else (
+                (
+                    stage,
+                    self._test_combined_loader
+                    if stage == "test"
+                    else self._predict_combined_loader
+                ),
+            )
+        )
+        for loader_stage, combined_loader in combined_loaders:
+            if combined_loader is not None:
+                self._attempt_teardown(
+                    f"{loader_stage}_combined_loader.reset",
+                    combined_loader.reset,
+                    failures
+                )
         self._attempt_teardown(
             "datamodule.teardown",
             lambda: self._call_datamodule_hook(
@@ -2817,9 +2847,7 @@ class Trainer:
             )
         if any(scheduler_config.interval == "step" for scheduler_config in config_schedulers):
             assert self.fit_loop.epoch_loop is not None
-            limited_batches: int | None = self.fit_loop.epoch_loop._resolve_limit_batches(
-                self._total_train_batches
-            )
+            limited_batches: int | None = self._total_train_batches
             if limited_batches is None:
                 raise MisconfigurationError(
                     "Cannot determine total training steps for the learning rate scheduler. "
@@ -3242,21 +3270,54 @@ class Trainer:
         return self._validation_schedule.enabled
 
     @property
+    def train_dataloader(self) -> object | None:
+        if self._train_combined_loader is None:
+            return None
+        return self._train_combined_loader.iterables
+
+    @property
+    def val_dataloaders(self) -> object | None:
+        if self._val_combined_loader is None:
+            return None
+        return self._val_combined_loader.iterables
+
+    @property
+    def test_dataloaders(self) -> object | None:
+        if self._test_combined_loader is None:
+            return None
+        return self._test_combined_loader.iterables
+
+    @property
+    def predict_dataloaders(self) -> object | None:
+        if self._predict_combined_loader is None:
+            return None
+        return self._predict_combined_loader.iterables
+
+    @property
     def num_training_batches(self) -> int | float:
-        assert self.fit_loop.epoch_loop is not None
-        resolved: int | None = self.fit_loop.epoch_loop._resolve_limit_batches(
-            self._total_train_batches
+        return (
+            float("inf")
+            if self._total_train_batches is None
+            else self._total_train_batches
         )
-        return float("inf") if resolved is None else resolved
 
     @property
     def num_val_batches(self) -> list[int | float]:
-        if self.val_dataloader is None:
+        if self._total_val_batches is None:
             return []
-        resolved: int | None = self.validate_loop._resolve_limit_batches(
-            self._total_val_batches
-        )
-        return [float("inf") if resolved is None else resolved]
+        resolved_batches: list[int | float] = []
+        for total_batches in self._total_val_batches:
+            effective_batches: int | None = resolve_batch_limit(
+                total_batches,
+                self.limit_val_batches,
+                "val"
+            )
+            resolved_batches.append(
+                float("inf")
+                if effective_batches is None
+                else effective_batches
+            )
+        return resolved_batches
 
     @property
     def num_sanity_val_batches(self) -> list[int | float]:
@@ -3267,21 +3328,39 @@ class Trainer:
 
     @property
     def num_test_batches(self) -> list[int | float]:
-        if self.test_dataloader is None:
+        if self._total_test_batches is None:
             return []
-        resolved: int | None = self.test_loop._resolve_limit_batches(
-            self._total_test_batches
-        )
-        return [float("inf") if resolved is None else resolved]
+        resolved_batches: list[int | float] = []
+        for total_batches in self._total_test_batches:
+            effective_batches: int | None = resolve_batch_limit(
+                total_batches,
+                self.limit_test_batches,
+                "test"
+            )
+            resolved_batches.append(
+                float("inf")
+                if effective_batches is None
+                else effective_batches
+            )
+        return resolved_batches
 
     @property
     def num_predict_batches(self) -> list[int | float]:
-        if self.predict_dataloader is None:
+        if self._total_predict_batches is None:
             return []
-        resolved: int | None = self.predict_loop._resolve_limit_batches(
-            self._total_predict_batches
-        )
-        return [float("inf") if resolved is None else resolved]
+        resolved_batches: list[int | float] = []
+        for total_batches in self._total_predict_batches:
+            effective_batches: int | None = resolve_batch_limit(
+                total_batches,
+                self.limit_predict_batches,
+                "predict"
+            )
+            resolved_batches.append(
+                float("inf")
+                if effective_batches is None
+                else effective_batches
+            )
+        return resolved_batches
 
     @property
     def estimated_stepping_batches(self) -> int | float:
@@ -3291,9 +3370,7 @@ class Trainer:
         # one-cycle schedule sizing must handle explicitly.
         if self.fit_loop.epoch_loop is None:
             return float("inf")
-        limited_batches: int | None = self.fit_loop.epoch_loop._resolve_limit_batches(
-            self._total_train_batches
-        )
+        limited_batches: int | None = self._total_train_batches
         if limited_batches is None:
             return float("inf") if self.max_steps == -1 else self.max_steps
         accum: int = self.fit_loop.epoch_loop.accumulate_grad_batches

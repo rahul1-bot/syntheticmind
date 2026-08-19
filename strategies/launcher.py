@@ -95,7 +95,7 @@ class _ProcessLauncher:
                     datamodule,
                     stage_kwargs
                 )
-            trainer._raise_if_sigterm()
+            trainer._raise_if_sigterm(synchronize=False)
             return result
 
     def kill(self, signum: int) -> None:

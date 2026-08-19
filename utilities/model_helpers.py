@@ -1,8 +1,13 @@
+import inspect
 from functools import partial
 
 from torch import nn
 
-__all__: list[str] = ["ModuleMode", "is_overridden"]
+__all__: list[str] = [
+    "ModuleMode",
+    "is_overridden",
+    "is_parameter_in_hook_signature"
+]
 
 
 class ModuleMode:
@@ -17,24 +22,61 @@ class ModuleMode:
     def restore(self, module: nn.Module) -> None:
         for name, submodule in module.named_modules():
             if name in self._training_modes:
-                submodule.training: bool = self._training_modes[name]
+                submodule.training = self._training_modes[name]
 
 
 def is_overridden(method_name: str, instance: object, parent: type[object]) -> bool:
-    instance_attribute: object | None = getattr(instance, method_name, None)
-    if instance_attribute is None:
+    optional_instance_attribute: object | None = getattr(instance, method_name, None)
+    if optional_instance_attribute is None:
         return False
-    parent_attribute: object | None = getattr(parent, method_name, None)
-    if parent_attribute is None:
+    optional_parent_attribute: object | None = getattr(parent, method_name, None)
+    if optional_parent_attribute is None:
         raise ValueError(f"{parent.__name__} does not define {method_name}().")
 
-    instance_attribute: object = _unwrap_callable(instance_attribute)
-    parent_attribute: object = _unwrap_callable(parent_attribute)
+    instance_attribute: object = _unwrap_callable(optional_instance_attribute)
+    parent_attribute: object = _unwrap_callable(optional_parent_attribute)
     instance_code: object | None = getattr(instance_attribute, "__code__", None)
     parent_code: object | None = getattr(parent_attribute, "__code__", None)
     if instance_code is None or parent_code is None:
         return instance_attribute is not parent_attribute
     return instance_code is not parent_code
+
+
+def is_parameter_in_hook_signature(
+    hook: object,
+    parameter_name: str,
+    explicit: bool = False,
+    minimum_arguments: int | None = None
+) -> bool:
+    if not callable(hook):
+        return False
+    parameters: list[inspect.Parameter] = list(
+        inspect.signature(hook).parameters.values()
+    )
+    positional_parameters: list[inspect.Parameter] = [
+        parameter
+        for parameter in parameters
+        if parameter.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD
+        }
+    ]
+    has_named_parameter: bool = any(
+        parameter.name == parameter_name
+        for parameter in positional_parameters
+    )
+    has_variable_arguments: bool = any(
+        parameter.kind is inspect.Parameter.VAR_POSITIONAL
+        for parameter in parameters
+    )
+    return (
+        has_named_parameter
+        or (not explicit and has_variable_arguments)
+        or (
+            minimum_arguments is not None
+            and len(positional_parameters) >= minimum_arguments
+        )
+    )
 
 
 def _unwrap_callable(callable_object: object) -> object:

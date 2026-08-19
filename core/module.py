@@ -53,6 +53,7 @@ from syntheticmind.core.optimizer import (
 from syntheticmind.core.saving import CheckpointHooks
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
 from syntheticmind.utilities.types import Batch, ModelOutput, Reduction, StepOutput
 
 if TYPE_CHECKING:
@@ -91,6 +92,7 @@ class MetricLoggingConfiguration(BaseModel):
     on_epoch: bool | None = None
     reduction: Reduction = "mean"
     sync_distributed: bool = False
+    add_dataloader_idx: bool = True
     batch_size: int | None = None
 
 
@@ -243,7 +245,12 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #     should be detached.
         raise NotImplementedError
 
-    def validation_step(self, batch: Batch, batch_idx: int) -> StepOutput:
+    def validation_step(
+        self,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0
+    ) -> StepOutput:
         # Operates on a single batch from the validation dataloader,
         # computing the quantities the client monitors (for example the
         # validation loss watched by EarlyStopping and ModelCheckpoint).
@@ -266,7 +273,12 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #     training mode automatically.
         raise NotImplementedError
 
-    def test_step(self, batch: Batch, batch_idx: int) -> StepOutput:
+    def test_step(
+        self,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0
+    ) -> StepOutput:
         # Operates on a single batch from the test dataloader.
         #
         # Args:
@@ -284,9 +296,24 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #     test-time behavior differs. The evaluation-mode and
         #     inference-mode conditions of validation_step apply here
         #     equally.
-        return self.validation_step(batch, batch_idx)
+        validation_step: Callable[..., StepOutput] = cast(
+            Callable[..., StepOutput],
+            self.validation_step
+        )
+        if is_parameter_in_hook_signature(
+            validation_step,
+            "dataloader_idx",
+            explicit=True
+        ):
+            return validation_step(batch, batch_idx, dataloader_idx)
+        return validation_step(batch, batch_idx)
 
-    def predict_step(self, batch: Batch, batch_idx: int) -> ModelOutput:
+    def predict_step(
+        self,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0
+    ) -> ModelOutput:
         # Operates on a single batch during Trainer.predict, producing the
         # model's inference output.
         #
@@ -313,6 +340,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #         def predict_step(self, batch: Batch, batch_idx: int) -> ModelOutput:
         #             features, _ = batch
         #             return self(features)
+        del batch_idx, dataloader_idx
         return self.forward(batch)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
@@ -447,6 +475,14 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         resolved_configuration: MetricLoggingConfiguration = (
             configuration if configuration is not None else MetricLoggingConfiguration()
         )
+        if (
+            resolved_configuration.add_dataloader_idx
+            and "/dataloader_idx_" in name
+        ):
+            raise MisconfigurationError(
+                f"self.log() received metric name {name!r} containing "
+                "`/dataloader_idx_` while add_dataloader_idx=True."
+            )
         current_fx_name: str | None = self._current_fx_name
         if current_fx_name is None:
             raise MisconfigurationError(
@@ -472,6 +508,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             on_epoch=resolved_on_epoch,
             reduction=resolved_configuration.reduction,
             sync_distributed=resolved_configuration.sync_distributed,
+            add_dataloader_idx=resolved_configuration.add_dataloader_idx,
             batch_size=resolved_configuration.batch_size
         )
         self._logged_metrics[name] = metric
@@ -1068,6 +1105,7 @@ class LoggedMetric:
         "on_epoch",
         "reduction",
         "sync_distributed",
+        "add_dataloader_idx",
         "batch_size"
     )
 
@@ -1080,6 +1118,7 @@ class LoggedMetric:
         on_epoch: bool,
         reduction: Reduction,
         sync_distributed: bool,
+        add_dataloader_idx: bool,
         batch_size: int | None
     ) -> None:
         # Stores the already-detached value and the fully resolved routing
@@ -1092,4 +1131,5 @@ class LoggedMetric:
         self.on_epoch: bool = on_epoch
         self.reduction: Reduction = reduction
         self.sync_distributed: bool = sync_distributed
+        self.add_dataloader_idx: bool = add_dataloader_idx
         self.batch_size: int | None = batch_size

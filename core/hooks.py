@@ -186,16 +186,16 @@ class DataHooks:
     def teardown(self, stage: TrainerStage) -> None:
         pass
 
-    def train_dataloader(self) -> torch.utils.data.DataLoader:
+    def train_dataloader(self) -> object:
         raise MisconfigurationError("train_dataloader() must be implemented before fitting a Module.")
 
-    def val_dataloader(self) -> torch.utils.data.DataLoader:
+    def val_dataloader(self) -> object:
         raise MisconfigurationError("val_dataloader() must be implemented before validating a Module.")
 
-    def test_dataloader(self) -> torch.utils.data.DataLoader:
+    def test_dataloader(self) -> object:
         raise MisconfigurationError("test_dataloader() must be implemented before testing a Module.")
 
-    def predict_dataloader(self) -> torch.utils.data.DataLoader:
+    def predict_dataloader(self) -> object:
         raise MisconfigurationError("predict_dataloader() must be implemented before predicting with a Module.")
 
     # Batch-transfer hook trio invoked by every loop around device placement.

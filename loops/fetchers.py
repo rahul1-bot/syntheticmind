@@ -1,30 +1,28 @@
 from collections.abc import Iterable, Iterator
 from typing import cast, override
 
-from syntheticmind.utilities.types import Batch
-
 __all__: list[str] = []
 
 _MISSING_BATCH: object = object()
 
 
-class _DataFetcher(Iterator[Batch]):
+class _DataFetcher[T](Iterator[T]):
     def __init__(
         self,
-        iterable: Iterable[Batch],
+        iterable: Iterable[T],
         max_batches: int | None,
         sized: bool
     ) -> None:
-        self._iterable: Iterable[Batch] = iterable
+        self._iterable: Iterable[T] = iterable
         self._max_batches: int | None = max_batches
         self._prefetch: bool = not sized
-        self._iterator: Iterator[Batch] | None = None
-        self._next_batch: Batch | object = _MISSING_BATCH
+        self._iterator: Iterator[T] | None = None
+        self._next_batch: T | object = _MISSING_BATCH
         self.fetched: int = 0
         self.done: bool = max_batches == 0
 
     @override
-    def __iter__(self) -> _DataFetcher:
+    def __iter__(self) -> _DataFetcher[T]:
         self._iterator = iter(self._iterable)
         self._next_batch = _MISSING_BATCH
         self.fetched = 0
@@ -34,14 +32,14 @@ class _DataFetcher(Iterator[Batch]):
         return self
 
     @override
-    def __next__(self) -> Batch:
+    def __next__(self) -> T:
         if self.done:
             raise StopIteration
         if self._iterator is None:
             raise RuntimeError("The data fetcher must be iterated before requesting a batch.")
         if not self._prefetch:
             try:
-                batch: Batch = next(self._iterator)
+                batch: T = next(self._iterator)
             except StopIteration:
                 self.done = True
                 raise
@@ -54,7 +52,7 @@ class _DataFetcher(Iterator[Batch]):
         if self._next_batch is _MISSING_BATCH:
             self.done = True
             raise StopIteration
-        batch = cast(Batch, self._next_batch)
+        batch = cast(T, self._next_batch)
         self._next_batch = _MISSING_BATCH
         self.fetched += 1
         if (

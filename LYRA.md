@@ -238,3 +238,11 @@
     4. Distributed signal agreement occurs only where every rank is guaranteed to participate. Unequal prediction partitions proved that per-batch collectives are invalid even when the decision itself appears harmless.
     5. CPU, MPS, two-rank Gloo, unequal distributed prediction, and every supported local process launcher establish the available execution contract; scheduler-managed requeue remains intentionally outside the current core signal capability.
     6. The next sequential capability is multiple dataloaders, including public plural loader surfaces, deterministic combined iteration, dataloader identity, batch limits, metrics, prediction ordering, and distributed behavior.
+
+| Strategic Note | Multiple-Dataloader Ownership | Date: 19 August 2026 | Time: 08:40 PM | Name: Ghost |
+
+    1. ✅ Nested training, validation, testing, and prediction data now execute through one SyntheticMind-owned `CombinedLoader` while retaining the established public modes, hook names, loader indices, result shapes, and Trainer inspection vocabulary.
+    2. Loader-specific metric suffixing, batch-count resets, transfer-hook identity, distributed sampler replacement, unrepeated prediction, worker cleanup, and checkpoint replay were treated as correctness boundaries rather than presentation details.
+    3. A repeated-stage subprocess deadlock exposed the danger of an unmatched signal collective after rank zero returned from a launcher. Outer launcher inspection is now local, while synchronized signal decisions remain only at boundaries reached by every rank.
+    4. CPU, MPS, exact shuffled checkpoint continuation, external two-rank Gloo, fork, spawn, and subprocess evidence establish the implemented execution boundary without using a linter.
+    5. Direct Trainer entry-point dataloader arguments and stateful-loader cursor restoration remain explicit next capabilities; neither will be represented by a cosmetic alias detached from runtime ownership.

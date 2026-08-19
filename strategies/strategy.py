@@ -173,21 +173,21 @@ class Strategy(ABC):
 
     @abstractmethod
     def validation_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> StepOutput:
         # Executes one validation step through the strategy's execution context.
         raise NotImplementedError
 
     @abstractmethod
     def test_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> StepOutput:
         # Executes one test step through the strategy's execution context.
         raise NotImplementedError
 
     @abstractmethod
     def predict_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> ModelOutput:
         # Executes one prediction step through the strategy's execution context.
         raise NotImplementedError
@@ -295,8 +295,8 @@ class Strategy(ABC):
             "test_step",
             "predict_step"
         ],
-        batch: Batch,
-        batch_idx: int
+        *step_args: object,
+        **step_kwargs: object
     ) -> object:
         from syntheticmind.core.module import Module
 
@@ -305,12 +305,12 @@ class Strategy(ABC):
             raise TypeError(
                 f"Strategy step execution requires Module, got {type(module).__name__}."
             )
-        step: Callable[[Batch, int], object] = cast(
-            Callable[[Batch, int], object],
+        step: Callable[..., object] = cast(
+            Callable[..., object],
             getattr(module, step_name)
         )
         if model is module:
-            return step(batch, batch_idx)
+            return step(*step_args, **step_kwargs)
         original_forward: Callable[..., object] = module.forward
 
         def redirected_forward(
@@ -318,20 +318,11 @@ class Strategy(ABC):
             **kwargs: object
         ) -> ModelOutput:
             module.forward = original_forward
-            if kwargs or len(args) != 2 or not isinstance(args[1], int):
-                raise TypeError(
-                    "Strategy step redirection requires positional batch and batch_idx arguments."
-                )
-            redirected_batch: Batch = cast(Batch, args[0])
-            redirected_batch_idx: int = args[1]
-            return cast(
-                ModelOutput,
-                step(redirected_batch, redirected_batch_idx)
-            )
+            return cast(ModelOutput, step(*args, **kwargs))
 
         module.forward = redirected_forward
         try:
-            return model(batch, batch_idx)
+            return model(*step_args, **step_kwargs)
         finally:
             module.forward = original_forward
 

@@ -201,10 +201,10 @@ class ProgressBarCallback(Callback):
     ) -> None:
         # Advances the validation bar by one batch.
         if self._val_bar:
-            self._batch_counts["validating"] = batch_idx + 1
+            self._batch_counts["validating"] += 1
             self._live_metrics["validating"] = self._capture_metrics(module)
             total: int | None = self._effective_total(trainer, "validating")
-            force: bool = total is not None and batch_idx + 1 >= total
+            force: bool = total is not None and self._batch_counts["validating"] >= total
             self._render_evaluation(trainer, module, "validating", force=force)
 
     @override
@@ -244,10 +244,10 @@ class ProgressBarCallback(Callback):
     ) -> None:
         # Advances the test bar by one batch.
         if self._test_bar:
-            self._batch_counts["testing"] = batch_idx + 1
+            self._batch_counts["testing"] += 1
             self._live_metrics["testing"] = self._capture_metrics(module)
             total: int | None = self._effective_total(trainer, "testing")
-            force: bool = total is not None and batch_idx + 1 >= total
+            force: bool = total is not None and self._batch_counts["testing"] >= total
             self._render_evaluation(trainer, module, "testing", force=force)
 
     @override
@@ -286,9 +286,9 @@ class ProgressBarCallback(Callback):
     ) -> None:
         if not self._predict_bar:
             return
-        self._batch_counts["predicting"] = batch_idx + 1
+        self._batch_counts["predicting"] += 1
         total: int | None = self._effective_total(trainer, "predicting")
-        force: bool = total is not None and batch_idx + 1 >= total
+        force: bool = total is not None and self._batch_counts["predicting"] >= total
         self._render_evaluation(trainer, module, "predicting", force=force)
 
     @override
@@ -445,26 +445,20 @@ class ProgressBarCallback(Callback):
 
     def _effective_total(self, trainer: Trainer, running_stage: RunningStage) -> int | None:
         raw_total: int | None = self._raw_total(trainer, running_stage)
-        if running_stage == "training":
-            assert trainer.fit_loop.epoch_loop is not None
-            return trainer.fit_loop.epoch_loop._resolve_limit_batches(raw_total)
-        if running_stage == "validating":
-            return trainer.validate_loop._resolve_limit_batches(raw_total)
-        if running_stage == "testing":
-            return trainer.test_loop._resolve_limit_batches(raw_total)
-        if running_stage == "predicting":
-            return trainer.predict_loop._resolve_limit_batches(raw_total)
-        return None
+        return raw_total
 
     def _raw_total(self, trainer: Trainer, running_stage: RunningStage) -> int | None:
         if running_stage == "training":
             return trainer._total_train_batches
         if running_stage == "validating":
-            return trainer._total_val_batches
+            combined_loader = trainer._val_combined_loader
+            return None if combined_loader is None else combined_loader._length()
         if running_stage == "testing":
-            return trainer._total_test_batches
+            combined_loader = trainer._test_combined_loader
+            return None if combined_loader is None else combined_loader._length()
         if running_stage == "predicting":
-            return trainer._total_predict_batches
+            combined_loader = trainer._predict_combined_loader
+            return None if combined_loader is None else combined_loader._length()
         return None
 
     def _stage_elapsed(self, trainer: Trainer, running_stage: RunningStage) -> float:

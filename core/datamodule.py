@@ -26,12 +26,14 @@
 #
 # Author: Rahul Sawhney
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, ClassVar
+import inspect
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import torch
 
 from syntheticmind.core.hyperparameters import HyperparametersMixin
+from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.types import Batch, StateDict, TrainerStage
 
 if TYPE_CHECKING:
@@ -103,20 +105,20 @@ class DataModule(HyperparametersMixin):
         # acquired in setup.
         pass
 
-    def train_dataloader(self) -> torch.utils.data.DataLoader:
+    def train_dataloader(self) -> object:
         # Factory for the training dataloader; mandatory for fit runs.
         raise NotImplementedError("train_dataloader() must be implemented by a DataModule subclass.")
 
-    def val_dataloader(self) -> torch.utils.data.DataLoader:
+    def val_dataloader(self) -> object:
         # Factory for the validation dataloader; required when validation is
         # scheduled during fit or invoked standalone.
         raise NotImplementedError("val_dataloader() must be implemented by a DataModule subclass.")
 
-    def test_dataloader(self) -> torch.utils.data.DataLoader:
+    def test_dataloader(self) -> object:
         # Factory for the test dataloader; required by the test entry point.
         raise NotImplementedError("test_dataloader() must be implemented by a DataModule subclass.")
 
-    def predict_dataloader(self) -> torch.utils.data.DataLoader:
+    def predict_dataloader(self) -> object:
         # Factory for the prediction dataloader; required by the predict entry
         # point.
         raise NotImplementedError("predict_dataloader() must be implemented by a DataModule subclass.")
@@ -159,13 +161,14 @@ class DataModule(HyperparametersMixin):
     @classmethod
     def from_datasets(
         cls,
-        train_dataset: torch.utils.data.Dataset | None = None,
-        val_dataset: torch.utils.data.Dataset | None = None,
-        test_dataset: torch.utils.data.Dataset | None = None,
-        predict_dataset: torch.utils.data.Dataset | None = None,
+        train_dataset: object | None = None,
+        val_dataset: object | None = None,
+        test_dataset: object | None = None,
+        predict_dataset: object | None = None,
         batch_size: int = 1,
-        num_workers: int = 0
-    ) -> DataModule:
+        num_workers: int = 0,
+        **datamodule_kwargs: object
+    ) -> Self:
         # Factory that wraps plain dataset objects in a DatasetDataModule, for
         # callers that need standard dataloaders without a custom subclass.
         #
@@ -187,7 +190,20 @@ class DataModule(HyperparametersMixin):
         #     A DatasetDataModule with exactly the supplied stages
         #     configured; requesting an unconfigured stage raises with
         #     corrective guidance.
-        return DatasetDataModule(
+        parameters: dict[str, inspect.Parameter] = dict(
+            inspect.signature(cls.__init__).parameters
+        )
+        accepts_kwargs: bool = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        constructor_kwargs: dict[str, object] = dict(datamodule_kwargs)
+        if accepts_kwargs or "batch_size" in parameters:
+            constructor_kwargs["batch_size"] = batch_size
+        if accepts_kwargs or "num_workers" in parameters:
+            constructor_kwargs["num_workers"] = num_workers
+        datamodule: Self = cls(**constructor_kwargs)
+        provider: DatasetDataModule = DatasetDataModule(
             train_dataset=train_dataset,
             val_dataset=val_dataset,
             test_dataset=test_dataset,
@@ -195,6 +211,15 @@ class DataModule(HyperparametersMixin):
             batch_size=batch_size,
             num_workers=num_workers
         )
+        if train_dataset is not None:
+            setattr(datamodule, "train_dataloader", provider.train_dataloader)
+        if val_dataset is not None:
+            setattr(datamodule, "val_dataloader", provider.val_dataloader)
+        if test_dataset is not None:
+            setattr(datamodule, "test_dataloader", provider.test_dataloader)
+        if predict_dataset is not None:
+            setattr(datamodule, "predict_dataloader", provider.predict_dataloader)
+        return datamodule
 
     def _configured_loader_stages(self) -> list[str]:
         # Determines which stages this datamodule supports by checking which
@@ -203,8 +228,11 @@ class DataModule(HyperparametersMixin):
         configured_loaders: list[str] = []
         for stage in ("train", "val", "test", "predict"):
             method_name: str = f"{stage}_dataloader"
-            class_method: Callable[..., torch.utils.data.DataLoader] | None = getattr(type(self), method_name, None)
-            base_method: Callable[..., torch.utils.data.DataLoader] | None = getattr(DataModule, method_name, None)
+            if method_name in self.__dict__:
+                configured_loaders.append(stage)
+                continue
+            class_method: Callable[..., object] | None = getattr(type(self), method_name, None)
+            base_method: Callable[..., object] | None = getattr(DataModule, method_name, None)
             if class_method is not None and class_method is not base_method:
                 configured_loaders.append(stage)
         return configured_loaders
@@ -224,10 +252,10 @@ class DatasetDataModule(DataModule):
     # worker count, raising with guidance when its dataset was not supplied.
     def __init__(
         self,
-        train_dataset: torch.utils.data.Dataset | None = None,
-        val_dataset: torch.utils.data.Dataset | None = None,
-        test_dataset: torch.utils.data.Dataset | None = None,
-        predict_dataset: torch.utils.data.Dataset | None = None,
+        train_dataset: object | None = None,
+        val_dataset: object | None = None,
+        test_dataset: object | None = None,
+        predict_dataset: object | None = None,
         batch_size: int = 1,
         num_workers: int = 0
     ) -> None:
@@ -238,14 +266,14 @@ class DatasetDataModule(DataModule):
             raise ValueError(f"batch_size must be >= 1, got {batch_size}")
         if num_workers < 0:
             raise ValueError(f"num_workers must be >= 0, got {num_workers}")
-        self._train_dataset: torch.utils.data.Dataset | None = train_dataset
-        self._val_dataset: torch.utils.data.Dataset | None = val_dataset
-        self._test_dataset: torch.utils.data.Dataset | None = test_dataset
-        self._predict_dataset: torch.utils.data.Dataset | None = predict_dataset
+        self._train_dataset: object | None = train_dataset
+        self._val_dataset: object | None = val_dataset
+        self._test_dataset: object | None = test_dataset
+        self._predict_dataset: object | None = predict_dataset
         self._batch_size: int = batch_size
         self._num_workers: int = num_workers
 
-    def train_dataloader(self) -> torch.utils.data.DataLoader:
+    def train_dataloader(self) -> object:
         # Builds the training dataloader. Map-style datasets are shuffled;
         # iterable datasets are not, because they own their ordering and the
         # DataLoader rejects shuffle for them.
@@ -254,15 +282,9 @@ class DatasetDataModule(DataModule):
                 "train_dataloader() is not configured. Override train_dataloader() "
                 "or provide train_dataset when constructing DatasetDataModule."
             )
-        train_shuffle: bool = not isinstance(self._train_dataset, torch.utils.data.IterableDataset)
-        return torch.utils.data.DataLoader(
-            self._train_dataset,
-            batch_size=self._batch_size,
-            shuffle=train_shuffle,
-            num_workers=self._num_workers
-        )
+        return self._build_dataloaders(self._train_dataset, shuffle=True)
 
-    def val_dataloader(self) -> torch.utils.data.DataLoader:
+    def val_dataloader(self) -> object:
         # Builds the validation dataloader without shuffling, so evaluation
         # order is stable across epochs and runs.
         if self._val_dataset is None:
@@ -270,14 +292,9 @@ class DatasetDataModule(DataModule):
                 "val_dataloader() is not configured. Override val_dataloader() "
                 "or provide val_dataset when constructing DatasetDataModule."
             )
-        return torch.utils.data.DataLoader(
-            self._val_dataset,
-            batch_size=self._batch_size,
-            shuffle=False,
-            num_workers=self._num_workers
-        )
+        return self._build_dataloaders(self._val_dataset, shuffle=False)
 
-    def test_dataloader(self) -> torch.utils.data.DataLoader:
+    def test_dataloader(self) -> object:
         # Builds the test dataloader without shuffling, so evaluation order is
         # stable across runs.
         if self._test_dataset is None:
@@ -285,14 +302,9 @@ class DatasetDataModule(DataModule):
                 "test_dataloader() is not configured. Override test_dataloader() "
                 "or provide test_dataset when constructing DatasetDataModule."
             )
-        return torch.utils.data.DataLoader(
-            self._test_dataset,
-            batch_size=self._batch_size,
-            shuffle=False,
-            num_workers=self._num_workers
-        )
+        return self._build_dataloaders(self._test_dataset, shuffle=False)
 
-    def predict_dataloader(self) -> torch.utils.data.DataLoader:
+    def predict_dataloader(self) -> object:
         # Builds the prediction dataloader without shuffling, so outputs align
         # with the dataset order.
         if self._predict_dataset is None:
@@ -300,12 +312,37 @@ class DatasetDataModule(DataModule):
                 "predict_dataloader() is not configured. Override predict_dataloader() "
                 "or provide predict_dataset when constructing DatasetDataModule."
             )
-        return torch.utils.data.DataLoader(
-            self._predict_dataset,
-            batch_size=self._batch_size,
-            shuffle=False,
-            num_workers=self._num_workers
-        )
+        return self._build_dataloaders(self._predict_dataset, shuffle=False)
+
+    def _build_dataloaders(self, datasets: object, shuffle: bool) -> object:
+        if (
+            not isinstance(datasets, torch.utils.data.Dataset)
+            and isinstance(datasets, Iterable)
+            and not isinstance(datasets, (dict, list, tuple, str, bytes))
+        ):
+            datasets = list(datasets)
+        combined_loader: CombinedLoader = CombinedLoader(datasets)
+        dataloaders: list[object] = []
+        for dataset in combined_loader.flattened:
+            if not isinstance(dataset, torch.utils.data.Dataset):
+                raise TypeError(
+                    "DataModule.from_datasets() expected Dataset leaves, got "
+                    f"{type(dataset).__qualname__}."
+                )
+            dataloaders.append(
+                torch.utils.data.DataLoader(
+                    dataset,
+                    batch_size=self._batch_size,
+                    shuffle=(
+                        shuffle
+                        and not isinstance(dataset, torch.utils.data.IterableDataset)
+                    ),
+                    num_workers=self._num_workers,
+                    pin_memory=True
+                )
+            )
+        combined_loader.flattened = dataloaders
+        return combined_loader.iterables
 
     def _configured_loader_stages(self) -> list[str]:
         # Reports configured stages from dataset presence rather than method

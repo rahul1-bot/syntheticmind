@@ -247,7 +247,7 @@ class DDPStrategy(Strategy):
 
     @override
     def validation_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> StepOutput:
         # Executes the validation step on the unwrapped module. Gradient
         # synchronization is irrelevant without a backward pass, so the
@@ -259,15 +259,16 @@ class DDPStrategy(Strategy):
                 self._forward_redirection(
                     model,
                     "validation_step",
-                    batch,
-                    batch_idx
+                    *args,
+                    **kwargs
                 )
             )
-        return unwrapped.validation_step(batch, batch_idx)
+        step = cast(Callable[..., StepOutput], unwrapped.validation_step)
+        return step(*args, **kwargs)
 
     @override
     def test_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> StepOutput:
         # Executes the test step on the unwrapped module, mirroring the
         # validation-step rationale for bypassing the wrapper.
@@ -278,15 +279,16 @@ class DDPStrategy(Strategy):
                 self._forward_redirection(
                     model,
                     "test_step",
-                    batch,
-                    batch_idx
+                    *args,
+                    **kwargs
                 )
             )
-        return unwrapped.test_step(batch, batch_idx)
+        step = cast(Callable[..., StepOutput], unwrapped.test_step)
+        return step(*args, **kwargs)
 
     @override
     def predict_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> ModelOutput:
         # Executes the prediction step on the unwrapped module, mirroring the
         # validation-step rationale for bypassing the wrapper.
@@ -297,11 +299,12 @@ class DDPStrategy(Strategy):
                 self._forward_redirection(
                     model,
                     "predict_step",
-                    batch,
-                    batch_idx
+                    *args,
+                    **kwargs
                 )
             )
-        return unwrapped.predict_step(batch, batch_idx)
+        step = cast(Callable[..., ModelOutput], unwrapped.predict_step)
+        return step(*args, **kwargs)
 
     @override
     def backward(

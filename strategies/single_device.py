@@ -15,6 +15,7 @@
 #
 # Author: Rahul Sawhney
 
+from collections.abc import Callable
 from typing import cast, override
 
 import torch
@@ -64,7 +65,7 @@ class SingleDeviceStrategy(Strategy):
 
     @override
     def validation_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> StepOutput:
         # Guards the module type, then delegates to the model's validation_step.
         if not isinstance(model, Module):
@@ -73,16 +74,17 @@ class SingleDeviceStrategy(Strategy):
                 self._forward_redirection(
                     model,
                     "validation_step",
-                    batch,
-                    batch_idx
+                    *args,
+                    **kwargs
                 )
             )
-        output: StepOutput = model.validation_step(batch, batch_idx)
+        step = cast(Callable[..., StepOutput], model.validation_step)
+        output: StepOutput = step(*args, **kwargs)
         return output
 
     @override
     def test_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> StepOutput:
         # Guards the module type, then delegates to the model's test_step.
         if not isinstance(model, Module):
@@ -91,16 +93,17 @@ class SingleDeviceStrategy(Strategy):
                 self._forward_redirection(
                     model,
                     "test_step",
-                    batch,
-                    batch_idx
+                    *args,
+                    **kwargs
                 )
             )
-        output: StepOutput = model.test_step(batch, batch_idx)
+        step = cast(Callable[..., StepOutput], model.test_step)
+        output: StepOutput = step(*args, **kwargs)
         return output
 
     @override
     def predict_step(
-        self, model: nn.Module, batch: Batch, batch_idx: int
+        self, model: nn.Module, *args: object, **kwargs: object
     ) -> ModelOutput:
         # Guards the module type, then delegates to the model's predict_step.
         if not isinstance(model, Module):
@@ -109,11 +112,12 @@ class SingleDeviceStrategy(Strategy):
                 self._forward_redirection(
                     model,
                     "predict_step",
-                    batch,
-                    batch_idx
+                    *args,
+                    **kwargs
                 )
             )
-        output: ModelOutput = model.predict_step(batch, batch_idx)
+        step = cast(Callable[..., ModelOutput], model.predict_step)
+        output: ModelOutput = step(*args, **kwargs)
         return output
 
     @override
