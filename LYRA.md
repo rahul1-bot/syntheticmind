@@ -160,3 +160,12 @@
     4. Distributed workers all execute the summary contract, but only global rank zero owns presentation. This behavior is verified under external Gloo, fork, and spawn rather than inferred from a rank check.
     5. The formal plain renderer remains the Trainer default under the approved restrained console policy; the standard Rich renderer is an explicit opt-in instead of an optional dependency silently taking terminal ownership.
     6. The next dependency-ordered boundary is the `profiler` parameter and its complete stage, action, artifact, logger, teardown, exception, and distributed ownership semantics.
+
+| Strategic Note | Profiling Ownership and Observability | Date: 19 August 2026 | Time: 05:07 PM | Name: Ghost |
+
+    1. ✅ SyntheticMind now has a standard profiler hierarchy and Trainer parameter contract without becoming a PyTorch Lightning clone or emitting Lightning-owned names.
+    2. Profiling observes the real extension and execution boundaries across modules, datamodules, callbacks, strategies, batches, epochs, dataloaders, optimization, checkpoint persistence, and every public stage.
+    3. The default pass-through path remains artifact-free, while selected profilers resolve output ownership through an explicit directory, the first logger, or the default root and isolate distributed ranks by filename.
+    4. Exception and teardown handling preserve the causal runtime failure and close profiler state deterministically, including repeated stages and failures arising after the report has been written.
+    5. CPU, MPS, and all supported local Gloo launch paths establish the available runtime contract; CUDA and XLA execution remain bounded by unavailable hardware or optional dependencies rather than being falsely claimed.
+    6. The next dependency-ordered phase is the standard `barebones` Trainer mode and its coordinated disabling of nonessential runtime features.

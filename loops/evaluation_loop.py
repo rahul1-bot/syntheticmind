@@ -136,36 +136,67 @@ class EvaluationLoop(Loop):
         module_mode.capture(module)
 
         if self.stage == "validate":
-            with module._hook_context("on_validation_model_eval"):
-                module.on_validation_model_eval()
+            trainer._call_module_hook(
+                module,
+                "on_validation_model_eval",
+                module.on_validation_model_eval
+            )
         else:
-            with module._hook_context("on_test_model_eval"):
-                module.on_test_model_eval()
+            trainer._call_module_hook(
+                module,
+                "on_test_model_eval",
+                module.on_test_model_eval
+            )
 
         if self.stage == "validate":
-            with module._hook_context("on_validation_start"):
-                for callback in callbacks:
-                    callback.on_validation_start(trainer, module)
-                module.on_validation_start()
-            with module._hook_context("on_validation_epoch_start"):
-                for callback in callbacks:
-                    callback.on_validation_epoch_start(trainer, module)
-                module.on_validation_epoch_start()
+            trainer._call_callback_hooks(
+                module,
+                "on_validation_start",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_validation_start",
+                module.on_validation_start
+            )
+            trainer._call_callback_hooks(
+                module,
+                "on_validation_epoch_start",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_validation_epoch_start",
+                module.on_validation_epoch_start
+            )
         else:
-            with module._hook_context("on_test_start"):
-                for callback in callbacks:
-                    callback.on_test_start(trainer, module)
-                module.on_test_start()
-            with module._hook_context("on_test_epoch_start"):
-                for callback in callbacks:
-                    callback.on_test_epoch_start(trainer, module)
-                module.on_test_epoch_start()
+            trainer._call_callback_hooks(
+                module,
+                "on_test_start",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_test_start",
+                module.on_test_start
+            )
+            trainer._call_callback_hooks(
+                module,
+                "on_test_epoch_start",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_test_epoch_start",
+                module.on_test_epoch_start
+            )
         epoch_accum: dict[str, MetricAccumulator] = {}
         logger_metric_names: set[str] = set()
         progress_bar_metric_names: set[str] = set()
 
         dataloader_iterator_start_time: float = time.perf_counter()
-        dataloader_iterator: Iterator[Batch] = iter(dataloader)
+        with trainer.profiler.profile(f"setup_{self.stage}_dataloader"):
+            dataloader_iterator: Iterator[Batch] = iter(dataloader)
         trainer._record_dataloader_iterator_creation_time(
             running_stage,
             time.perf_counter() - dataloader_iterator_start_time
@@ -174,7 +205,11 @@ class EvaluationLoop(Loop):
         while True:
             dataloader_fetch_start_time: float = time.perf_counter()
             try:
-                batch: Batch = next(dataloader_iterator)
+                dataloader_prefix: str = "val" if self.stage == "validate" else "test"
+                with trainer.profiler.profile(
+                    f"[{type(self).__name__}].{dataloader_prefix}_next"
+                ):
+                    batch: Batch = next(dataloader_iterator)
             except StopIteration:
                 break
             trainer._record_dataloader_fetch_time(
@@ -188,32 +223,91 @@ class EvaluationLoop(Loop):
             batch: Batch = trainer.precision_plugin.convert_input(batch)
 
             if self.stage == "validate":
-                with module._hook_context("on_validation_batch_start"):
-                    for callback in callbacks:
-                        callback.on_validation_batch_start(trainer, module, batch, batch_idx, 0)
-                    module.on_validation_batch_start(batch, batch_idx, 0)
+                trainer._call_callback_hooks(
+                    module,
+                    "on_validation_batch_start",
+                    batch,
+                    batch_idx,
+                    0,
+                    callback_group=callbacks
+                )
+                trainer._call_module_hook(
+                    module,
+                    "on_validation_batch_start",
+                    module.on_validation_batch_start,
+                    batch,
+                    batch_idx,
+                    0
+                )
             else:
-                with module._hook_context("on_test_batch_start"):
-                    for callback in callbacks:
-                        callback.on_test_batch_start(trainer, module, batch, batch_idx, 0)
-                    module.on_test_batch_start(batch, batch_idx, 0)
+                trainer._call_callback_hooks(
+                    module,
+                    "on_test_batch_start",
+                    batch,
+                    batch_idx,
+                    0,
+                    callback_group=callbacks
+                )
+                trainer._call_module_hook(
+                    module,
+                    "on_test_batch_start",
+                    module.on_test_batch_start,
+                    batch,
+                    batch_idx,
+                    0
+                )
 
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
-                batch: Batch = dm.on_before_batch_transfer(batch, dataloader_idx=0)
+                batch: Batch = trainer._call_datamodule_hook(
+                    dm,
+                    "on_before_batch_transfer",
+                    dm.on_before_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("on_before_batch_transfer"):
-                    batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "on_before_batch_transfer",
+                    module.on_before_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
-                batch: Batch = dm.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                batch = trainer._call_datamodule_hook(
+                    dm,
+                    "transfer_batch_to_device",
+                    dm.transfer_batch_to_device,
+                    batch,
+                    device,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("transfer_batch_to_device"):
-                    batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "transfer_batch_to_device",
+                    module.transfer_batch_to_device,
+                    batch,
+                    device,
+                    dataloader_idx=0
+                )
             if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
-                batch: Batch = dm.on_after_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_datamodule_hook(
+                    dm,
+                    "on_after_batch_transfer",
+                    dm.on_after_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("on_after_batch_transfer"):
-                    batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "on_after_batch_transfer",
+                    module.on_after_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
 
             step_context: AbstractContextManager[None] = (
                 trainer.precision_plugin.val_step_context()
@@ -223,21 +317,61 @@ class EvaluationLoop(Loop):
             with step_context:
                 if self.stage == "validate":
                     with module._hook_context("validation_step"):
-                        outputs: StepOutput = strategy.validation_step(model, batch, batch_idx)
+                        outputs: StepOutput = trainer._call_strategy_hook(
+                            "validation_step",
+                            strategy.validation_step,
+                            model,
+                            batch,
+                            batch_idx
+                        )
                 else:
                     with module._hook_context("test_step"):
-                        outputs: StepOutput = strategy.test_step(model, batch, batch_idx)
+                        outputs = trainer._call_strategy_hook(
+                            "test_step",
+                            strategy.test_step,
+                            model,
+                            batch,
+                            batch_idx
+                        )
 
             if self.stage == "validate":
-                with module._hook_context("on_validation_batch_end"):
-                    for callback in callbacks:
-                        callback.on_validation_batch_end(trainer, module, outputs, batch, batch_idx, 0)
-                    module.on_validation_batch_end(outputs, batch, batch_idx, 0)
+                trainer._call_callback_hooks(
+                    module,
+                    "on_validation_batch_end",
+                    outputs,
+                    batch,
+                    batch_idx,
+                    0,
+                    callback_group=callbacks
+                )
+                trainer._call_module_hook(
+                    module,
+                    "on_validation_batch_end",
+                    module.on_validation_batch_end,
+                    outputs,
+                    batch,
+                    batch_idx,
+                    0
+                )
             else:
-                with module._hook_context("on_test_batch_end"):
-                    for callback in callbacks:
-                        callback.on_test_batch_end(trainer, module, outputs, batch, batch_idx, 0)
-                    module.on_test_batch_end(outputs, batch, batch_idx, 0)
+                trainer._call_callback_hooks(
+                    module,
+                    "on_test_batch_end",
+                    outputs,
+                    batch,
+                    batch_idx,
+                    0,
+                    callback_group=callbacks
+                )
+                trainer._call_module_hook(
+                    module,
+                    "on_test_batch_end",
+                    module.on_test_batch_end,
+                    outputs,
+                    batch,
+                    batch_idx,
+                    0
+                )
 
             self._accumulate_metrics(
                 module,
@@ -266,41 +400,71 @@ class EvaluationLoop(Loop):
 
         if self.stage == "validate":
             self.trainer._callback_metrics.update(self.epoch_metrics)
-            with module._hook_context("on_validation_epoch_end"):
-                for callback in non_monitoring_callbacks:
-                    callback.on_validation_epoch_end(trainer, module)
-            with module._hook_context("on_validation_epoch_end"):
-                module.on_validation_epoch_end()
+            trainer._call_callback_hooks(
+                module,
+                "on_validation_epoch_end",
+                callback_group=non_monitoring_callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_validation_epoch_end",
+                module.on_validation_epoch_end
+            )
             self._consume_epoch_end_hook_metrics(module, state, running_stage)
             self.trainer._callback_metrics.update(self.epoch_metrics)
-            with module._hook_context("on_validation_epoch_end"):
-                for callback in monitoring_callbacks:
-                    callback.on_validation_epoch_end(trainer, module)
-            with module._hook_context("on_validation_end"):
-                for callback in callbacks:
-                    callback.on_validation_end(trainer, module)
-                module.on_validation_end()
+            trainer._call_callback_hooks(
+                module,
+                "on_validation_epoch_end",
+                callback_group=monitoring_callbacks
+            )
+            trainer._call_callback_hooks(
+                module,
+                "on_validation_end",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_validation_end",
+                module.on_validation_end
+            )
             if is_overridden("on_validation_model_train", module, Module):
-                with module._hook_context("on_validation_model_train"):
-                    module.on_validation_model_train()
+                trainer._call_module_hook(
+                    module,
+                    "on_validation_model_train",
+                    module.on_validation_model_train
+                )
             else:
                 module_mode.restore(module)
         else:
             self.trainer._callback_metrics.update(self.epoch_metrics)
-            with module._hook_context("on_test_epoch_end"):
-                for callback in callbacks:
-                    callback.on_test_epoch_end(trainer, module)
-            with module._hook_context("on_test_epoch_end"):
-                module.on_test_epoch_end()
+            trainer._call_callback_hooks(
+                module,
+                "on_test_epoch_end",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_test_epoch_end",
+                module.on_test_epoch_end
+            )
             self._consume_epoch_end_hook_metrics(module, state, running_stage)
             self.trainer._callback_metrics.update(self.epoch_metrics)
-            with module._hook_context("on_test_end"):
-                for callback in callbacks:
-                    callback.on_test_end(trainer, module)
-                module.on_test_end()
+            trainer._call_callback_hooks(
+                module,
+                "on_test_end",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_test_end",
+                module.on_test_end
+            )
             if is_overridden("on_test_model_train", module, Module):
-                with module._hook_context("on_test_model_train"):
-                    module.on_test_model_train()
+                trainer._call_module_hook(
+                    module,
+                    "on_test_model_train",
+                    module.on_test_model_train
+                )
             else:
                 module_mode.restore(module)
 

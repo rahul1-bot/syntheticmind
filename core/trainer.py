@@ -45,6 +45,7 @@ import os
 import tempfile
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Sized
+from contextlib import AbstractContextManager, nullcontext
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal, Never, cast
@@ -92,6 +93,7 @@ from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.loops.validation_schedule import ValidationSchedule
 from syntheticmind.precision.precision import Precision
 from syntheticmind.precision.resolver import PrecisionResolver
+from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
 from syntheticmind.state.checkpoint_state import CheckpointState
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
@@ -263,6 +265,7 @@ class Trainer:
         benchmark: bool | None = None,
         inference_mode: bool = True,
         use_distributed_sampler: bool = True,
+        profiler: Profiler | str | None = None,
         detect_anomaly: bool = False,
         plugins: Precision | list[Precision] | None = None,
         sync_batchnorm: bool = False,
@@ -689,6 +692,7 @@ class Trainer:
         self.callbacks = non_checkpoint_callbacks + checkpoint_callbacks
 
         self._loggers: list[Logger] = resolved_loggers
+        self.profiler: Profiler = _resolve_profiler(profiler)
         self.state: TrainerState = TrainerState()
         self._sanity_checking: bool = False
         self._is_mid_epoch_validation: bool = False
@@ -761,6 +765,7 @@ class Trainer:
         self._dataloader_fetch_time_seconds: dict[RunningStage, float] = {}
         self._dataloader_iterator_creation_time_seconds: dict[RunningStage, float] = {}
         self._active_exception: BaseException | None = None
+        self._profiler_is_setup: bool = False
 
     def fit(
         self,
@@ -848,24 +853,48 @@ class Trainer:
             # barrier so no process enters setup against partially prepared
             # data.
             self.strategy.setup_environment()
+            self._setup_profiler("fit", module)
 
             if is_rank_zero():
-                datamodule.prepare_data()
-            self.strategy.barrier()
+                self._call_datamodule_hook(
+                    datamodule,
+                    "prepare_data",
+                    datamodule.prepare_data
+                )
+            self._call_strategy_hook("barrier", self.strategy.barrier)
 
-            datamodule.setup("fit")
+            self._call_datamodule_hook(
+                datamodule,
+                "setup",
+                datamodule.setup,
+                "fit"
+            )
 
             # Retrieve the fit-stage dataloaders. The harness supports exactly
             # one loader per stage, so collection returns are rejected here
             # rather than failing obscurely inside the loops.
-            self.train_dataloader: torch.utils.data.DataLoader | None = datamodule.train_dataloader()
+            with self.profiler.profile("setup_train_dataloader"):
+                self.train_dataloader: torch.utils.data.DataLoader | None = (
+                    self._call_datamodule_hook(
+                        datamodule,
+                        "train_dataloader",
+                        datamodule.train_dataloader
+                    )
+                )
 
             if isinstance(self.train_dataloader, (list, tuple, dict)):
                 raise MisconfigurationError(
                     "Multiple train dataloaders are not supported. train_dataloader() must return a single DataLoader."
                 )
 
-            self.val_dataloader: torch.utils.data.DataLoader | None = datamodule.val_dataloader()
+            with self.profiler.profile("setup_val_dataloader"):
+                self.val_dataloader: torch.utils.data.DataLoader | None = (
+                    self._call_datamodule_hook(
+                        datamodule,
+                        "val_dataloader",
+                        datamodule.val_dataloader
+                    )
+                )
 
             if isinstance(self.val_dataloader, (list, tuple, dict)):
                 raise MisconfigurationError(
@@ -936,8 +965,11 @@ class Trainer:
                     "the optimizer_idx parameter from training_step, set automatic_optimization = False, "
                     "and access optimizers through self.optimizers()."
                 )
-            with module._hook_context("configure_optimizers"):
-                optimization_configuration: object = module.configure_optimizers()
+            optimization_configuration: object = self._call_module_hook(
+                module,
+                "configure_optimizers",
+                module.configure_optimizers
+            )
             optimizer_initialization: tuple[
                 list[torch.optim.Optimizer],
                 list[LRSchedulerConfig]
@@ -1024,10 +1056,8 @@ class Trainer:
 
             self._validate_callback_state_keys()
 
-            with module._hook_context("setup"):
-                for callback in self.callbacks:
-                    callback.setup(self, module, "fit")
-                module.setup("fit")
+            self._call_callback_hooks(module, "setup", "fit")
+            self._call_module_hook(module, "setup", module.setup, "fit")
 
             # The run configuration is announced to the logger from rank zero
             # only, keeping multi-process runs single-writer.
@@ -1045,10 +1075,12 @@ class Trainer:
             # sanity pass runs inside the fit stage but before training
             # starts, surfacing validation-path defects before the first
             # training epoch is paid for; it discards every trace of itself.
-            with module._hook_context("on_fit_start"):
-                for callback in self.callbacks:
-                    callback.on_fit_start(self, module)
-                module.on_fit_start()
+            self._call_callback_hooks(module, "on_fit_start")
+            self._call_module_hook(
+                module,
+                "on_fit_start",
+                module.on_fit_start
+            )
 
             if (
                 self.enable_validation
@@ -1069,10 +1101,8 @@ class Trainer:
 
             # End hooks mirror the start order reversed: the module first,
             # then the callbacks.
-            with module._hook_context("on_fit_end"):
-                for callback in self.callbacks:
-                    callback.on_fit_end(self, module)
-                module.on_fit_end()
+            self._call_callback_hooks(module, "on_fit_end")
+            self._call_module_hook(module, "on_fit_end", module.on_fit_end)
             fit_completed: bool = True
         # Interrupts and failures funnel through one handler that marks the
         # trainer state interrupted, offers the exception to the callback,
@@ -1155,13 +1185,30 @@ class Trainer:
         )
         try:
             self.strategy.setup_environment()
+            self._setup_profiler("validate", module)
 
             if is_rank_zero():
-                datamodule.prepare_data()
-            self.strategy.barrier()
+                self._call_datamodule_hook(
+                    datamodule,
+                    "prepare_data",
+                    datamodule.prepare_data
+                )
+            self._call_strategy_hook("barrier", self.strategy.barrier)
 
-            datamodule.setup("validate")
-            self.val_dataloader: torch.utils.data.DataLoader | None = datamodule.val_dataloader()
+            self._call_datamodule_hook(
+                datamodule,
+                "setup",
+                datamodule.setup,
+                "validate"
+            )
+            with self.profiler.profile("setup_val_dataloader"):
+                self.val_dataloader: torch.utils.data.DataLoader | None = (
+                    self._call_datamodule_hook(
+                        datamodule,
+                        "val_dataloader",
+                        datamodule.val_dataloader
+                    )
+                )
 
             if isinstance(self.val_dataloader, (list, tuple, dict)):
                 raise MisconfigurationError(
@@ -1193,10 +1240,8 @@ class Trainer:
                     weights_only=weights_only
                 )
 
-            with module._hook_context("setup"):
-                for callback in self.callbacks:
-                    callback.setup(self, module, "validate")
-                module.setup("validate")
+            self._call_callback_hooks(module, "setup", "validate")
+            self._call_module_hook(module, "setup", module.setup, "validate")
 
             metrics: dict[str, float] = self.validate_loop.run()
             stage_completed: bool = True
@@ -1270,13 +1315,30 @@ class Trainer:
         )
         try:
             self.strategy.setup_environment()
+            self._setup_profiler("test", module)
 
             if is_rank_zero():
-                datamodule.prepare_data()
-            self.strategy.barrier()
+                self._call_datamodule_hook(
+                    datamodule,
+                    "prepare_data",
+                    datamodule.prepare_data
+                )
+            self._call_strategy_hook("barrier", self.strategy.barrier)
 
-            datamodule.setup("test")
-            self.test_dataloader: torch.utils.data.DataLoader | None = datamodule.test_dataloader()
+            self._call_datamodule_hook(
+                datamodule,
+                "setup",
+                datamodule.setup,
+                "test"
+            )
+            with self.profiler.profile("setup_test_dataloader"):
+                self.test_dataloader: torch.utils.data.DataLoader | None = (
+                    self._call_datamodule_hook(
+                        datamodule,
+                        "test_dataloader",
+                        datamodule.test_dataloader
+                    )
+                )
 
             if isinstance(self.test_dataloader, (list, tuple, dict)):
                 raise MisconfigurationError(
@@ -1308,10 +1370,8 @@ class Trainer:
                     weights_only=weights_only
                 )
 
-            with module._hook_context("setup"):
-                for callback in self.callbacks:
-                    callback.setup(self, module, "test")
-                module.setup("test")
+            self._call_callback_hooks(module, "setup", "test")
+            self._call_module_hook(module, "setup", module.setup, "test")
 
             metrics: dict[str, float] = self.test_loop.run()
             stage_completed: bool = True
@@ -1393,13 +1453,30 @@ class Trainer:
         )
         try:
             self.strategy.setup_environment()
+            self._setup_profiler("predict", module)
 
             if is_rank_zero():
-                datamodule.prepare_data()
-            self.strategy.barrier()
+                self._call_datamodule_hook(
+                    datamodule,
+                    "prepare_data",
+                    datamodule.prepare_data
+                )
+            self._call_strategy_hook("barrier", self.strategy.barrier)
 
-            datamodule.setup("predict")
-            self.predict_dataloader: torch.utils.data.DataLoader | None = datamodule.predict_dataloader()
+            self._call_datamodule_hook(
+                datamodule,
+                "setup",
+                datamodule.setup,
+                "predict"
+            )
+            with self.profiler.profile("setup_predict_dataloader"):
+                self.predict_dataloader: torch.utils.data.DataLoader | None = (
+                    self._call_datamodule_hook(
+                        datamodule,
+                        "predict_dataloader",
+                        datamodule.predict_dataloader
+                    )
+                )
 
             if isinstance(self.predict_dataloader, (list, tuple, dict)):
                 raise MisconfigurationError(
@@ -1431,10 +1508,8 @@ class Trainer:
                     weights_only=weights_only
                 )
 
-            with module._hook_context("setup"):
-                for callback in self.callbacks:
-                    callback.setup(self, module, "predict")
-                module.setup("predict")
+            self._call_callback_hooks(module, "setup", "predict")
+            self._call_module_hook(module, "setup", module.setup, "predict")
 
             self.predict_loop.return_predictions = return_predictions
             predictions: list[ModelOutput] = self.predict_loop.run()
@@ -1550,6 +1625,122 @@ class Trainer:
         self.test_loop.trainer = self
         self.predict_loop.trainer = self
 
+    def _setup_profiler(self, stage: TrainerStage, module: Module) -> None:
+        if self._profiler_is_setup:
+            raise RuntimeError("The profiler is already active for another Trainer stage.")
+        self.profiler._attach_module(module)
+        local_rank: int | None = self.local_rank if self.world_size > 1 else None
+        log_dir: str | None = (
+            None if isinstance(self.profiler, PassThroughProfiler) else self.log_dir
+        )
+        try:
+            self.profiler.setup(
+                stage=stage,
+                local_rank=local_rank,
+                log_dir=log_dir
+            )
+        except BaseException as exception:
+            try:
+                self.profiler.teardown(stage=stage)
+            except BaseException as teardown_exception:
+                exception.add_note(
+                    "Profiler teardown after setup failure raised "
+                    f"{type(teardown_exception).__name__}: {teardown_exception}"
+                )
+            raise
+        self._profiler_is_setup = True
+
+    def _teardown_profiler(self) -> None:
+        if not self._profiler_is_setup:
+            return
+        try:
+            self.profiler.describe()
+        finally:
+            self._profiler_is_setup = False
+
+    def _call_callback_hook[ReturnT](
+        self,
+        callback: Callback,
+        module: Module,
+        hook_name: str,
+        hook: Callable[..., ReturnT],
+        *args: object,
+        **kwargs: object
+    ) -> ReturnT:
+        action_name: str = f"[Callback]{callback.state_key}.{hook_name}"
+        if not self._profiler_is_setup:
+            with module._hook_context(hook_name):
+                return hook(self, module, *args, **kwargs)
+        with module._hook_context(hook_name), self.profiler.profile(action_name):
+            return hook(self, module, *args, **kwargs)
+
+    def _call_callback_hooks(
+        self,
+        module: Module,
+        hook_name: str,
+        *args: object,
+        callback_group: Iterable[Callback] | None = None,
+        **kwargs: object
+    ) -> None:
+        callbacks: Iterable[Callback] = (
+            self.callbacks if callback_group is None else callback_group
+        )
+        for callback in callbacks:
+            hook: Callable[..., None] = cast(
+                Callable[..., None],
+                getattr(callback, hook_name)
+            )
+            self._call_callback_hook(
+                callback,
+                module,
+                hook_name,
+                hook,
+                *args,
+                **kwargs
+            )
+
+    def _call_module_hook[**Parameters, ReturnT](
+        self,
+        module: Module,
+        hook_name: str,
+        hook: Callable[Parameters, ReturnT],
+        *args: Parameters.args,
+        **kwargs: Parameters.kwargs
+    ) -> ReturnT:
+        action_name: str = f"[Module]{type(module).__name__}.{hook_name}"
+        if not self._profiler_is_setup:
+            with module._hook_context(hook_name):
+                return hook(*args, **kwargs)
+        with self.profiler.profile(action_name), module._hook_context(hook_name):
+            return hook(*args, **kwargs)
+
+    def _call_datamodule_hook[**Parameters, ReturnT](
+        self,
+        datamodule: DataModule,
+        hook_name: str,
+        hook: Callable[Parameters, ReturnT],
+        *args: Parameters.args,
+        **kwargs: Parameters.kwargs
+    ) -> ReturnT:
+        action_name: str = f"[DataModule]{type(datamodule).__name__}.{hook_name}"
+        if not self._profiler_is_setup:
+            return hook(*args, **kwargs)
+        with self.profiler.profile(action_name):
+            return hook(*args, **kwargs)
+
+    def _call_strategy_hook[**Parameters, ReturnT](
+        self,
+        hook_name: str,
+        hook: Callable[Parameters, ReturnT],
+        *args: Parameters.args,
+        **kwargs: Parameters.kwargs
+    ) -> ReturnT:
+        action_name: str = f"[Strategy]{type(self.strategy).__name__}.{hook_name}"
+        if not self._profiler_is_setup:
+            return hook(*args, **kwargs)
+        with self.profiler.profile(action_name):
+            return hook(*args, **kwargs)
+
     def _configure_model(self, module: Module) -> None:
         has_legacy_override: bool = is_overridden("configure_sharded_model", module, ModelHooks)
         has_configure_override: bool = is_overridden("configure_model", module, ModelHooks)
@@ -1574,8 +1765,7 @@ class Trainer:
             hook: Callable[[], None] = module.configure_model
         else:
             return
-        with module._hook_context(hook_name):
-            hook()
+        self._call_module_hook(module, hook_name, hook)
 
     def _setup_model(self, module: Module, device: torch.device) -> Module:
         self.accelerator.setup_device(device)
@@ -1598,7 +1788,13 @@ class Trainer:
             resolved_module: Module = synchronized_model
         resolved_module._trainer = self
         self.module = resolved_module
-        self.strategy.setup(resolved_module, device)
+        self.profiler._attach_module(resolved_module)
+        self._call_strategy_hook(
+            "setup",
+            self.strategy.setup,
+            resolved_module,
+            device
+        )
         resolved_module._device = device
         return resolved_module
 
@@ -1629,8 +1825,11 @@ class Trainer:
         return module, connected_optimizers, connected_lr_schedulers
 
     def _call_on_validation_model_zero_grad(self, module: Module) -> None:
-        with module._hook_context("on_validation_model_zero_grad"):
-            module.on_validation_model_zero_grad()
+        self._call_module_hook(
+            module,
+            "on_validation_model_zero_grad",
+            module.on_validation_model_zero_grad
+        )
 
     def _resolve_accelerator(self, accelerator: str | Accelerator) -> Accelerator:
         # Resolves the accelerator argument: a live instance passes through
@@ -1859,9 +2058,7 @@ class Trainer:
         # a finally block, and every trace of the sanity pass (epoch metrics,
         # the module's logging buffer, callback metrics) is discarded so
         # sanity results cannot influence monitoring or checkpointing.
-        with module._hook_context("on_sanity_check_start"):
-            for callback in self.callbacks:
-                callback.on_sanity_check_start(self, module)
+        self._call_callback_hooks(module, "on_sanity_check_start")
 
         self.state.set_running_stage("sanity_checking")
         module._running_stage = "sanity_checking"
@@ -1879,9 +2076,7 @@ class Trainer:
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("validating")
 
-        with module._hook_context("on_sanity_check_end"):
-            for callback in self.callbacks:
-                callback.on_sanity_check_end(self, module)
+        self._call_callback_hooks(module, "on_sanity_check_end")
 
         module._running_stage = "training"
 
@@ -1934,11 +2129,14 @@ class Trainer:
                     CheckpointDict,
                     checkpoint_rng_state
                 )
-        with module._hook_context("on_load_checkpoint"):
-            if hasattr(module, "on_load_checkpoint"):
-                module.on_load_checkpoint(checkpoint)
-            for callback in self.callbacks:
-                callback.on_load_checkpoint(self, module, checkpoint)
+        if hasattr(module, "on_load_checkpoint"):
+            self._call_module_hook(
+                module,
+                "on_load_checkpoint",
+                module.on_load_checkpoint,
+                checkpoint
+            )
+        self._call_callback_hooks(module, "on_load_checkpoint", checkpoint)
 
     def _select_checkpoint_path(
         self,
@@ -2061,11 +2259,14 @@ class Trainer:
         )
         if not weights_only:
             self.precision_plugin.on_save_checkpoint(checkpoint)
-        with module._hook_context("on_save_checkpoint"):
-            if not weights_only:
-                for callback in self.callbacks:
-                    callback.on_save_checkpoint(self, module, checkpoint)
-            module.on_save_checkpoint(checkpoint)
+        if not weights_only:
+            self._call_callback_hooks(module, "on_save_checkpoint", checkpoint)
+        self._call_module_hook(
+            module,
+            "on_save_checkpoint",
+            module.on_save_checkpoint,
+            checkpoint
+        )
         return checkpoint
 
     def save_checkpoint(
@@ -2086,25 +2287,34 @@ class Trainer:
             raise AttributeError(
                 "Saving a checkpoint requires a model attached through a Trainer stage."
             )
-        path: Path = Path(filepath).expanduser()
-        checkpoint: CheckpointDict = self._build_checkpoint(bool(weights_only))
-        if self.is_global_zero:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            file_descriptor: int
-            temporary_path_value: str
-            file_descriptor, temporary_path_value = tempfile.mkstemp(
-                dir=str(path.parent),
-                suffix=".tmp"
-            )
-            os.close(file_descriptor)
-            temporary_path: Path = Path(temporary_path_value)
-            try:
-                torch.save(checkpoint, temporary_path)
-                temporary_path.replace(path)
-            finally:
-                if temporary_path.exists():
-                    temporary_path.unlink()
-        self.strategy.barrier()
+        profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
+            self.profiler.profile("save_checkpoint")
+            if self._profiler_is_setup
+            else nullcontext()
+        )
+        with profile_context:
+            path: Path = Path(filepath).expanduser()
+            checkpoint: CheckpointDict = self._build_checkpoint(bool(weights_only))
+            if self.is_global_zero:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                file_descriptor: int
+                temporary_path_value: str
+                file_descriptor, temporary_path_value = tempfile.mkstemp(
+                    dir=str(path.parent),
+                    suffix=".tmp"
+                )
+                os.close(file_descriptor)
+                temporary_path: Path = Path(temporary_path_value)
+                try:
+                    torch.save(checkpoint, temporary_path)
+                    temporary_path.replace(path)
+                finally:
+                    if temporary_path.exists():
+                        temporary_path.unlink()
+            if self._profiler_is_setup:
+                self._call_strategy_hook("barrier", self.strategy.barrier)
+            else:
+                self.strategy.barrier()
 
     def _handle_exception(
         self,
@@ -2130,8 +2340,13 @@ class Trainer:
         self.state.interrupt()
         for index, callback in enumerate(self.callbacks):
             try:
-                with module._hook_context("on_exception"):
-                    callback.on_exception(self, module, exception)
+                self._call_callback_hook(
+                    callback,
+                    module,
+                    "on_exception",
+                    callback.on_exception,
+                    exception
+                )
             except BaseException as hook_exception:
                 self._add_exception_note(
                     exception,
@@ -2139,11 +2354,20 @@ class Trainer:
                     hook_exception
                 )
         try:
-            datamodule.on_exception(exception)
+            self._call_datamodule_hook(
+                datamodule,
+                "on_exception",
+                datamodule.on_exception,
+                exception
+            )
         except BaseException as hook_exception:
             self._add_exception_note(exception, "datamodule.on_exception", hook_exception)
         try:
-            self.strategy.on_exception(exception)
+            self._call_strategy_hook(
+                "on_exception",
+                self.strategy.on_exception,
+                exception
+            )
         except BaseException as hook_exception:
             self._add_exception_note(exception, "strategy.on_exception", hook_exception)
 
@@ -2165,7 +2389,12 @@ class Trainer:
         )
         self._attempt_teardown(
             "datamodule.teardown",
-            lambda: datamodule.teardown(stage),
+            lambda: self._call_datamodule_hook(
+                datamodule,
+                "teardown",
+                datamodule.teardown,
+                stage
+            ),
             failures
         )
         for index, callback in enumerate(self.callbacks):
@@ -2192,12 +2421,6 @@ class Trainer:
                 configured_logger.finalize,
                 failures
             )
-
-        exception_notified: bool = False
-        if failures and self._active_exception is None:
-            self._notify_exception(module, datamodule, failures[0][1])
-            exception_notified = True
-
         for index, callback in progress_callbacks:
             self._attempt_teardown(
                 f"callback[{index}].teardown",
@@ -2208,6 +2431,16 @@ class Trainer:
                 ),
                 failures
             )
+        self._attempt_teardown(
+            "profiler.describe",
+            self._teardown_profiler,
+            failures
+        )
+
+        exception_notified: bool = False
+        if failures and self._active_exception is None:
+            self._notify_exception(module, datamodule, failures[0][1])
+            exception_notified = True
 
         if not failures:
             return None
@@ -2240,12 +2473,21 @@ class Trainer:
         module: Module,
         stage: TrainerStage
     ) -> None:
-        with module._hook_context("teardown"):
-            callback.teardown(self, module, stage)
+        self._call_callback_hook(
+            callback,
+            module,
+            "teardown",
+            callback.teardown,
+            stage
+        )
 
     def _call_module_teardown(self, module: Module, stage: TrainerStage) -> None:
-        with module._hook_context("teardown"):
-            module.teardown(stage)
+        self._call_module_hook(
+            module,
+            "teardown",
+            module.teardown,
+            stage
+        )
 
     def _add_exception_note(
         self,

@@ -5,7 +5,6 @@ from typing import cast
 
 import torch
 
-from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.types import (
     Batch,
@@ -61,11 +60,17 @@ class Precision:
         return data
 
     def pre_backward(self, tensor: torch.Tensor, module: Module) -> torch.Tensor:
-        callback: Callback
-        with module._hook_context("on_before_backward"):
-            for callback in module.trainer.callbacks:
-                callback.on_before_backward(module.trainer, module, tensor)
-            module.on_before_backward(tensor)
+        module.trainer._call_callback_hooks(
+            module,
+            "on_before_backward",
+            tensor
+        )
+        module.trainer._call_module_hook(
+            module,
+            "on_before_backward",
+            module.on_before_backward,
+            tensor
+        )
         return tensor
 
     def backward(
@@ -80,12 +85,13 @@ class Precision:
         model.backward(tensor, *args, **kwargs)
 
     def post_backward(self, tensor: torch.Tensor, module: Module) -> torch.Tensor:
-        callback: Callback
         detached_tensor: torch.Tensor = tensor.detach()
-        with module._hook_context("on_after_backward"):
-            for callback in module.trainer.callbacks:
-                callback.on_after_backward(module.trainer, module)
-            module.on_after_backward()
+        module.trainer._call_callback_hooks(module, "on_after_backward")
+        module.trainer._call_module_hook(
+            module,
+            "on_after_backward",
+            module.on_after_backward
+        )
         return detached_tensor
 
     def optimizer_step(
@@ -126,12 +132,14 @@ class Precision:
     ) -> None:
         if not model.automatic_optimization:
             return
-        with model._hook_context("configure_gradient_clipping"):
-            model.configure_gradient_clipping(
-                optimizer,
-                clip_val,
-                gradient_clip_algorithm
-            )
+        model.trainer._call_module_hook(
+            model,
+            "configure_gradient_clipping",
+            model.configure_gradient_clipping,
+            optimizer,
+            clip_val,
+            gradient_clip_algorithm
+        )
 
     def clip_gradients(
         self,
@@ -207,11 +215,17 @@ class Precision:
         model: Module,
         optimizer: torch.optim.Optimizer
     ) -> None:
-        callback: Callback
-        with model._hook_context("on_before_optimizer_step"):
-            for callback in model.trainer.callbacks:
-                callback.on_before_optimizer_step(model.trainer, model, optimizer)
-            model.on_before_optimizer_step(optimizer)
+        model.trainer._call_callback_hooks(
+            model,
+            "on_before_optimizer_step",
+            optimizer
+        )
+        model.trainer._call_module_hook(
+            model,
+            "on_before_optimizer_step",
+            model.on_before_optimizer_step,
+            optimizer
+        )
         self._clip_gradients(
             model,
             optimizer,

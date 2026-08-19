@@ -42,6 +42,7 @@ import shutil
 import tempfile
 import time
 import warnings
+from contextlib import AbstractContextManager, nullcontext
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast, override
@@ -402,16 +403,83 @@ class ModelCheckpoint(Checkpoint):
         # save hooks run on the assembled payload, the write is atomic through
         # a same-directory temporary file, and save duration and size are
         # logged as runtime metrics.
-        if trainer.module is not module:
-            raise RuntimeError("ModelCheckpoint received a module not attached to its Trainer.")
-        self._last_global_step_saved = trainer.global_step
-        self._last_checkpoint_saved = str(filepath)
-        checkpoint_start_time: float = time.perf_counter()
-        checkpoint: CheckpointDict = trainer._build_checkpoint(
-            self.save_weights_only
+        profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
+            trainer.profiler.profile("save_checkpoint")
+            if trainer._profiler_is_setup
+            else nullcontext()
         )
-        if trainer.is_global_zero:
+        with profile_context:
+            if trainer.module is not module:
+                raise RuntimeError("ModelCheckpoint received a module not attached to its Trainer.")
+            self._last_global_step_saved = trainer.global_step
+            self._last_checkpoint_saved = str(filepath)
+            checkpoint_start_time: float = time.perf_counter()
+            checkpoint: CheckpointDict = trainer._build_checkpoint(
+                self.save_weights_only
+            )
+            if trainer.is_global_zero:
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+
+                # mkstemp pre-creates the temporary file; the descriptor is closed
+                # immediately because torch.save reopens the path itself.
+                file_descriptor: int
+                tmp_path_str: str
+                file_descriptor, tmp_path_str = tempfile.mkstemp(
+                    dir=str(filepath.parent),
+                    suffix=".tmp"
+                )
+                os.close(file_descriptor)
+                tmp_path: Path = Path(tmp_path_str)
+                try:
+                    torch.save(checkpoint, tmp_path)
+                    tmp_path.replace(filepath)
+                    checkpoint_duration_ms: float = (time.perf_counter() - checkpoint_start_time) * 1000.0
+                    checkpoint_size_mb: float = filepath.stat().st_size / 1048576.0
+                    if trainer.loggers:
+                        trainer._log_metrics(
+                            {
+                                "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
+                                "runtime/checkpoint_size_mb": checkpoint_size_mb
+                            },
+                            step=trainer.state.global_step
+                        )
+                finally:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+            if synchronize:
+                trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
+
+    def _save_partial_checkpoint(self, module: Module, filepath: Path) -> None:
+        # Writes a weights-only payload marked partial in its metadata, used
+        # by the exception path when the run failed before the optimizer
+        # existed. The write follows the same atomic temporary-file protocol
+        # as full checkpoints.
+        trainer: Trainer = module.trainer
+        profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
+            trainer.profiler.profile("save_checkpoint")
+            if trainer._profiler_is_setup
+            else nullcontext()
+        )
+        with profile_context:
             filepath.parent.mkdir(parents=True, exist_ok=True)
+            model_state_dict: CheckpointDict = cast(
+                CheckpointDict,
+                module.state_dict()
+            )
+            checkpoint: CheckpointDict = {
+                "state_dict": model_state_dict,
+                "model_state_dict": model_state_dict,
+                "metadata": {
+                    "torch_version": str(torch.__version__),
+                    "partial": True
+                }
+            }
+            trainer._call_module_hook(
+                module,
+                "on_save_checkpoint",
+                module.on_save_checkpoint,
+                checkpoint
+            )
 
             # mkstemp pre-creates the temporary file; the descriptor is closed
             # immediately because torch.save reopens the path itself.
@@ -426,59 +494,9 @@ class ModelCheckpoint(Checkpoint):
             try:
                 torch.save(checkpoint, tmp_path)
                 tmp_path.replace(filepath)
-                checkpoint_duration_ms: float = (time.perf_counter() - checkpoint_start_time) * 1000.0
-                checkpoint_size_mb: float = filepath.stat().st_size / 1048576.0
-                if trainer.loggers:
-                    trainer._log_metrics(
-                        {
-                            "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
-                            "runtime/checkpoint_size_mb": checkpoint_size_mb
-                        },
-                        step=trainer.state.global_step
-                    )
             finally:
                 if tmp_path.exists():
                     tmp_path.unlink()
-        if synchronize:
-            trainer.strategy.barrier()
-
-    def _save_partial_checkpoint(self, module: Module, filepath: Path) -> None:
-        # Writes a weights-only payload marked partial in its metadata, used
-        # by the exception path when the run failed before the optimizer
-        # existed. The write follows the same atomic temporary-file protocol
-        # as full checkpoints.
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        model_state_dict: CheckpointDict = cast(
-            CheckpointDict,
-            module.state_dict()
-        )
-        checkpoint: CheckpointDict = {
-            "state_dict": model_state_dict,
-            "model_state_dict": model_state_dict,
-            "metadata": {
-                "torch_version": str(torch.__version__),
-                "partial": True
-            }
-        }
-        with module._hook_context("on_save_checkpoint"):
-            module.on_save_checkpoint(checkpoint)
-
-        # mkstemp pre-creates the temporary file; the descriptor is closed
-        # immediately because torch.save reopens the path itself.
-        file_descriptor: int
-        tmp_path_str: str
-        file_descriptor, tmp_path_str = tempfile.mkstemp(
-            dir=str(filepath.parent),
-            suffix=".tmp"
-        )
-        os.close(file_descriptor)
-        tmp_path: Path = Path(tmp_path_str)
-        try:
-            torch.save(checkpoint, tmp_path)
-            tmp_path.replace(filepath)
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
 
     def _update_top_k(self, score: torch.Tensor, filepath: Path) -> None:
         # Inserts the new checkpoint into the retention set, sorts by score in
@@ -806,7 +824,7 @@ class ModelCheckpoint(Checkpoint):
                     Path(filepath)
                 )
             if synchronize:
-                trainer.strategy.barrier()
+                trainer._call_strategy_hook("barrier", trainer.strategy.barrier)
         else:
             self._save_checkpoint(
                 trainer,

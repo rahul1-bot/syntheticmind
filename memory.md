@@ -208,3 +208,13 @@
     5. Hierarchical module rows may recursively include child parameters, while direct root parameters belong in a separate leftover row. The total model count remains authoritative and must not be reconstructed by summing overlapping hierarchy rows.
     6. Optional presentation dependencies must not silently seize the default terminal. The plain renderer provides stable redirected output, while Rich formatting remains an explicit user-selected capability with a clear dependency boundary.
     7. Uninitialized parameters require a cached warning because table construction queries totals, trainable counts, row counts, size, and formatting repeatedly. Emitting once preserves the defect signal without turning one lazy layer into a warning avalanche.
+
+| Memory | Profiler Lifecycle and Action Semantics | Date: 19 August 2026 | Time: 05:07 PM | Name: Ghost |
+
+    1. A profiler is a stage lifecycle collaborator rather than a timing utility wrapped around `training_step`. Correct observability requires the same centralized dispatch boundary used by module, datamodule, callback, and strategy extension hooks.
+    2. Action names are an inspection interface. Universal execution terms such as `run_training_batch`, `run_training_epoch`, `save_checkpoint`, `backward`, and optimizer-step names should remain stable, while framework-owned prefixes must identify SyntheticMind rather than Lightning.
+    3. Nested profiling is required because a batch action contains strategy, module, precision, optimizer, callback, and checkpoint work. cProfile parents must pause and resume around children, while PyTorch record-function ranges must preserve the nesting directly.
+    4. Profiler teardown belongs after ordinary and presentation teardown hooks so their cost is observable, but its own failure must not mask an earlier runtime or cleanup failure. A failure reported after profiler closure must not restart the profiler through exception hooks.
+    5. Artifact ownership follows the first logger only as a directory authority; profiler reports are not terminal progress metrics or experiment-log events. Rank suffixes prevent distributed writers from colliding, and the disabled pass-through path must not create directories.
+    6. PyTorch profiler schedules advance on standard step-hook boundaries, module-name recording follows the actual strategy-connected module, and repeated Trainer stages require complete recording and trace reset without discarding the reusable profiler object.
+    7. Hardware evidence remains explicit: MPS validates PyTorch operator recording on this MacBook, Gloo validates rank-separated artifacts, and CUDA NVTX plus XLA traces require later execution on the corresponding runtime.

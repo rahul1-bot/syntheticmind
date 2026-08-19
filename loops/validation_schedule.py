@@ -127,6 +127,7 @@ class ValidationSchedule:
                 )
             self.batch_interval = None
         else:
+            assert isinstance(self.val_check_interval, float)
             self.batch_interval = max(1, int(max_batches * self.val_check_interval))
         if reset_time:
             self._last_validation_time = time.monotonic()

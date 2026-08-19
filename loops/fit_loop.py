@@ -93,10 +93,16 @@ class FitLoop(Loop):
         ):
             return
 
-        with module._hook_context("on_train_start"):
-            for callback in callbacks:
-                callback.on_train_start(trainer, module)
-            module.on_train_start()
+        trainer._call_callback_hooks(
+            module,
+            "on_train_start",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_train_start",
+            module.on_train_start
+        )
 
         while not self._max_epochs_reached(state) and not self._max_steps_reached(state):
             if self.should_stop or (trainer.should_stop and self._can_stop_early(state)):
@@ -109,7 +115,12 @@ class FitLoop(Loop):
             if trainer.reload_dataloaders_every_n_epochs > 0 and epoch > 0:
                 if epoch % trainer.reload_dataloaders_every_n_epochs == 0:
                     assert trainer.datamodule is not None
-                    trainer.train_dataloader = trainer.datamodule.train_dataloader()
+                    with trainer.profiler.profile("setup_train_dataloader"):
+                        trainer.train_dataloader = trainer._call_datamodule_hook(
+                            trainer.datamodule,
+                            "train_dataloader",
+                            trainer.datamodule.train_dataloader
+                        )
 
                     if trainer.overfit_batches:
                         trainer.train_dataloader = trainer._prepare_overfit_dataloader(
@@ -126,7 +137,12 @@ class FitLoop(Loop):
                     trainer._total_train_batches = trainer._safe_len(trainer.train_dataloader)
 
                     if trainer.val_dataloader is not None:
-                        trainer.val_dataloader = trainer.datamodule.val_dataloader()
+                        with trainer.profiler.profile("setup_val_dataloader"):
+                            trainer.val_dataloader = trainer._call_datamodule_hook(
+                                trainer.datamodule,
+                                "val_dataloader",
+                                trainer.datamodule.val_dataloader
+                            )
                         if trainer.overfit_batches:
                             trainer.val_dataloader = trainer._prepare_overfit_dataloader(
                                 trainer.val_dataloader,
@@ -153,22 +169,36 @@ class FitLoop(Loop):
             trainer._reset_progress_bar_metrics("validating")
             module.train()
 
-            with module._hook_context("on_train_epoch_start"):
-                for callback in callbacks:
-                    callback.on_train_epoch_start(trainer, module)
-                module.on_train_epoch_start()
+            trainer._call_callback_hooks(
+                module,
+                "on_train_epoch_start",
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_train_epoch_start",
+                module.on_train_epoch_start
+            )
 
-            self.epoch_loop.run()
+            with trainer.profiler.profile("run_training_epoch"):
+                self.epoch_loop.run()
 
-            with module._hook_context("on_train_epoch_end"):
-                for callback in non_monitoring_callbacks:
-                    callback.on_train_epoch_end(trainer, module)
-            with module._hook_context("on_train_epoch_end"):
-                module.on_train_epoch_end()
+            trainer._call_callback_hooks(
+                module,
+                "on_train_epoch_end",
+                callback_group=non_monitoring_callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_train_epoch_end",
+                module.on_train_epoch_end
+            )
             self._flush_hook_metrics(module, trainer, state)
-            with module._hook_context("on_train_epoch_end"):
-                for callback in monitoring_callbacks:
-                    callback.on_train_epoch_end(trainer, module)
+            trainer._call_callback_hooks(
+                module,
+                "on_train_epoch_end",
+                callback_group=monitoring_callbacks
+            )
 
             module._reset_logged_metrics()
 
@@ -198,10 +228,12 @@ class FitLoop(Loop):
             if trainer.should_stop and self._can_stop_early(state):
                 self.should_stop: bool = True
 
-        with module._hook_context("on_train_end"):
-            for callback in callbacks:
-                callback.on_train_end(trainer, module)
-            module.on_train_end()
+        trainer._call_callback_hooks(
+            module,
+            "on_train_end",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(module, "on_train_end", module.on_train_end)
 
     def _max_epochs_reached(self, state: TrainerState) -> bool:
         return self.max_epochs != -1 and state.current_epoch >= self.max_epochs

@@ -249,7 +249,8 @@ class TrainingEpochLoop(Loop):
 
         self._has_entered_batch_loop: bool = True
         dataloader_iterator_start_time: float = time.perf_counter()
-        train_iterator: Iterator[Batch] = iter(train_dataloader)
+        with trainer.profiler.profile("setup_train_dataloader"):
+            train_iterator: Iterator[Batch] = iter(train_dataloader)
         trainer._record_dataloader_iterator_creation_time(
             "training",
             time.perf_counter() - dataloader_iterator_start_time
@@ -263,7 +264,10 @@ class TrainingEpochLoop(Loop):
                 break
             dataloader_fetch_start_time: float = time.perf_counter()
             try:
-                batch: Batch = next(train_iterator)
+                with trainer.profiler.profile(
+                    f"[{type(self).__name__}].train_dataloader_next"
+                ):
+                    batch: Batch = next(train_iterator)
             except StopIteration:
                 dataloader_exhausted = True
                 break
@@ -287,72 +291,130 @@ class TrainingEpochLoop(Loop):
                 )
                 self._resume_checkpoint_rng_state = None
 
-            with module._hook_context("on_train_batch_start"):
-                for callback in callbacks:
-                    callback.on_train_batch_start(trainer, module, batch, batch_idx)
-                hook_response: int | None = module.on_train_batch_start(batch, batch_idx)
+            trainer._call_callback_hooks(
+                module,
+                "on_train_batch_start",
+                batch,
+                batch_idx,
+                callback_group=callbacks
+            )
+            hook_response: int | None = trainer._call_module_hook(
+                module,
+                "on_train_batch_start",
+                module.on_train_batch_start,
+                batch,
+                batch_idx
+            )
             if hook_response == -1:
                 break
 
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
-                batch: Batch = dm.on_before_batch_transfer(batch, dataloader_idx=0)
+                batch: Batch = trainer._call_datamodule_hook(
+                    dm,
+                    "on_before_batch_transfer",
+                    dm.on_before_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("on_before_batch_transfer"):
-                    batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "on_before_batch_transfer",
+                    module.on_before_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
-                batch: Batch = dm.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                batch = trainer._call_datamodule_hook(
+                    dm,
+                    "transfer_batch_to_device",
+                    dm.transfer_batch_to_device,
+                    batch,
+                    device,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("transfer_batch_to_device"):
-                    batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "transfer_batch_to_device",
+                    module.transfer_batch_to_device,
+                    batch,
+                    device,
+                    dataloader_idx=0
+                )
             if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
-                batch: Batch = dm.on_after_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_datamodule_hook(
+                    dm,
+                    "on_after_batch_transfer",
+                    dm.on_after_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("on_after_batch_transfer"):
-                    batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "on_after_batch_transfer",
+                    module.on_after_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
 
             # Automatic path: the loss is divided by the accumulation factor
             # so the accumulated gradient matches the equivalent large batch,
             # DDP gradient sync is suppressed on accumulation batches, and
             # the optimizer steps only on window boundaries, with the final
             # limited batch forcing a non-accumulating step.
-            if module.automatic_optimization:
-                assert optimizer is not None
-                is_accumulating: bool = (batch_idx + 1) % self.accumulate_grad_batches != 0
-                if max_batches is not None and (batch_idx + 1) >= max_batches:
-                    is_accumulating: bool = False
+            with trainer.profiler.profile("run_training_batch"):
+                if module.automatic_optimization:
+                    assert optimizer is not None
+                    is_accumulating: bool = (batch_idx + 1) % self.accumulate_grad_batches != 0
+                    if max_batches is not None and (batch_idx + 1) >= max_batches:
+                        is_accumulating: bool = False
 
-                no_sync_ctx: AbstractContextManager[None] = nullcontext()
-                if isinstance(model, DistributedDataParallel) and is_accumulating:
-                    no_sync_ctx: AbstractContextManager[None] = model.no_sync()
+                    no_sync_ctx: AbstractContextManager[None] = nullcontext()
+                    if isinstance(model, DistributedDataParallel) and is_accumulating:
+                        no_sync_ctx: AbstractContextManager[None] = model.no_sync()
 
-                automatic_closure: _AutomaticClosure = self._make_automatic_closure(
-                    trainer,
-                    module,
-                    strategy,
-                    model,
-                    batch,
-                    batch_idx
-                )
-                if is_accumulating:
-                    with no_sync_ctx:
-                        automatic_closure()
-                else:
-                    self._do_optimizer_step(
-                        trainer, module, optimizer, state, batch_idx, automatic_closure
+                    automatic_closure: _AutomaticClosure = self._make_automatic_closure(
+                        trainer,
+                        module,
+                        strategy,
+                        model,
+                        batch,
+                        batch_idx
                     )
-                outputs: StepOutput = automatic_closure.outputs
-            else:
-                outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
-                is_accumulating: bool = False
+                    if is_accumulating:
+                        with no_sync_ctx:
+                            automatic_closure()
+                    else:
+                        self._do_optimizer_step(
+                            trainer, module, optimizer, state, batch_idx, automatic_closure
+                        )
+                    outputs: StepOutput = automatic_closure.outputs
+                else:
+                    outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
+                    is_accumulating: bool = False
 
             self._completed_batches = batch_idx + 1
             self._total_batches_processed += 1
 
-            with module._hook_context("on_train_batch_end"):
-                for callback in callbacks:
-                    callback.on_train_batch_end(trainer, module, outputs, batch, batch_idx)
-                module.on_train_batch_end(outputs, batch, batch_idx)
+            trainer._call_callback_hooks(
+                module,
+                "on_train_batch_end",
+                outputs,
+                batch,
+                batch_idx,
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_train_batch_end",
+                module.on_train_batch_end,
+                outputs,
+                batch,
+                batch_idx
+            )
 
             self._dispatch_step_metrics(
                 module,
@@ -476,7 +538,9 @@ class TrainingEpochLoop(Loop):
         # in a finally block so a raising step cannot leave a stale marker.
         with self._make_autocast_context(self.trainer.strategy.root_device):
             with module._hook_context("training_step"):
-                outputs: StepOutput = strategy.training_step(
+                outputs: StepOutput = self.trainer._call_strategy_hook(
+                    "training_step",
+                    strategy.training_step,
                     model,
                     batch,
                     batch_idx
@@ -610,7 +674,14 @@ class TrainingEpochLoop(Loop):
         # hooks fire before the corresponding module hooks. With an active
         # GradScaler the loss is scaled before backward; otherwise backward is
         # delegated to the strategy so distributed synchronization applies.
-        trainer.strategy.backward(loss, None, *args, **kwargs)
+        trainer._call_strategy_hook(
+            "backward",
+            trainer.strategy.backward,
+            loss,
+            None,
+            *args,
+            **kwargs
+        )
 
     def optimizer_step(
         self,
@@ -668,13 +739,15 @@ class TrainingEpochLoop(Loop):
         )
         synthetic_optimizer._automatic_step = True
         try:
-            with module._hook_context("optimizer_step"):
-                module.optimizer_step(
-                    module.current_epoch,
-                    batch_idx,
-                    synthetic_optimizer,
-                    closure
-                )
+            trainer._call_module_hook(
+                module,
+                "optimizer_step",
+                module.optimizer_step,
+                module.current_epoch,
+                batch_idx,
+                synthetic_optimizer,
+                closure
+            )
         finally:
             synthetic_optimizer._automatic_step = False
         self._increment_global_step(state, module)
@@ -716,8 +789,13 @@ class TrainingEpochLoop(Loop):
                         raise MisconfigurationError(message)
                     warnings.warn(message, RuntimeWarning, stacklevel=3)
                     continue
-            with module._hook_context("lr_scheduler_step"):
-                module.lr_scheduler_step(configuration.scheduler, monitor_value)
+            trainer._call_module_hook(
+                module,
+                "lr_scheduler_step",
+                module.lr_scheduler_step,
+                configuration.scheduler,
+                monitor_value
+            )
 
     def _optimizer_step_only(
         self,
@@ -735,7 +813,9 @@ class TrainingEpochLoop(Loop):
         del automatic
         step_kwargs: dict[str, object] = {} if kwargs is None else kwargs
         resolved_closure: Callable[[], object] = closure or do_nothing_closure
-        return trainer.strategy.optimizer_step(
+        return trainer._call_strategy_hook(
+            "optimizer_step",
+            trainer.strategy.optimizer_step,
             optimizer,
             resolved_closure,
             model=module,
@@ -750,17 +830,27 @@ class TrainingEpochLoop(Loop):
         automatic: bool
     ) -> None:
         callbacks: list[Callback] = trainer.callbacks
-        with module._hook_context("on_before_optimizer_step"):
-            for callback in callbacks:
-                callback.on_before_optimizer_step(trainer, module, optimizer)
-            module.on_before_optimizer_step(optimizer)
+        trainer._call_callback_hooks(
+            module,
+            "on_before_optimizer_step",
+            optimizer,
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_before_optimizer_step",
+            module.on_before_optimizer_step,
+            optimizer
+        )
         if automatic:
-            with module._hook_context("configure_gradient_clipping"):
-                module.configure_gradient_clipping(
-                    optimizer,
-                    self.gradient_clip_val,
-                    self.gradient_clip_algorithm
-                )
+            trainer._call_module_hook(
+                module,
+                "configure_gradient_clipping",
+                module.configure_gradient_clipping,
+                optimizer,
+                self.gradient_clip_val,
+                self.gradient_clip_algorithm
+            )
 
     def _optimizer_zero_grad(
         self,
@@ -773,12 +863,26 @@ class TrainingEpochLoop(Loop):
         # the module observe gradients in their final post-step state before
         # they are released.
         callbacks: list[Callback] = trainer.callbacks
-        with module._hook_context("on_before_zero_grad"):
-            for callback in callbacks:
-                callback.on_before_zero_grad(trainer, module, optimizer)
-            module.on_before_zero_grad(optimizer)
-        with module._hook_context("optimizer_zero_grad"):
-            module.optimizer_zero_grad(module.current_epoch, batch_idx, optimizer)
+        trainer._call_callback_hooks(
+            module,
+            "on_before_zero_grad",
+            optimizer,
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_before_zero_grad",
+            module.on_before_zero_grad,
+            optimizer
+        )
+        trainer._call_module_hook(
+            module,
+            "optimizer_zero_grad",
+            module.optimizer_zero_grad,
+            module.current_epoch,
+            batch_idx,
+            optimizer
+        )
 
     @staticmethod
     def _increment_global_step(state: TrainerState, module: Module) -> None:

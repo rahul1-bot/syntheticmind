@@ -91,22 +91,38 @@ class PredictionLoop(Loop):
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
-        with module._hook_context("on_predict_model_eval"):
-            module.on_predict_model_eval()
+        trainer._call_module_hook(
+            module,
+            "on_predict_model_eval",
+            module.on_predict_model_eval
+        )
 
-        with module._hook_context("on_predict_start"):
-            for callback in callbacks:
-                callback.on_predict_start(trainer, module)
-            module.on_predict_start()
-        with module._hook_context("on_predict_epoch_start"):
-            for callback in callbacks:
-                callback.on_predict_epoch_start(trainer, module)
-            module.on_predict_epoch_start()
+        trainer._call_callback_hooks(
+            module,
+            "on_predict_start",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_predict_start",
+            module.on_predict_start
+        )
+        trainer._call_callback_hooks(
+            module,
+            "on_predict_epoch_start",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_predict_epoch_start",
+            module.on_predict_epoch_start
+        )
 
         all_predictions: list[ModelOutput] = []
 
         dataloader_iterator_start_time: float = time.perf_counter()
-        dataloader_iterator: Iterator[Batch] = iter(predict_dataloader)
+        with trainer.profiler.profile("setup_predict_dataloader"):
+            dataloader_iterator: Iterator[Batch] = iter(predict_dataloader)
         trainer._record_dataloader_iterator_creation_time(
             "predicting",
             time.perf_counter() - dataloader_iterator_start_time
@@ -115,7 +131,10 @@ class PredictionLoop(Loop):
         while True:
             dataloader_fetch_start_time: float = time.perf_counter()
             try:
-                batch: Batch = next(dataloader_iterator)
+                with trainer.profiler.profile(
+                    f"[{type(self).__name__}].predict_next"
+                ):
+                    batch: Batch = next(dataloader_iterator)
             except StopIteration:
                 break
             trainer._record_dataloader_fetch_time(
@@ -128,47 +147,126 @@ class PredictionLoop(Loop):
 
             batch: Batch = trainer.precision_plugin.convert_input(batch)
 
-            with module._hook_context("on_predict_batch_start"):
-                for callback in callbacks:
-                    callback.on_predict_batch_start(trainer, module, batch, batch_idx, 0)
-                module.on_predict_batch_start(batch, batch_idx, 0)
+            trainer._call_callback_hooks(
+                module,
+                "on_predict_batch_start",
+                batch,
+                batch_idx,
+                0,
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_predict_batch_start",
+                module.on_predict_batch_start,
+                batch,
+                batch_idx,
+                0
+            )
 
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
-                batch: Batch = dm.on_before_batch_transfer(batch, dataloader_idx=0)
+                batch: Batch = trainer._call_datamodule_hook(
+                    dm,
+                    "on_before_batch_transfer",
+                    dm.on_before_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("on_before_batch_transfer"):
-                    batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "on_before_batch_transfer",
+                    module.on_before_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
-                batch: Batch = dm.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                batch = trainer._call_datamodule_hook(
+                    dm,
+                    "transfer_batch_to_device",
+                    dm.transfer_batch_to_device,
+                    batch,
+                    device,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("transfer_batch_to_device"):
-                    batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "transfer_batch_to_device",
+                    module.transfer_batch_to_device,
+                    batch,
+                    device,
+                    dataloader_idx=0
+                )
             if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
-                batch: Batch = dm.on_after_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_datamodule_hook(
+                    dm,
+                    "on_after_batch_transfer",
+                    dm.on_after_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
             else:
-                with module._hook_context("on_after_batch_transfer"):
-                    batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
+                batch = trainer._call_module_hook(
+                    module,
+                    "on_after_batch_transfer",
+                    module.on_after_batch_transfer,
+                    batch,
+                    dataloader_idx=0
+                )
 
             with trainer.precision_plugin.predict_step_context():
                 with module._hook_context("predict_step"):
-                    outputs: ModelOutput = strategy.predict_step(model, batch, batch_idx)
+                    outputs: ModelOutput = trainer._call_strategy_hook(
+                        "predict_step",
+                        strategy.predict_step,
+                        model,
+                        batch,
+                        batch_idx
+                    )
             if self.return_predictions:
                 all_predictions.append(outputs)
 
-            with module._hook_context("on_predict_batch_end"):
-                for callback in callbacks:
-                    callback.on_predict_batch_end(trainer, module, outputs, batch, batch_idx, 0)
-                module.on_predict_batch_end(outputs, batch, batch_idx, 0)
+            trainer._call_callback_hooks(
+                module,
+                "on_predict_batch_end",
+                outputs,
+                batch,
+                batch_idx,
+                0,
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_predict_batch_end",
+                module.on_predict_batch_end,
+                outputs,
+                batch,
+                batch_idx,
+                0
+            )
 
-        with module._hook_context("on_predict_epoch_end"):
-            for callback in callbacks:
-                callback.on_predict_epoch_end(trainer, module)
-            module.on_predict_epoch_end()
-        with module._hook_context("on_predict_end"):
-            for callback in callbacks:
-                callback.on_predict_end(trainer, module)
-            module.on_predict_end()
+        trainer._call_callback_hooks(
+            module,
+            "on_predict_epoch_end",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_predict_epoch_end",
+            module.on_predict_epoch_end
+        )
+        trainer._call_callback_hooks(
+            module,
+            "on_predict_end",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_predict_end",
+            module.on_predict_end
+        )
         module_mode.restore(module)
 
         module._reset_logged_metrics()
