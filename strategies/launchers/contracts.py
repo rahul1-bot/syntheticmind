@@ -78,6 +78,7 @@ class _WorkerOutput(BaseModel):
     trainer_state_dict: TrainerStateDict
     should_stop: bool
     callback_metrics: dict[str, float]
+    logged_metrics: dict[str, float]
     progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]]
     last_progress_bar_stage: RunningStage | None
     callback_states: list[StateDict]

@@ -52,6 +52,7 @@ from syntheticmind.core.optimizer import (
 )
 from syntheticmind.core.saving import CheckpointHooks
 from syntheticmind.loggers.logger import Logger
+from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
 from syntheticmind.utilities.types import Batch, ModelOutput, Reduction, StepOutput
@@ -1106,7 +1107,8 @@ class LoggedMetric:
         "reduction",
         "sync_distributed",
         "add_dataloader_idx",
-        "batch_size"
+        "batch_size",
+        "_computed_value"
     )
 
     def __init__(
@@ -1133,3 +1135,19 @@ class LoggedMetric:
         self.sync_distributed: bool = sync_distributed
         self.add_dataloader_idx: bool = add_dataloader_idx
         self.batch_size: int | None = batch_size
+        self._computed_value: float | None = None
+
+    def compute(self, device: torch.device) -> float:
+        if self._computed_value is not None:
+            return self._computed_value
+        value: torch.Tensor | float = self.value
+        if self.sync_distributed and DistributedUtils.is_distributed():
+            if isinstance(value, torch.Tensor):
+                value = value.clone()
+            else:
+                value = torch.tensor(value, device=device)
+            value = DistributedUtils.all_reduce_mean(value)
+        if isinstance(value, torch.Tensor):
+            value = value.item()
+        self._computed_value = float(value)
+        return self._computed_value

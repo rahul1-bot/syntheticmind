@@ -276,3 +276,11 @@
     2. Output is deterministic, width-aware, dependency-free, rank-zero-owned, and identical in semantic content across interactive terminals, captured streams, MPS, spawn, and subprocess execution.
     3. Internal fit validation remains silent, and the progress completion line avoids repeating metrics that the verbose result record already owns.
     4. The next action is a renewed Trainer semantic audit for runtime contracts not detectable through signature comparison before moving to the next core module.
+
+| Strategic Note | Metric Inspection Integrity | Date: 19 August 2026 | Time: 09:51 PM | Name: Ghost |
+
+    1. ✅ Trainer metric inspection now distinguishes experiment-visible, callback-monitoring, and progress-visible state instead of presenting validation results as a false universal metric view.
+    2. Current step values are observable at inherited batch-end hooks with the stage-specific callback semantics established by the pinned reference, while sanity and repeated public stages cannot leak stale values.
+    3. Distributed synchronization has one owner per buffered metric, and the same computed value reaches hooks, accumulation, parent reconciliation, and the terminal rather than being reduced twice or rendered from rank-local state.
+    4. Spawn execution now retains the default progress UI because terminal streams are reconstructed inside workers rather than serialized from the parent process.
+    5. CPU, MPS, subprocess, spawn, fork, and notebook-fork evidence establishes the implemented boundary. The next sequential audit moves into `Module.log` value, naming, reduction, and duplicate-definition contracts.

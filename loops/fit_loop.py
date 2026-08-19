@@ -232,9 +232,7 @@ class FitLoop(Loop):
         callback_metrics: dict[str, float] = {}
         progress_bar_metrics: dict[str, float] = {}
         for name, metric in logged.items():
-            val: torch.Tensor | float = metric.value
-            if isinstance(val, torch.Tensor):
-                val: torch.Tensor | float = val.item()
+            val: float = metric.compute(trainer.strategy.root_device)
             if metric.on_step or metric.on_epoch:
                 callback_metrics[name] = val
             if metric.logger:
@@ -242,6 +240,7 @@ class FitLoop(Loop):
             if metric.progress_bar:
                 progress_bar_metrics[name] = val
         trainer._callback_metrics.update(callback_metrics)
+        trainer._update_logged_metrics(log_metrics)
         trainer._update_progress_bar_metrics("training", progress_bar_metrics)
         if log_metrics and trainer.loggers and DistributedUtils.is_rank_zero():
             trainer._log_metrics(log_metrics, step=state.global_step)

@@ -351,3 +351,13 @@
     3. Full metric visibility and low information density are compatible when one dataloader owns one record, fields are deterministically ordered, and records wrap rather than becoming a bordered table.
     4. Automatic `/dataloader_idx_N` suffixes belong to returned and logged metric identity but are redundant in a display line already labeled with the producing dataloader position.
     5. Distributed presentation must be rank-zero-owned at the executing stage boundary. A resolved worker path prints exactly once while preserving the unmodified list of metric dictionaries returned to the parent.
+
+| Memory | Metric View and Synchronization Semantics | Date: 19 August 2026 | Time: 09:51 PM | Name: Ghost |
+
+    1. Logger configuration and logged-metric inspection are separate concepts. A `logger=True` metric remains visible through `Trainer.logged_metrics` even when no experiment backend is configured, while `logger=False` must remain excluded.
+    2. The established batch-end timing is achieved by exposing buffered step values before callback and module end hooks, then consuming the same records afterward. Moving complete logger dispatch before hooks would alter external side-effect and failure timing unnecessarily.
+    3. Training step metrics belong in callback monitoring state, but evaluation step-only metrics do not. Evaluation callback metrics become authoritative through epoch reduction, preventing a transient batch value from masquerading as a monitored validation result.
+    4. Distributed synchronization cannot occur independently in every consumer. Caching the first scalar computation gives hook inspection, accumulation, logger dispatch, and progress presentation one collective and one agreed value.
+    5. A terminal stream is process-local state and must not be pickled into spawn workers. Serializing only renderer configuration and reconstructing its stream preserves standard progress behavior across process start methods.
+    6. Multiprocessing parent reconciliation must include every public inspection mapping. Returning model weights and callback metrics while dropping logged metrics leaves a stage that executed correctly in workers but lies when inspected from the parent.
+    7. The unresolved adjacent contract is metric-name forking when one value is routed to both step and epoch scopes. That behavior belongs to the `Module.log` audit rather than being inferred from the Trainer cache alone.

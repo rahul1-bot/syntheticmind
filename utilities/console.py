@@ -37,6 +37,12 @@ class ConsoleRenderer:
         self._spinner_index = 0
         self._last_render_time = 0.0
 
+    def __getstate__(self) -> dict[str, float]:
+        return {"refresh_interval": self.refresh_interval}
+
+    def __setstate__(self, state: dict[str, float]) -> None:
+        self.__init__(state["refresh_interval"])
+
     def next_spinner(self) -> str:
         frames: tuple[str, ...] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
         frame: str = frames[self._spinner_index % len(frames)]

@@ -382,6 +382,12 @@ class EvaluationLoop(Loop):
                             *step_arguments
                         )
 
+            trainer._preview_logged_metrics(
+                module,
+                running_stage,
+                dataloader_idx,
+                include_dataloader_idx
+            )
             if self.stage == "validate":
                 trainer._call_callback_hooks(
                     module,
@@ -442,14 +448,19 @@ class EvaluationLoop(Loop):
             }
             trainer._update_progress_bar_metrics(running_stage, progress_bar_epoch_metrics)
 
-        if trainer.loggers and self.epoch_metrics and DistributedUtils.is_rank_zero():
-            logger_epoch_metrics: dict[str, float] = {
-                k: v
-                for k, v in self.epoch_metrics.items()
-                if any(k in names for names in logger_metric_names)
-            }
-            if logger_epoch_metrics:
-                trainer._log_metrics(logger_epoch_metrics, step=state.global_step)
+        logger_epoch_metrics: dict[str, float] = {
+            name: value
+            for name, value in self.epoch_metrics.items()
+            if any(name in names for names in logger_metric_names)
+        }
+        if not trainer.sanity_checking:
+            trainer._update_logged_metrics(logger_epoch_metrics)
+        if (
+            trainer.loggers
+            and logger_epoch_metrics
+            and DistributedUtils.is_rank_zero()
+        ):
+            trainer._log_metrics(logger_epoch_metrics, step=state.global_step)
 
         if self.stage == "validate":
             self.trainer._callback_metrics.update(self.epoch_metrics)
@@ -627,13 +638,7 @@ class EvaluationLoop(Loop):
                 if include_dataloader_idx and metric.add_dataloader_idx
                 else name
             )
-            value: torch.Tensor | float = metric.value
-            if metric.sync_distributed and DistributedUtils.is_distributed():
-                if not isinstance(value, torch.Tensor):
-                    value: torch.Tensor | float = torch.tensor(value, device=self.trainer.strategy.root_device)
-                value: torch.Tensor | float = DistributedUtils.all_reduce_mean(value)
-            if isinstance(value, torch.Tensor):
-                value: torch.Tensor | float = value.item()
+            value: float = metric.compute(self.trainer.strategy.root_device)
             if metric.on_step and metric.logger:
                 step_metrics[metric_name] = value
             if metric.on_step and metric.progress_bar:
@@ -647,9 +652,14 @@ class EvaluationLoop(Loop):
                 if metric.progress_bar:
                     progress_bar_metric_names.add(metric_name)
 
-        if step_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
-            self.trainer._log_metrics(step_metrics, step=state.global_step)
         if not self.trainer.sanity_checking:
+            self.trainer._update_logged_metrics(step_metrics)
+            if (
+                step_metrics
+                and self.trainer.loggers
+                and DistributedUtils.is_rank_zero()
+            ):
+                self.trainer._log_metrics(step_metrics, step=state.global_step)
             self.trainer._update_progress_bar_metrics(
                 running_stage,
                 progress_bar_step_metrics
@@ -674,13 +684,7 @@ class EvaluationLoop(Loop):
         hook_logger_metrics: dict[str, float] = {}
         hook_progress_bar_metrics: dict[str, float] = {}
         for name, metric in logged.items():
-            value: torch.Tensor | float = metric.value
-            if metric.sync_distributed and DistributedUtils.is_distributed():
-                if not isinstance(value, torch.Tensor):
-                    value: torch.Tensor | float = torch.tensor(value, device=self.trainer.strategy.root_device)
-                value: torch.Tensor | float = DistributedUtils.all_reduce_mean(value)
-            if isinstance(value, torch.Tensor):
-                value: torch.Tensor | float = value.item()
+            value: float = metric.compute(self.trainer.strategy.root_device)
             if metric.on_epoch:
                 self.epoch_metrics[name] = value
             if metric.logger:
@@ -690,6 +694,7 @@ class EvaluationLoop(Loop):
         if hook_logger_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
             self.trainer._log_metrics(hook_logger_metrics, step=state.global_step)
         if not self.trainer.sanity_checking:
+            self.trainer._update_logged_metrics(hook_logger_metrics)
             self.trainer._update_progress_bar_metrics(
                 running_stage,
                 hook_progress_bar_metrics

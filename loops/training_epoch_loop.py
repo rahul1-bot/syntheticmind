@@ -465,6 +465,7 @@ class TrainingEpochLoop(Loop):
             if self.is_last_batch:
                 epoch_completed: bool = True
 
+            trainer._preview_logged_metrics(module, "training")
             trainer._call_callback_hooks(
                 module,
                 "on_train_batch_end",
@@ -995,13 +996,7 @@ class TrainingEpochLoop(Loop):
         callback_step_metrics: dict[str, float] = {}
         progress_bar_step_metrics: dict[str, float] = {}
         for name, metric in logged.items():
-            value: torch.Tensor | float = metric.value
-            if metric.sync_distributed and DistributedUtils.is_distributed():
-                if not isinstance(value, torch.Tensor):
-                    value: torch.Tensor | float = torch.tensor(value, device=self.trainer.strategy.root_device)
-                value: torch.Tensor | float = DistributedUtils.all_reduce_mean(value)
-            if isinstance(value, torch.Tensor):
-                value: torch.Tensor | float = value.item()
+            value: float = metric.compute(self.trainer.strategy.root_device)
 
             if metric.on_step:
                 callback_step_metrics[name] = value
@@ -1019,6 +1014,7 @@ class TrainingEpochLoop(Loop):
                     epoch_progress_bar_names.add(name)
 
         self.trainer._callback_metrics.update(callback_step_metrics)
+        self.trainer._update_logged_metrics(step_metrics)
         self.trainer._update_progress_bar_metrics("training", progress_bar_step_metrics)
         if (
             step_metrics
@@ -1055,13 +1051,16 @@ class TrainingEpochLoop(Loop):
             for name, value in all_reduced.items()
             if name in epoch_progress_bar_names
         }
+        logger_reduced: dict[str, float] = {
+            name: value
+            for name, value in all_reduced.items()
+            if name in epoch_logger_names
+        }
+        self.trainer._update_logged_metrics(logger_reduced)
         self.trainer._update_progress_bar_metrics("training", progress_bar_reduced)
         if not self.trainer.loggers:
             return
         if not DistributedUtils.is_rank_zero():
             return
-        logger_reduced: dict[str, float] = {
-            k: v for k, v in all_reduced.items() if k in epoch_logger_names
-        }
         if logger_reduced:
             self.trainer._log_metrics(logger_reduced, step=state.global_step)

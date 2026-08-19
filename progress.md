@@ -188,8 +188,16 @@
     3. ✅ Multiple dataloaders, long names, finite and non-finite values, disabled and enabled progress callbacks, CPU, MPS, spawn, and subprocess execution preserve rank-zero output and unchanged returned results.
     4. ✅ Python compilation, targeted type checking, diff validation, and source-comment preservation pass without invoking a linter.
 
-| Progress Todo | Trainer Runtime Contract Audit | Date: 19 August 2026 | Time: 09:38 PM | Name: Ghost |
+| Progress Complete | Trainer Runtime Metric Inspection | Date: 19 August 2026 | Time: 09:51 PM | Name: Ghost |
 
-    1. Audit the remaining pinned Trainer runtime contracts that signature comparison cannot detect, including context-manager behavior, public inspection properties, checkpoint saving options, repeated-stage state, and constructor parameter interactions.
-    2. Classify every difference as universal capability, intentional SyntheticMind architecture, or excluded vendor integration before selecting another implementation phase.
-    3. Verify the selected gap through executable local, accelerator, and distributed evidence proportional to its ownership boundary, then commit and synchronize `dev` and `origin/dev` before moving to the next core module.
+    1. ✅ The remaining Trainer runtime inspection audit identified `logged_metrics` as a broken public contract: it exposed validation epoch values regardless of logger routing, omitted other stages, and remained stale after repeated-stage execution.
+    2. ✅ Logged, callback, and progress mappings now preserve their distinct routing, stage-reset, sanity, hook-timing, multiple-dataloader, and defensive-copy meanings.
+    3. ✅ Distributed metric computation is cached and transferred to multiprocessing parents, preventing duplicate collectives and preserving synchronized inspection after worker completion.
+    4. ✅ The default progress renderer now consumes synchronized values and reconstructs its process-local stream after serialization, making enabled progress compatible with spawn execution.
+    5. ✅ Focused CPU, MPS, subprocess, spawn, fork, notebook-fork, repeated-stage, multiple-dataloader, and two-rank synchronization probes pass together with compilation, diff validation, and targeted type inspection without invoking a linter.
+
+| Progress Todo | Standard Module Logging Contract | Date: 19 August 2026 | Time: 09:51 PM | Name: Ghost |
+
+    1. Audit `Module.log`, `log_dict`, `MetricLoggingConfiguration`, and buffered reduction behavior against the pinned reference and established metric conventions before changing the public surface.
+    2. Resolve scalar and supported metric-value validation, step and epoch name forking, duplicate-definition conflicts, reduction and batch-size semantics, dataloader suffix composition, and hook-specific defaults through one coherent contract.
+    3. Verify inheritance timing, repeated hooks, local accelerators, distributed synchronization, checkpoint interaction, and logger routing before committing and synchronizing the next phase.

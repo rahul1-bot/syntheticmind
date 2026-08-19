@@ -53,6 +53,7 @@ class _WorkerStateTransfer:
             trainer_state_dict=trainer.state.state_dict(),
             should_stop=trainer.should_stop,
             callback_metrics=trainer.callback_metrics,
+            logged_metrics=trainer.logged_metrics,
             progress_bar_metrics_by_stage={
                 running_stage: dict(metrics)
                 for running_stage, metrics in trainer._progress_bar_metrics_by_stage.items()
@@ -109,6 +110,8 @@ class _WorkerStateTransfer:
         module._device = parameter.device if parameter is not None else torch.device("cpu")
         trainer._callback_metrics.clear()
         trainer._callback_metrics.update(worker_output.callback_metrics)
+        trainer._logged_metrics.clear()
+        trainer._logged_metrics.update(worker_output.logged_metrics)
         trainer._progress_bar_metrics_by_stage = {
             running_stage: dict(metrics)
             for running_stage, metrics in worker_output.progress_bar_metrics_by_stage.items()
