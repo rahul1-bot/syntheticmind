@@ -25,6 +25,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, override
 
+import torch
+
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
@@ -393,10 +395,10 @@ class ProgressBarCallback(Callback):
         for metric in module.logged_metrics:
             if not metric.progress_bar or not metric.on_step:
                 continue
-            value: float | None = metric.compute_step(module.device)
+            value: torch.Tensor | None = metric.compute_step(module.device)
             if value is None:
                 continue
-            captured[metric.output_name(on_step=True)] = value
+            captured[metric.output_name(on_step=True)] = module.trainer._metric_to_float(value)
             if len(captured) == 2:
                 break
         return captured

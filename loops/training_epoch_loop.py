@@ -822,11 +822,11 @@ class TrainingEpochLoop(Loop):
                 continue
             if current_index % configuration.frequency != 0:
                 continue
-            monitor_value: float | None = None
+            monitor_value: torch.Tensor | None = None
             if configuration.reduce_on_plateau:
                 monitor: str | None = configuration.monitor
                 assert monitor is not None
-                monitor_value: float | None = trainer.callback_metrics.get(monitor)
+                monitor_value = trainer.callback_metrics.get(monitor)
                 if monitor_value is None:
                     message: str = (
                         f"ReduceLROnPlateau monitor {monitor!r} is unavailable. "
@@ -987,12 +987,12 @@ class TrainingEpochLoop(Loop):
             module._reset_logged_metrics()
             return
 
-        step_metrics: dict[str, float] = {}
-        callback_step_metrics: dict[str, float] = {}
+        step_metrics: dict[str, torch.Tensor] = {}
+        callback_step_metrics: dict[str, torch.Tensor] = {}
         progress_bar_step_metrics: dict[str, float] = {}
         for metric in logged:
             if metric.on_step:
-                value: float | None = metric.compute_step(
+                value: torch.Tensor | None = metric.compute_step(
                     self.trainer.strategy.root_device
                 )
                 if value is not None:
@@ -1002,7 +1002,9 @@ class TrainingEpochLoop(Loop):
                     if metric.logger:
                         step_metrics[step_name] = value
                     if metric.progress_bar:
-                        progress_bar_step_metrics[step_name] = value
+                        progress_bar_step_metrics[step_name] = (
+                            self.trainer._metric_to_float(value)
+                        )
             if metric.on_epoch:
                 if metric.storage_key not in epoch_accum:
                     epoch_accum[metric.storage_key] = (
@@ -1011,7 +1013,8 @@ class TrainingEpochLoop(Loop):
                             reduction=metric.reduction,
                             sync_dist=metric.sync_dist,
                             sync_dist_group=metric.sync_dist_group,
-                            rank_zero_only=metric.rank_zero_only
+                            rank_zero_only=metric.rank_zero_only,
+                            enable_graph=metric.enable_graph
                         )
                     )
                 accumulator: MetricAccumulator = epoch_accum[metric.storage_key][1]
@@ -1053,18 +1056,22 @@ class TrainingEpochLoop(Loop):
         # logging configuration requested logger visibility.
         if not epoch_accum:
             return
-        callback_reduced: dict[str, float] = {}
-        logger_reduced: dict[str, float] = {}
+        callback_reduced: dict[str, torch.Tensor] = {}
+        logger_reduced: dict[str, torch.Tensor] = {}
         progress_bar_reduced: dict[str, float] = {}
         for metric, accumulator in epoch_accum.values():
-            value: float = accumulator.compute(self.trainer.strategy.root_device)
+            value: torch.Tensor = accumulator.compute(
+                self.trainer.strategy.root_device
+            )
+            if not metric.enable_graph:
+                value = value.detach()
             epoch_name: str = metric.output_name(on_step=False)
             callback_reduced[metric.base_name()] = value
             callback_reduced[epoch_name] = value
             if metric.logger:
                 logger_reduced[epoch_name] = value
             if metric.progress_bar:
-                progress_bar_reduced[epoch_name] = value
+                progress_bar_reduced[epoch_name] = self.trainer._metric_to_float(value)
         for _, accumulator in epoch_accum.values():
             accumulator.reset()
         self.trainer._callback_metrics.update(callback_reduced)

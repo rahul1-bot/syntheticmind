@@ -52,8 +52,14 @@ class _WorkerStateTransfer:
             module_state_dict=cast(StateDict, module.state_dict()),
             trainer_state_dict=trainer.state.state_dict(),
             should_stop=trainer.should_stop,
-            callback_metrics=trainer.callback_metrics,
-            logged_metrics=trainer.logged_metrics,
+            callback_metrics={
+                name: value.detach().cpu()
+                for name, value in trainer.callback_metrics.items()
+            },
+            logged_metrics={
+                name: value.detach().cpu()
+                for name, value in trainer.logged_metrics.items()
+            },
             progress_bar_metrics_by_stage={
                 running_stage: dict(metrics)
                 for running_stage, metrics in trainer._progress_bar_metrics_by_stage.items()

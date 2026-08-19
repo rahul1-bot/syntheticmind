@@ -1411,7 +1411,7 @@ class LoggedMetric:
             metric_attribute,
             rank_zero_only
         )
-        self._computed_step_value: float | None = None
+        self._computed_step_value: torch.Tensor | None = None
 
     @property
     def is_metric(self) -> bool:
@@ -1431,13 +1431,19 @@ class LoggedMetric:
             name = f"{name}/dataloader_idx_{self.dataloader_idx}"
         return name
 
-    def local_value(self) -> float:
+    def local_value(self) -> torch.Tensor:
         if self.is_metric:
             raise RuntimeError("A torchmetrics.Metric has no per-call scalar epoch value.")
-        tensor_value: torch.Tensor = cast(torch.Tensor, self.value)
-        return float(tensor_value.detach().item())
+        return cast(torch.Tensor, self.value)
 
-    def compute_step(self, device: torch.device) -> float | None:
+    def compute_step(self, device: torch.device) -> torch.Tensor | None:
+        if self.enable_graph:
+            with torch.enable_grad():
+                return self._compute_step(device)
+        with torch.no_grad():
+            return self._compute_step(device)
+
+    def _compute_step(self, device: torch.device) -> torch.Tensor | None:
         if self._computed_step_value is not None:
             return self._computed_step_value
         value: object = self.value
@@ -1474,11 +1480,20 @@ class LoggedMetric:
                     op=operation,
                     group=self.sync_dist_group
                 )
-        self._computed_step_value = float(tensor.detach().item())
+        if not self.enable_graph:
+            tensor = tensor.detach()
+        self._computed_step_value = tensor.squeeze()
         return self._computed_step_value
 
-    def compute(self, device: torch.device) -> float:
-        value: float | None = self.compute_step(device)
+    def compute(self, device: torch.device) -> torch.Tensor:
+        if self.enable_graph:
+            with torch.enable_grad():
+                return self._compute(device)
+        with torch.no_grad():
+            return self._compute(device)
+
+    def _compute(self, device: torch.device) -> torch.Tensor:
+        value: torch.Tensor | None = self.compute_step(device)
         if value is not None:
             return value
         metric: Metric = cast("Metric", self.value)
@@ -1487,11 +1502,20 @@ class LoggedMetric:
             raise ValueError(
                 f"The compute() result for logged Metric {self.name!r} must be a single-element Tensor."
             )
-        return float(computed.detach().item())
+        if not self.enable_graph:
+            computed = computed.detach()
+        return computed.squeeze()
 
-    def compute_epoch(self, device: torch.device) -> float:
+    def compute_epoch(self, device: torch.device) -> torch.Tensor:
+        if self.enable_graph:
+            with torch.enable_grad():
+                return self._compute_epoch(device)
+        with torch.no_grad():
+            return self._compute_epoch(device)
+
+    def _compute_epoch(self, device: torch.device) -> torch.Tensor:
         if not self.is_metric:
-            value: float | None = self.compute_step(device)
+            value: torch.Tensor | None = self.compute_step(device)
             assert value is not None
             return value
         metric: Metric = cast("Metric", self.value)
@@ -1500,4 +1524,6 @@ class LoggedMetric:
             raise ValueError(
                 f"The compute() result for logged Metric {self.name!r} must be a single-element Tensor."
             )
-        return float(computed.detach().item())
+        if not self.enable_graph:
+            computed = computed.detach()
+        return computed.squeeze()

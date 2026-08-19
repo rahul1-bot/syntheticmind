@@ -228,11 +228,11 @@ class FitLoop(Loop):
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return
-        log_metrics: dict[str, float] = {}
-        callback_metrics: dict[str, float] = {}
+        log_metrics: dict[str, torch.Tensor] = {}
+        callback_metrics: dict[str, torch.Tensor] = {}
         progress_bar_metrics: dict[str, float] = {}
         for metric in logged:
-            val: float = metric.compute_epoch(trainer.strategy.root_device)
+            val: torch.Tensor = metric.compute_epoch(trainer.strategy.root_device)
             metric_name: str = metric.output_name(on_step=False)
             if metric.on_step or metric.on_epoch:
                 callback_metrics[metric.base_name()] = val
@@ -240,7 +240,7 @@ class FitLoop(Loop):
             if metric.logger:
                 log_metrics[metric_name] = val
             if metric.progress_bar:
-                progress_bar_metrics[metric_name] = val
+                progress_bar_metrics[metric_name] = trainer._metric_to_float(val)
             if metric.is_metric:
                 reset: object = getattr(metric.value, "reset")
                 if callable(reset):

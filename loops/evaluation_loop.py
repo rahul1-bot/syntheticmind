@@ -85,8 +85,8 @@ class EvaluationLoop(Loop):
         self.inference_mode: bool = inference_mode
         self.verbose: bool = True
         self.epoch_metrics: dict[str, float] = {}
-        self._callback_epoch_metrics: dict[str, float] = {}
-        self._logger_epoch_metrics: dict[str, float] = {}
+        self._callback_epoch_metrics: dict[str, torch.Tensor] = {}
+        self._logger_epoch_metrics: dict[str, torch.Tensor] = {}
         self._progress_bar_epoch_metrics: dict[str, float] = {}
         self.results: list[dict[str, float]] = []
 
@@ -106,8 +106,8 @@ class EvaluationLoop(Loop):
         # epoch-end and stage-end hook pairs, and publish the reduced metrics
         # to the trainer's callback metrics.
         self.epoch_metrics: dict[str, float] = {}
-        self._callback_epoch_metrics: dict[str, float] = {}
-        self._logger_epoch_metrics: dict[str, float] = {}
+        self._callback_epoch_metrics: dict[str, torch.Tensor] = {}
+        self._logger_epoch_metrics: dict[str, torch.Tensor] = {}
         self._progress_bar_epoch_metrics: dict[str, float] = {}
         self.results: list[dict[str, float]] = []
 
@@ -623,11 +623,11 @@ class EvaluationLoop(Loop):
             module._reset_logged_metrics()
             return
 
-        step_metrics: dict[str, float] = {}
+        step_metrics: dict[str, torch.Tensor] = {}
         progress_bar_step_metrics: dict[str, float] = {}
         for metric in logged:
             if metric.on_step:
-                value: float | None = metric.compute_step(
+                value: torch.Tensor | None = metric.compute_step(
                     self.trainer.strategy.root_device
                 )
                 if value is not None:
@@ -635,7 +635,9 @@ class EvaluationLoop(Loop):
                     if metric.logger:
                         step_metrics[step_name] = value
                     if metric.progress_bar:
-                        progress_bar_step_metrics[step_name] = value
+                        progress_bar_step_metrics[step_name] = (
+                            self.trainer._metric_to_float(value)
+                        )
             if metric.on_epoch:
                 if metric.storage_key not in epoch_accum:
                     epoch_accum[metric.storage_key] = (
@@ -644,7 +646,8 @@ class EvaluationLoop(Loop):
                             reduction=metric.reduction,
                             sync_dist=metric.sync_dist,
                             sync_dist_group=metric.sync_dist_group,
-                            rank_zero_only=metric.rank_zero_only
+                            rank_zero_only=metric.rank_zero_only,
+                            enable_graph=metric.enable_graph
                         )
                     )
                 accumulator: MetricAccumulator = epoch_accum[metric.storage_key][1]
@@ -688,20 +691,24 @@ class EvaluationLoop(Loop):
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return
-        hook_logger_metrics: dict[str, float] = {}
+        hook_logger_metrics: dict[str, torch.Tensor] = {}
         hook_progress_bar_metrics: dict[str, float] = {}
         for metric in logged:
-            value: float = metric.compute_epoch(self.trainer.strategy.root_device)
+            value: torch.Tensor = metric.compute_epoch(
+                self.trainer.strategy.root_device
+            )
             epoch_name: str = metric.output_name(on_step=False)
             if metric.on_epoch:
                 self._callback_epoch_metrics[metric.base_name()] = value
                 self._callback_epoch_metrics[epoch_name] = value
             if metric.logger:
                 if metric.on_epoch:
-                    self.epoch_metrics[epoch_name] = value
+                    self.epoch_metrics[epoch_name] = self.trainer._metric_to_float(value)
                 hook_logger_metrics[epoch_name] = value
             if metric.progress_bar:
-                hook_progress_bar_metrics[epoch_name] = value
+                hook_progress_bar_metrics[epoch_name] = (
+                    self.trainer._metric_to_float(value)
+                )
         if hook_logger_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
             self.trainer._log_metrics(hook_logger_metrics, step=state.global_step)
         if not self.trainer.sanity_checking:
@@ -720,15 +727,21 @@ class EvaluationLoop(Loop):
         # reduction mode each metric declared when it was logged.
         reduced: dict[str, float] = {}
         for metric, accumulator in epoch_accum.values():
-            value: float = accumulator.compute(self.trainer.strategy.root_device)
+            value: torch.Tensor = accumulator.compute(
+                self.trainer.strategy.root_device
+            )
+            if not metric.enable_graph:
+                value = value.detach()
             epoch_name: str = metric.output_name(on_step=False)
             self._callback_epoch_metrics[metric.base_name()] = value
             self._callback_epoch_metrics[epoch_name] = value
             if metric.logger:
-                reduced[epoch_name] = value
+                reduced[epoch_name] = self.trainer._metric_to_float(value)
                 self._logger_epoch_metrics[epoch_name] = value
             if metric.progress_bar:
-                self._progress_bar_epoch_metrics[epoch_name] = value
+                self._progress_bar_epoch_metrics[epoch_name] = (
+                    self.trainer._metric_to_float(value)
+                )
         for _, accumulator in epoch_accum.values():
             accumulator.reset()
         return reduced

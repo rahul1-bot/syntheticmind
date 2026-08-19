@@ -372,3 +372,12 @@
     6. Optional ecosystem support must not impose eager process-wide side effects. Importing TorchMetrics during core module import initialized enough ancillary runtime state to crash macOS fork workers; a lazy type boundary restored ordinary fork execution without weakening Metric support.
     7. Routing predicates must be applied while records are reduced, not reconstructed later from a set of public names. Two hooks may publish the same name with different logger or progress settings, and name-only filtering selects the wrong record after collision.
     8. Python 3.14 currently rejects `torch.compile` execution in the installed PyTorch runtime. The logging methods retain the compiler-disabled boundary and eager behavior is verified, but live graph-compilation execution remains externally unavailable rather than falsely reported as tested.
+
+| Memory | Tensor Metric Ownership and Graph Lifetime | Date: 19 August 2026 | Time: 10:39 PM | Name: Ghost |
+
+    1. Callback and logged metric inspection is tensor-valued runtime state. Converting values to floats before those surfaces destroys dtype, device, and autograd information and weakens callback, scheduler, and inherited extension behavior.
+    2. Retaining an input tensor is insufficient for `enable_graph=True` when evaluation wraps the loop in `no_grad`. Every cache, clone, weighted accumulation, and final division that must remain differentiable requires an explicit gradient-enabled computation boundary.
+    3. The default graph-disabled path must enforce detachment inside the reducer rather than relying only on its callers. This prevents direct or future callers from accidentally retaining an epoch-long graph.
+    4. Logger and terminal consumers own scalar conversion, while validation and test return values remain ordinary floats. ModelCheckpoint and multiprocessing transfer own explicit detachment because persistence and cross-process transport cannot preserve a meaningful live graph.
+    5. macOS process `fork` remains unsafe after a parent imports TorchMetrics and triggers Objective-C or MPS initialization. Lazy TorchMetrics discovery protects ordinary numeric fork execution, while TorchMetrics execution is verified through subprocess and spawn paths rather than falsely claiming the external fork limitation is solved.
+    6. Tensor-valued monitoring remains compatible with EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, multiple dataloaders, Gloo reductions, MPS execution, custom loggers, and defensive mapping snapshots.

@@ -204,8 +204,15 @@
     4. ✅ Logger, callback, progress, evaluation-result, and checkpoint-monitor routing remain distinct across same-name records, step-only values, epoch-only values, hidden metrics, multiple dataloaders, and rank-zero-only calls.
     5. ✅ CPU, MPS, subprocess DDP, spawn, fork, notebook-fork, TorchMetrics, checkpoint, inheritance-hook, repeated-stage, compilation, source-comment, diff, and targeted type verification pass within the available Python 3.14 runtime without invoking a linter.
 
-| Progress Todo | Tensor Metric State and Graph Propagation | Date: 19 August 2026 | Time: 10:21 PM | Name: Ghost |
+| Progress Complete | Tensor Metric State and Graph Propagation | Date: 19 August 2026 | Time: 10:39 PM | Name: Ghost |
 
-    1. Compare the pinned tensor-valued `Trainer.callback_metrics` and `Trainer.logged_metrics` contracts with SyntheticMind's current scalar inspection mappings and every downstream callback, scheduler, launcher, logger, and presentation consumer.
-    2. Preserve tensor device, dtype, detachment, and `enable_graph` semantics through the public metric state while converting only at logger and terminal boundaries that require Python scalars.
-    3. Verify checkpoint monitoring, early stopping, plateau scheduling, multiprocessing state transfer, CPU, MPS, distributed execution, and graph-lifetime behavior before the next synchronized development checkpoint.
+    1. ✅ `Trainer.callback_metrics` and `Trainer.logged_metrics` now preserve scalar tensors, dtype, device, default detachment, and explicit `enable_graph` state through step caches and epoch reductions.
+    2. ✅ Logger backends, progress presentation, and evaluation return records receive Python floats at their respective boundaries without rewriting the public tensor inspection state.
+    3. ✅ EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, multiprocessing reconciliation, multiple dataloaders, and TorchMetrics consume or transfer the tensor contract without retaining unsafe graphs in persistence state.
+    4. ✅ Focused CPU, MPS, subprocess DDP, spawn, fork, distributed reduction, graph-gradient, checkpoint, scheduler, logger, compilation, diff, and targeted type checks pass without invoking a linter.
+
+| Progress Todo | Remaining Module Surface Audit | Date: 19 August 2026 | Time: 10:39 PM | Name: Ghost |
+
+    1. Compare the complete public `Module` method and property surface with the pinned reference, including signatures, defaults, override behavior, runtime dispatch, and state ownership.
+    2. Exclude Fabric and Lightning-owned branding, classify universal machine-learning capabilities, and select the earliest unresolved dependency rather than adding an isolated alias.
+    3. Implement and verify the selected capability across applicable local, accelerator, checkpoint, and distributed paths before the next synchronized development checkpoint.

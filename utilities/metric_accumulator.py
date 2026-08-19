@@ -59,6 +59,7 @@ class MetricAccumulator:
         "_sync_dist",
         "_sync_dist_group",
         "_rank_zero_only",
+        "_enable_graph",
         "_metric"
     )
 
@@ -67,35 +68,47 @@ class MetricAccumulator:
         reduction: ReductionMode = "mean",
         sync_dist: bool = False,
         sync_dist_group: dist.ProcessGroup | None = None,
-        rank_zero_only: bool = False
+        rank_zero_only: bool = False,
+        enable_graph: bool = False
     ) -> None:
         # Fixes the reduction mode and zeroes every accumulator: plain sum and
         # count for unweighted means, running extremes for min and max, and the
         # weighted pair used when callers report batch sizes.
         self._reduction: ReductionMode = reduction
-        self._sum: float = 0.0
+        self._sum: torch.Tensor | None = None
         self._count: int = 0
-        self._min: float = float("inf")
-        self._max: float = float("-inf")
-        self._weighted_sum: float = 0.0
+        self._min: torch.Tensor | None = None
+        self._max: torch.Tensor | None = None
+        self._weighted_sum: torch.Tensor | None = None
         self._total_weight: float = 0.0
         self._sync_dist: bool = sync_dist
         self._sync_dist_group: dist.ProcessGroup | None = sync_dist_group
         self._rank_zero_only: bool = rank_zero_only
+        self._enable_graph: bool = enable_graph
         self._metric: _Metric | None = None
 
-    def update(self, value: float, batch_size: int | None = None) -> None:
+    def update(self, value: torch.Tensor, batch_size: int | None = None) -> None:
         # Adds one observation: always advances the unweighted sum, count, and
         # extremes; additionally advances the weighted pair when a batch size is
         # given, which arms batch-size-weighted averaging in compute().
-        self._sum += value
+        if self._enable_graph:
+            with torch.enable_grad():
+                self._update(value, batch_size)
+            return
+        with torch.no_grad():
+            self._update(value.detach(), batch_size)
+
+    def _update(self, value: torch.Tensor, batch_size: int | None) -> None:
+        self._sum = value if self._sum is None else self._sum + value
         self._count += 1
-        if value < self._min:
-            self._min: float = value
-        if value > self._max:
-            self._max: float = value
+        self._min = value if self._min is None else torch.minimum(self._min, value)
+        self._max = value if self._max is None else torch.maximum(self._max, value)
         if batch_size is not None:
-            self._weighted_sum += value * batch_size
+            self._weighted_sum = (
+                value * batch_size
+                if self._weighted_sum is None
+                else self._weighted_sum + value * batch_size
+            )
             self._total_weight += batch_size
 
     def update_metric(self, metric: object) -> None:
@@ -110,62 +123,71 @@ class MetricAccumulator:
             )
         self._metric = resolved_metric
 
-    def compute(self, device: torch.device | None = None) -> float:
+    def compute(self, device: torch.device | None = None) -> torch.Tensor:
         # Reduces the window: sum, min, and max read their accumulators
         # directly; the mean divides the weighted sum by total weight when any
         # weights were recorded and otherwise falls back to the unweighted mean
         # over update calls. An empty window reduces to 0.0.
+        if self._enable_graph:
+            with torch.enable_grad():
+                return self._compute(device)
+        with torch.no_grad():
+            return self._compute(device).detach()
+
+    def _compute(self, device: torch.device | None) -> torch.Tensor:
         if self._metric is not None:
             value: object = self._metric.compute()
             if not isinstance(value, torch.Tensor) or value.numel() != 1:
                 raise ValueError(
                     "The compute() result of a logged Metric must be a single-element Tensor."
                 )
-            return float(value.detach().item())
+            return value.squeeze()
         if self._count == 0:
-            return 0.0
-        resolved_device: torch.device = device or torch.device("cpu")
+            return torch.tensor(0.0, device=device)
         should_sync: bool = (
             self._sync_dist
             and not self._rank_zero_only
             and DistributedUtils.is_distributed()
         )
+        assert self._sum is not None
+        assert self._min is not None
+        assert self._max is not None
         if should_sync:
             if self._reduction == "mean":
                 weighted: bool = self._total_weight > 0
-                numerator: float = self._weighted_sum if weighted else self._sum
+                numerator: torch.Tensor | None = (
+                    self._weighted_sum if weighted else self._sum
+                )
+                assert numerator is not None
                 denominator: float = self._total_weight if weighted else self._count
-                state: torch.Tensor = torch.tensor(
-                    [numerator, denominator],
-                    dtype=torch.float64,
-                    device=resolved_device
+                state: torch.Tensor = torch.stack(
+                    (
+                        numerator,
+                        numerator.new_tensor(denominator)
+                    )
                 )
                 DistributedUtils.all_reduce(
                     state,
                     op=dist.ReduceOp.SUM,
                     group=self._sync_dist_group
                 )
-                return float((state[0] / state[1]).item())
+                return state[0] / state[1]
             operation: dist.ReduceOp.RedOpType = {
                 "sum": dist.ReduceOp.SUM,
                 "min": dist.ReduceOp.MIN,
                 "max": dist.ReduceOp.MAX
             }[self._reduction]
-            state = torch.tensor(
-                {
-                    "sum": self._sum,
-                    "min": self._min,
-                    "max": self._max
-                }[self._reduction],
-                dtype=torch.float64,
-                device=resolved_device
-            )
+            state = {
+                "sum": self._sum,
+                "min": self._min,
+                "max": self._max
+            }[self._reduction].clone()
             DistributedUtils.all_reduce(
                 state,
                 op=operation,
                 group=self._sync_dist_group
             )
-            return float(state.item())
+            return state
         match self._reduction:
             case "sum":
                 return self._sum
@@ -174,18 +196,18 @@ class MetricAccumulator:
             case "max":
                 return self._max
             case _:
-                if self._total_weight > 0:
+                if self._total_weight > 0 and self._weighted_sum is not None:
                     return self._weighted_sum / self._total_weight
                 return self._sum / self._count
 
     def reset(self) -> None:
         # Returns every accumulator to its initial state so the instance can be
         # reused for the next window.
-        self._sum: float = 0.0
+        self._sum: torch.Tensor | None = None
         self._count: int = 0
-        self._min: float = float("inf")
-        self._max: float = float("-inf")
-        self._weighted_sum: float = 0.0
+        self._min: torch.Tensor | None = None
+        self._max: torch.Tensor | None = None
+        self._weighted_sum: torch.Tensor | None = None
         self._total_weight: float = 0.0
         if self._metric is not None:
             self._metric.reset()

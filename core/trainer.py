@@ -43,7 +43,7 @@ import inspect
 import math
 import os
 import warnings
-from collections.abc import Callable, Iterable, Iterator, Sized
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from pathlib import Path
@@ -896,8 +896,8 @@ class Trainer:
         self.reload_dataloaders_every_n_epochs: int = reload_dataloaders_every_n_epochs
         self._last_train_dataloader_reload_epoch: int | None = None
         self._last_val_dataloader_reload_epoch: int | None = None
-        self._callback_metrics: dict[str, float] = {}
-        self._logged_metrics: dict[str, float] = {}
+        self._callback_metrics: dict[str, torch.Tensor] = {}
+        self._logged_metrics: dict[str, torch.Tensor] = {}
         self._progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]] = {
             "training": {},
             "validating": {},
@@ -1983,7 +1983,7 @@ class Trainer:
         self._progress_bar_metrics_by_stage[running_stage].update(metrics)
         self._last_progress_bar_stage: RunningStage | None = running_stage
 
-    def _update_logged_metrics(self, metrics: dict[str, float]) -> None:
+    def _update_logged_metrics(self, metrics: dict[str, torch.Tensor]) -> None:
         self._logged_metrics.update(metrics)
 
     def _preview_logged_metrics(
@@ -1991,13 +1991,13 @@ class Trainer:
         module: Module,
         running_stage: RunningStage
     ) -> None:
-        callback_metrics: dict[str, float] = {}
-        logged_metrics: dict[str, float] = {}
+        callback_metrics: dict[str, torch.Tensor] = {}
+        logged_metrics: dict[str, torch.Tensor] = {}
         progress_bar_metrics: dict[str, float] = {}
         for metric in module.logged_metrics:
             if not metric.on_step:
                 continue
-            value: float | None = metric.compute_step(self.strategy.root_device)
+            value: torch.Tensor | None = metric.compute_step(self.strategy.root_device)
             if value is None:
                 continue
             metric_name: str = metric.output_name(on_step=True)
@@ -2007,7 +2007,7 @@ class Trainer:
             if metric.logger:
                 logged_metrics[metric_name] = value
             if metric.progress_bar:
-                progress_bar_metrics[metric_name] = value
+                progress_bar_metrics[metric_name] = self._metric_to_float(value)
         self._callback_metrics.update(callback_metrics)
         if not self.sanity_checking:
             self._update_logged_metrics(logged_metrics)
@@ -3311,9 +3311,25 @@ class Trainer:
             return self.max_steps
         return self.max_epochs
 
-    def _log_metrics(self, metrics: dict[str, float], step: int) -> None:
+    @staticmethod
+    def _metric_to_float(value: torch.Tensor | float) -> float:
+        if isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                raise ValueError("Logged metric tensors must contain exactly one element.")
+            return float(value.detach().cpu().item())
+        return float(value)
+
+    def _log_metrics(
+        self,
+        metrics: Mapping[str, torch.Tensor | float],
+        step: int
+    ) -> None:
+        scalar_metrics: dict[str, float] = {
+            name: self._metric_to_float(value)
+            for name, value in metrics.items()
+        }
         for configured_logger in self._loggers:
-            configured_logger.log_metrics(metrics, step=step)
+            configured_logger.log_metrics(scalar_metrics, step=step)
 
     def _log_hyperparams(self, params: HyperparameterDict) -> None:
         for configured_logger in self._loggers:
@@ -3577,13 +3593,13 @@ class Trainer:
         return self.state.global_step
 
     @property
-    def callback_metrics(self) -> dict[str, float]:
+    def callback_metrics(self) -> dict[str, torch.Tensor]:
         # Copy of the metric mapping monitored by callbacks; returned as a new
         # dictionary so callers cannot mutate the trainer's internal state.
         return dict(self._callback_metrics)
 
     @property
-    def logged_metrics(self) -> dict[str, float]:
+    def logged_metrics(self) -> dict[str, torch.Tensor]:
         # Reduced epoch metrics from the most recent validation pass, exposed
         # for inspection after validate() or a fit-scheduled validation.
         return dict(self._logged_metrics)

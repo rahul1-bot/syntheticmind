@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, override
 
+import torch
 from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
@@ -79,7 +80,9 @@ class EarlyStopping(Callback):
         self.strict: bool = strict
 
         self.wait_count: int = 0
-        self.best_score: float = float("inf") if mode == "min" else float("-inf")
+        self.best_score: torch.Tensor = torch.tensor(
+            float("inf") if mode == "min" else float("-inf")
+        )
         self.stopped_epoch: int = 0
 
     @override
@@ -91,8 +94,8 @@ class EarlyStopping(Callback):
         # and the trainer's stop flag is raised with the outcome logged.
         if trainer.fast_dev_run or trainer.sanity_checking:
             return
-        metrics: dict[str, float] = trainer.callback_metrics
-        current_score: float | None = metrics.get(self.monitor)
+        metrics: dict[str, torch.Tensor] = trainer.callback_metrics
+        current_score: torch.Tensor | None = metrics.get(self.monitor)
         if current_score is None:
             if self.strict:
                 available: list[str] = list(metrics.keys())
@@ -104,7 +107,7 @@ class EarlyStopping(Callback):
             return
 
         if self._is_improvement(current_score):
-            self.best_score: float = current_score
+            self.best_score = current_score.detach().clone()
             self.wait_count: int = 0
         else:
             self.wait_count += 1
@@ -114,12 +117,13 @@ class EarlyStopping(Callback):
                 self.stopped_epoch: int = module.current_epoch
                 trainer.should_stop = True
 
-    def _is_improvement(self, current: float) -> bool:
+    def _is_improvement(self, current: torch.Tensor) -> bool:
         # Applies the improvement test in the configured direction, requiring
         # the current value to beat the best score by more than min_delta.
+        best_score: torch.Tensor = self.best_score.to(current.device)
         if self.mode == "min":
-            return current < self.best_score - self.min_delta
-        return current > self.best_score + self.min_delta
+            return bool(current < best_score - self.min_delta)
+        return bool(current > best_score + self.min_delta)
 
     @property
     def state_key(self) -> str:
@@ -153,12 +157,20 @@ class EarlyStopping(Callback):
         )
         if wait_count is not None and not isinstance(wait_count, scalar_types):
             raise TypeError("EarlyStopping wait_count checkpoint state must be scalar.")
-        if best_score is not None and not isinstance(best_score, scalar_types):
+        if best_score is not None and not isinstance(
+            best_score,
+            (*scalar_types, torch.Tensor)
+        ):
             raise TypeError("EarlyStopping best_score checkpoint state must be scalar.")
         if stopped_epoch is not None and not isinstance(stopped_epoch, scalar_types):
             raise TypeError("EarlyStopping stopped_epoch checkpoint state must be scalar.")
         self.wait_count: int = int(wait_count if wait_count is not None else 0)
-        self.best_score: float = float(best_score if best_score is not None else self.best_score)
+        if isinstance(best_score, torch.Tensor):
+            if best_score.numel() != 1:
+                raise TypeError("EarlyStopping best_score checkpoint state must be scalar.")
+            self.best_score = best_score.detach().clone().squeeze()
+        elif best_score is not None:
+            self.best_score = torch.tensor(float(best_score))
         self.stopped_epoch: int = int(stopped_epoch if stopped_epoch is not None else 0)
 
     @override

@@ -293,3 +293,11 @@
     4. TorchMetrics integration is lazy by design. This preserves ordinary fork-based execution and prevents optional metric support from initializing a large dependency graph when a model logs only tensors or numbers.
     5. Focused local, accelerator, launcher, distributed, checkpoint, and TorchMetrics probes establish the implemented behavior without invoking Ruff or another linter.
     6. The next adjacent audit concerns tensor-valued public metric state and full `enable_graph` propagation beyond the buffer; logger backends must continue receiving ordinary scalars at their boundary.
+
+| Strategic Note | Tensor Metric Runtime Contract | Date: 19 August 2026 | Time: 10:39 PM | Name: Ghost |
+
+    1. ✅ Callback and logged inspection now retain tensor dtype, device, and explicit graph state, while progress, logger, and evaluation-output consumers receive compact Python scalars.
+    2. Graph ownership reaches cached step values and weighted epoch reductions even inside evaluation no-gradient contexts; the default path prevents graph construction and retention.
+    3. Monitoring callbacks and plateau schedulers consume tensors directly, while checkpoint and multiprocessing boundaries detach intentionally to prevent persistence or transport from owning a live autograd graph.
+    4. Live CPU, MPS, subprocess, spawn, fork, Gloo, multiple-loader, TorchMetrics, checkpoint, and scheduler evidence establishes this boundary without using a linter.
+    5. The next sequential action is a complete remaining `Module` surface audit against the pinned reference before another capability is adopted.
