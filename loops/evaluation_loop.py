@@ -44,7 +44,6 @@ from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
@@ -109,7 +108,6 @@ class EvaluationLoop(Loop):
         non_monitoring_callbacks: list[Callback] = [
             callback for callback in callbacks if not isinstance(callback, (EarlyStopping, ModelCheckpoint))
         ]
-        log_fn: Logger | None = trainer.logger
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model
         assert model is not None
@@ -246,7 +244,6 @@ class EvaluationLoop(Loop):
                 epoch_accum,
                 logger_metric_names,
                 progress_bar_metric_names,
-                log_fn,
                 state,
                 running_stage
             )
@@ -260,12 +257,12 @@ class EvaluationLoop(Loop):
             }
             trainer._update_progress_bar_metrics(running_stage, progress_bar_epoch_metrics)
 
-        if log_fn is not None and self.epoch_metrics and DistributedUtils.is_rank_zero():
+        if trainer.loggers and self.epoch_metrics and DistributedUtils.is_rank_zero():
             logger_epoch_metrics: dict[str, float] = {
                 k: v for k, v in self.epoch_metrics.items() if k in logger_metric_names
             }
             if logger_epoch_metrics:
-                log_fn.log_metrics(logger_epoch_metrics, step=state.global_step)
+                trainer._log_metrics(logger_epoch_metrics, step=state.global_step)
 
         if self.stage == "validate":
             self.trainer._callback_metrics.update(self.epoch_metrics)
@@ -274,7 +271,7 @@ class EvaluationLoop(Loop):
                     callback.on_validation_epoch_end(trainer, module)
             with module._hook_context("on_validation_epoch_end"):
                 module.on_validation_epoch_end()
-            self._consume_epoch_end_hook_metrics(module, log_fn, state, running_stage)
+            self._consume_epoch_end_hook_metrics(module, state, running_stage)
             self.trainer._callback_metrics.update(self.epoch_metrics)
             with module._hook_context("on_validation_epoch_end"):
                 for callback in monitoring_callbacks:
@@ -295,7 +292,7 @@ class EvaluationLoop(Loop):
                     callback.on_test_epoch_end(trainer, module)
             with module._hook_context("on_test_epoch_end"):
                 module.on_test_epoch_end()
-            self._consume_epoch_end_hook_metrics(module, log_fn, state, running_stage)
+            self._consume_epoch_end_hook_metrics(module, state, running_stage)
             self.trainer._callback_metrics.update(self.epoch_metrics)
             with module._hook_context("on_test_end"):
                 for callback in callbacks:
@@ -347,7 +344,6 @@ class EvaluationLoop(Loop):
         epoch_accum: dict[str, MetricAccumulator],
         logger_metric_names: set[str],
         progress_bar_metric_names: set[str],
-        log_fn: Logger | None,
         state: TrainerState,
         running_stage: RunningStage
     ) -> None:
@@ -384,8 +380,8 @@ class EvaluationLoop(Loop):
                 if metric.progress_bar:
                     progress_bar_metric_names.add(name)
 
-        if step_metrics and log_fn is not None and DistributedUtils.is_rank_zero():
-            log_fn.log_metrics(step_metrics, step=state.global_step)
+        if step_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
+            self.trainer._log_metrics(step_metrics, step=state.global_step)
         if not self.trainer._sanity_checking:
             self.trainer._update_progress_bar_metrics(
                 running_stage,
@@ -397,7 +393,6 @@ class EvaluationLoop(Loop):
     def _consume_epoch_end_hook_metrics(
         self,
         module: Module,
-        log_fn: Logger | None,
         state: TrainerState,
         running_stage: RunningStage
     ) -> None:
@@ -425,8 +420,8 @@ class EvaluationLoop(Loop):
                 hook_logger_metrics[name] = value
             if metric.progress_bar:
                 hook_progress_bar_metrics[name] = value
-        if hook_logger_metrics and log_fn is not None and DistributedUtils.is_rank_zero():
-            log_fn.log_metrics(hook_logger_metrics, step=state.global_step)
+        if hook_logger_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
+            self.trainer._log_metrics(hook_logger_metrics, step=state.global_step)
         if not self.trainer._sanity_checking:
             self.trainer._update_progress_bar_metrics(
                 running_stage,

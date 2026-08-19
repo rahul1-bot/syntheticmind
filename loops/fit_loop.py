@@ -109,7 +109,7 @@ class FitLoop(Loop):
             if trainer.reload_dataloaders_every_n_epochs > 0 and epoch > 0:
                 if epoch % trainer.reload_dataloaders_every_n_epochs == 0:
                     assert trainer.datamodule is not None
-                    trainer.train_dataloader: DataLoader | None = trainer.datamodule.train_dataloader()
+                    trainer.train_dataloader = trainer.datamodule.train_dataloader()
 
                     if trainer.overfit_batches:
                         trainer.train_dataloader = trainer._prepare_overfit_dataloader(
@@ -119,14 +119,14 @@ class FitLoop(Loop):
 
                     if trainer.use_distributed_sampler and trainer.strategy.is_distributed:
                         if not isinstance(trainer.train_dataloader.dataset, IterableDataset):
-                            trainer.train_dataloader: DataLoader | None = trainer._wrap_with_distributed_sampler(
+                            trainer.train_dataloader = trainer._wrap_with_distributed_sampler(
                                 trainer.train_dataloader,
                                 shuffle=not bool(trainer.overfit_batches)
                             )
-                    trainer._total_train_batches: int | None = trainer._safe_len(trainer.train_dataloader)
+                    trainer._total_train_batches = trainer._safe_len(trainer.train_dataloader)
 
                     if trainer.val_dataloader is not None:
-                        trainer.val_dataloader: DataLoader | None = trainer.datamodule.val_dataloader()
+                        trainer.val_dataloader = trainer.datamodule.val_dataloader()
                         if trainer.overfit_batches:
                             trainer.val_dataloader = trainer._prepare_overfit_dataloader(
                                 trainer.val_dataloader,
@@ -134,10 +134,10 @@ class FitLoop(Loop):
                             )
                         if trainer.use_distributed_sampler and trainer.strategy.is_distributed:
                             if not isinstance(trainer.val_dataloader.dataset, IterableDataset):
-                                trainer.val_dataloader: DataLoader | None = trainer._wrap_with_distributed_sampler(
+                                trainer.val_dataloader = trainer._wrap_with_distributed_sampler(
                                     trainer.val_dataloader, shuffle=False
                                 )
-                        trainer._total_val_batches: int | None = trainer._safe_len(trainer.val_dataloader)
+                        trainer._total_val_batches = trainer._safe_len(trainer.val_dataloader)
                     trainer._configure_validation_schedule(reset_time=False)
 
             # DistributedSampler derives its shuffle permutation from the
@@ -148,7 +148,7 @@ class FitLoop(Loop):
                 train_dl.sampler.set_epoch(epoch)
 
             state.set_running_stage("training")
-            module._running_stage: str | None = "training"
+            module._running_stage = "training"
             trainer._reset_progress_bar_metrics("training")
             trainer._reset_progress_bar_metrics("validating")
             module.train()
@@ -190,7 +190,7 @@ class FitLoop(Loop):
                 )
 
             state.increment_epoch()
-            module._current_epoch: int = state.current_epoch
+            module._current_epoch = state.current_epoch
 
             # A stop raised at trainer level (early stopping, strategies)
             # propagates to the loop-local flag, ending the epoch sequence
@@ -243,6 +243,6 @@ class FitLoop(Loop):
                 progress_bar_metrics[name] = val
         trainer._callback_metrics.update(callback_metrics)
         trainer._update_progress_bar_metrics("training", progress_bar_metrics)
-        if log_metrics and trainer.logger is not None and DistributedUtils.is_rank_zero():
-            trainer.logger.log_metrics(log_metrics, step=state.global_step)
+        if log_metrics and trainer.loggers and DistributedUtils.is_rank_zero():
+            trainer._log_metrics(log_metrics, step=state.global_step)
         module._reset_logged_metrics()

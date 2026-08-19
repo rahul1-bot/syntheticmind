@@ -293,8 +293,8 @@ class ModelCheckpoint(Callback):
             tmp_path.replace(filepath)
             checkpoint_duration_ms: float = (time.perf_counter() - checkpoint_start_time) * 1000.0
             checkpoint_size_mb: float = filepath.stat().st_size / 1048576.0
-            if trainer.logger is not None:
-                trainer.logger.log_metrics(
+            if trainer.loggers:
+                trainer._log_metrics(
                     {
                         "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
                         "runtime/checkpoint_size_mb": checkpoint_size_mb
@@ -407,15 +407,27 @@ class ModelCheckpoint(Callback):
         # protection: when any restored top-k path resolves outside the
         # current checkpoint directory, the retention state is cleared so
         # eviction can never delete files that belong to another directory.
-        best_score: int | str | float | bool | None = state_dict.get("best_score", self.best_score)
-        self.best_score: float = float(best_score if best_score is not None else self.best_score)
-        path: StateValue | None = state_dict.get("best_path")
-        self.best_path: Path | None = Path(str(path)) if path is not None else None
-        top_k_raw: StateValue | None = state_dict.get("top_k_scores")
+        best_score_value: StateValue = state_dict.get("best_score", self.best_score)
+        if isinstance(best_score_value, int | float) and not isinstance(best_score_value, bool):
+            self.best_score = float(best_score_value)
+        path_value: StateValue = state_dict.get("best_path")
+        self.best_path = Path(path_value) if isinstance(path_value, str) else None
+        top_k_raw: StateValue = state_dict.get("top_k_scores")
+        restored_top_k_scores: list[tuple[float, Path]] = []
         if isinstance(top_k_raw, list):
-            self._top_k_scores: list[tuple[float, Path]] = [(float(score), Path(str(path_value))) for score, path_value in top_k_raw]
-        save_count: int | str | float | bool | None = state_dict.get("save_count", 0)
-        self._save_count: int = int(save_count if save_count is not None else 0)
+            for item in top_k_raw:
+                if not isinstance(item, list | tuple) or len(item) != 2:
+                    continue
+                score_value, retained_path_value = item
+                if isinstance(score_value, bool) or not isinstance(score_value, int | float):
+                    continue
+                if not isinstance(retained_path_value, str):
+                    continue
+                restored_top_k_scores.append((float(score_value), Path(retained_path_value)))
+        self._top_k_scores = restored_top_k_scores
+        save_count_value: StateValue = state_dict.get("save_count", 0)
+        if isinstance(save_count_value, int) and not isinstance(save_count_value, bool):
+            self._save_count = save_count_value
 
         if self._top_k_scores:
             resolved_dirpath: Path = self.dirpath.resolve()
@@ -428,7 +440,7 @@ class ModelCheckpoint(Callback):
                     f"Clearing top-k state to prevent cross-directory deletion."
                 )
                 self._top_k_scores.clear()
-                self.best_path: Path | None = None
+                self.best_path = None
 
     @override
     def __repr__(self) -> str:

@@ -39,7 +39,7 @@ class CSVLogger(Logger):
         # Resolves the metrics file inside log_dir and seeds the column set from
         # any existing file so resumed runs extend rather than clobber history.
         super().__init__(save_dir=save_dir, name=name, version=version)
-        self._metrics_file: Path = self.log_dir / "metrics.csv"
+        self._metrics_file: Path = self._log_directory() / "metrics.csv"
         self._writer: csv.DictWriter | None = None
         self._file_handle: TextIOWrapper | None = None
         self._fieldnames: list[str] = self._read_existing_fieldnames()
@@ -98,6 +98,7 @@ class CSVLogger(Logger):
     def _init_writer(self) -> None:
         # Opens the metrics file for appending and binds a DictWriter over the
         # current column set, emitting the header only when the file is empty.
+        self._metrics_file.parent.mkdir(parents=True, exist_ok=True)
         self._file_handle: TextIOWrapper | None = open(self._metrics_file, "a", newline="")  # noqa: SIM115
         self._writer: csv.DictWriter | None = csv.DictWriter(
             self._file_handle,  # type: ignore[arg-type]

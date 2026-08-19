@@ -103,14 +103,14 @@ class RuntimeMetricAccumulator:
             return accumulator
         if not isinstance(mean_value, int | float):
             return accumulator
-        accumulator.count: int = count_value
-        accumulator.total: float = float(mean_value) * count_value
+        accumulator.count = count_value
+        accumulator.total = float(mean_value) * count_value
         minimum_value: RuntimeRecordValue = record.get("min")
         maximum_value: RuntimeRecordValue = record.get("max")
         latest_value: RuntimeRecordValue = record.get("latest")
-        accumulator.minimum: float | None = float(minimum_value) if isinstance(minimum_value, int | float) else None
-        accumulator.maximum: float | None = float(maximum_value) if isinstance(maximum_value, int | float) else None
-        accumulator.latest: float | None = float(latest_value) if isinstance(latest_value, int | float) else None
+        accumulator.minimum = float(minimum_value) if isinstance(minimum_value, int | float) else None
+        accumulator.maximum = float(maximum_value) if isinstance(maximum_value, int | float) else None
+        accumulator.latest = float(latest_value) if isinstance(latest_value, int | float) else None
         return accumulator
 
 
@@ -554,8 +554,8 @@ class RuntimeProfiler(Callback):
             return
         for metric_name, value in finite_metrics.items():
             self._metric_summaries.setdefault(metric_name, RuntimeMetricAccumulator()).update(value)
-        if trainer.logger is not None and is_rank_zero():
-            trainer.logger.log_metrics(finite_metrics, step=trainer.state.global_step)
+        if trainer.loggers and is_rank_zero():
+            trainer._log_metrics(finite_metrics, step=trainer.state.global_step)
         self._append_profile_event(trainer, module, event_name, batch_idx, finite_metrics)
         self._write_profile_summary()
 

@@ -178,3 +178,13 @@
     5. Evaluation context must cover lifecycle hooks, batch transfer, precision contexts, step execution, metric reduction, and end hooks. Wrapping only the step body creates inconsistent extension behavior that users cannot reason about.
     6. Autograd anomaly detection must surround the closure-driven fit loop because the backward call may occur inside an optimizer closure. Wrapping only `training_step` would miss the operation that exposes the faulty gradient.
     7. Deterministic flags and RNG state are process-global execution inputs. Spawned workers require explicit restoration, while environment variables such as `CUBLAS_WORKSPACE_CONFIG` propagate through the child process environment.
+
+| Memory | Logger Configuration and Distributed Ownership | Date: 19 August 2026 | Time: 03:26 PM | Name: Ghost |
+
+    1. `logger=None` and `logger=False` are different public contracts: the former requests the default backend and the latter disables experiment logging. Treating both as absence silently violates standard Trainer behavior.
+    2. Multiple logger support requires one central dispatch authority. Replacing only the main training-loop call leaves evaluation, checkpoint, profiler, learning-rate, device, and throughput callbacks writing to the first backend and creates inconsistent experiment records.
+    3. The first configured logger owns singular compatibility surfaces such as `Trainer.logger` and `Trainer.log_dir`; this does not grant it exclusive metric ownership. All configured backends must receive equivalent event payloads in the same order.
+    4. Default version discovery must not create directories during logger construction. In distributed execution every rank constructs the Trainer independently; eager allocation allows later ranks to observe rank zero's new directory and select different versions before process coordination begins.
+    5. `log_every_n_steps=0` disables only step-cadence logging. Epoch reductions remain semantically distinct events and must continue reaching experiment backends.
+    6. Teardown is a collection-wide operation. Every logger must receive `finalize`, with the first failure retaining causal priority and later failures attached rather than swallowed or allowed to prevent subsequent cleanup.
+    7. A no-operation logger during fast development preserves user code that accesses logger integrations while enforcing the stronger requirement that no experiment artifacts are written.

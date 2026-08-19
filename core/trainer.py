@@ -42,7 +42,7 @@
 import inspect
 import math
 import warnings
-from collections.abc import Callable, Iterator, Sized
+from collections.abc import Callable, Iterable, Iterator, Sized
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal, Never, cast
@@ -72,7 +72,9 @@ from syntheticmind.core.optimizer import (
     _SchedulerInstance,
     _init_optimizers_and_lr_schedulers,
 )
-from syntheticmind.loggers.logger import Logger, _NoOpLogger
+from syntheticmind.core.protocols import OptimizerTrainerProtocol
+from syntheticmind.loggers.configuration import resolve_loggers
+from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.batch_limits import (
     normalize_batch_limit,
     normalize_fast_dev_run,
@@ -171,12 +173,13 @@ class _UnrepeatedDistributedSampler(DistributedSampler):
         # index list is strided by rank so the union across ranks covers every
         # sample exactly once. Shuffling seeds from the base seed plus the
         # epoch, matching the parent sampler's epoch-dependent permutation.
+        dataset: Sized = cast(Sized, self.dataset)
         if self.shuffle:
             g: torch.Generator = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices: list[int] = torch.randperm(len(self.dataset), generator=g).tolist()
+            indices: list[int] = torch.randperm(len(dataset), generator=g).tolist()
         else:
-            indices: list[int] = list(range(len(self.dataset)))
+            indices: list[int] = list(range(len(dataset)))
         indices: list[int] = indices[self.rank::self.num_replicas]
         return iter(indices)
 
@@ -184,7 +187,8 @@ class _UnrepeatedDistributedSampler(DistributedSampler):
         # Length of this rank's shard under the strided partition, which may
         # differ across ranks by one when the dataset size is not divisible by
         # the replica count.
-        return max(0, math.ceil((len(self.dataset) - self.rank) / self.num_replicas))
+        dataset: Sized = cast(Sized, self.dataset)
+        return max(0, math.ceil((len(dataset) - self.rank) / self.num_replicas))
 
 
 class Trainer:
@@ -227,8 +231,8 @@ class Trainer:
         devices: int | str | list[int] = "auto",
         num_nodes: int = 1,
         precision: PrecisionInput | None = None,
-        logger: Logger | None = None,
-        callbacks: list[Callback] | None = None,
+        logger: bool | Logger | Iterable[Logger] | None = None,
+        callbacks: Callback | list[Callback] | None = None,
         fast_dev_run: int | bool = False,
         max_epochs: int | None = None,
         min_epochs: int | None = None,
@@ -243,8 +247,8 @@ class Trainer:
         val_check_interval: int | float | str | timedelta | dict[str, int] | None = None,
         check_val_every_n_epoch: int | None = 1,
         num_sanity_val_steps: int | None = None,
-        log_every_n_steps: int = 10,
-        enable_progress_bar: bool = True,
+        log_every_n_steps: int | None = None,
+        enable_progress_bar: bool | None = None,
         accumulate_grad_batches: int = 1,
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None,
@@ -256,6 +260,7 @@ class Trainer:
         plugins: Precision | list[Precision] | None = None,
         sync_batchnorm: bool = False,
         reload_dataloaders_every_n_epochs: int = 0,
+        default_root_dir: str | Path | None = None,
         resume_from_checkpoint: str | Path | None = None,
         seed: int | None = None
     ) -> None:
@@ -389,7 +394,49 @@ class Trainer:
             val_check_interval
         )
         effective_check_val_every_n_epoch: int | None = check_val_every_n_epoch
-        effective_logger: Logger | None = logger
+        if enable_progress_bar is not None and type(enable_progress_bar) is not bool:
+            raise TypeError(
+                "`enable_progress_bar` must be a bool or None, got "
+                f"{enable_progress_bar!r}."
+            )
+        if (
+            log_every_n_steps is not None
+            and (
+                type(log_every_n_steps) is not int
+                or log_every_n_steps < 0
+            )
+        ):
+            raise MisconfigurationError(
+                "`log_every_n_steps` must be a non-negative integer or None."
+            )
+        if callbacks is None:
+            resolved_callbacks: list[Callback] = []
+        elif isinstance(callbacks, Callback):
+            resolved_callbacks = [callbacks]
+        elif isinstance(callbacks, list) and all(
+            isinstance(callback, Callback) for callback in callbacks
+        ):
+            resolved_callbacks = list(callbacks)
+        else:
+            raise TypeError(
+                "`callbacks` must be a Callback, a list of Callback instances, or None."
+            )
+        resolved_log_every_n_steps: int = (
+            50 if log_every_n_steps is None else log_every_n_steps
+        )
+        resolved_enable_progress_bar: bool = (
+            True if enable_progress_bar is None else enable_progress_bar
+        )
+        self._default_root_dir: Path = (
+            Path.cwd()
+            if default_root_dir is None
+            else Path(default_root_dir).expanduser()
+        )
+        resolved_loggers: list[Logger] = resolve_loggers(
+            logger,
+            self._default_root_dir,
+            fast_dev_run_enabled
+        )
         resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
             effective_max_epochs,
             min_epochs,
@@ -430,8 +477,6 @@ class Trainer:
             resolved_num_sanity_val_steps = 0
             effective_val_check_interval = 1.0
             effective_check_val_every_n_epoch = 1
-            if effective_logger is not None:
-                effective_logger = _NoOpLogger()
             resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
                 effective_max_epochs,
                 min_epochs,
@@ -456,7 +501,8 @@ class Trainer:
 
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
-        self.log_every_n_steps: int = log_every_n_steps
+        self.log_every_n_steps: int = resolved_log_every_n_steps
+        self.enable_progress_bar: bool = resolved_enable_progress_bar
         self.num_sanity_val_steps: int | float = resolved_num_sanity_val_steps
         self.fast_dev_run: int | bool = resolved_fast_dev_run
         self.overfit_batches: int | float = resolved_overfit_batches
@@ -481,9 +527,6 @@ class Trainer:
 
         if accumulate_grad_batches < 1:
             raise MisconfigurationError("accumulate_grad_batches must be >= 1")
-        if log_every_n_steps < 1:
-            raise MisconfigurationError("log_every_n_steps must be >= 1")
-
         if seed is not None:
             SeedManager.seed(seed)
 
@@ -536,7 +579,7 @@ class Trainer:
         )
         self.strategy._attach_precision_plugin(self._precision_plugin)
 
-        self.callbacks: list[Callback] = list(callbacks) if callbacks is not None else []
+        self.callbacks: list[Callback] = resolved_callbacks
         from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 
         progress_callbacks: list[ProgressBarCallback] = [
@@ -549,7 +592,7 @@ class Trainer:
                 "Only one progress bar callback is supported. Remove duplicate "
                 "ProgressBarCallback instances from callbacks."
             )
-        if not enable_progress_bar and progress_callbacks:
+        if not resolved_enable_progress_bar and progress_callbacks:
             raise MisconfigurationError(
                 "Trainer was configured with enable_progress_bar=False but received "
                 "a ProgressBarCallback in callbacks."
@@ -572,7 +615,7 @@ class Trainer:
                 self.callbacks.append(timer)
                 timer_callbacks.append(timer)
 
-        if enable_progress_bar:
+        if resolved_enable_progress_bar:
             progress_index: int | None = next(
                 (
                     index
@@ -590,7 +633,7 @@ class Trainer:
             if not progress_callbacks:
                 self.callbacks.append(ProgressBarCallback())
 
-        self.logger: Logger | None = effective_logger
+        self._loggers: list[Logger] = resolved_loggers
         self.state: TrainerState = TrainerState()
         self._sanity_checking: bool = False
         self._is_mid_epoch_validation: bool = False
@@ -610,14 +653,14 @@ class Trainer:
             min_epochs=resolved_min_epochs,
             max_epochs=resolved_max_epochs
         )
-        self.fit_loop.epoch_loop: TrainingEpochLoop | None = TrainingEpochLoop(
+        self.fit_loop.epoch_loop = TrainingEpochLoop(
             min_steps=min_steps,
             max_steps=effective_max_steps,
             accumulate_grad_batches=accumulate_grad_batches,
             precision=self.precision,
             gradient_clip_val=self.gradient_clip_val,
             gradient_clip_algorithm=self.gradient_clip_algorithm,
-            log_every_n_steps=log_every_n_steps
+            log_every_n_steps=resolved_log_every_n_steps
         )
         self.validate_loop: EvaluationLoop = EvaluationLoop(
             stage="validate",
@@ -716,7 +759,7 @@ class Trainer:
         self._reset_progress_bar_metrics()
         self._total_train_batches: int | None = None
         self._total_val_batches: int | None = None
-        self.fit_loop.should_stop: bool = False
+        self.fit_loop.should_stop = False
         if self.fit_loop.epoch_loop is not None:
             self.fit_loop.epoch_loop.reset_on_run()
         # Bind the run participants and zero the module's progress mirrors.
@@ -725,9 +768,9 @@ class Trainer:
         # methods.
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
-        module._trainer: Trainer | None = self
-        module._current_epoch: int = 0
-        module._global_step: int = 0
+        module._trainer = self
+        module._current_epoch = 0
+        module._global_step = 0
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
         fit_completed: bool = False
@@ -852,7 +895,11 @@ class Trainer:
                 )
             )
             self._synthetic_optimizers: list[SyntheticOptimizer] = [
-                SyntheticOptimizer._to_synthetic_optimizer(optimizer, self, module)
+                SyntheticOptimizer._to_synthetic_optimizer(
+                    optimizer,
+                    cast(OptimizerTrainerProtocol, self),
+                    module
+                )
                 for optimizer in self.optimizers
             ]
 
@@ -917,7 +964,7 @@ class Trainer:
 
             # The run configuration is announced to the logger from rank zero
             # only, keeping multi-process runs single-writer.
-            if self.logger is not None and is_rank_zero():
+            if self.loggers and is_rank_zero():
                 config_dict: HyperparameterDict = {
                     "max_epochs": self.max_epochs,
                     "max_steps": self.max_steps,
@@ -925,7 +972,7 @@ class Trainer:
                     "accelerator": type(self.accelerator).__name__,
                     "strategy": type(self.strategy).__name__
                 }
-                self.logger.log_hyperparams(config_dict)
+                self._log_hyperparams(config_dict)
 
             # Start hooks fire callbacks-first, then the module. The optional
             # sanity pass runs inside the fit stage but before training
@@ -948,7 +995,7 @@ class Trainer:
             # loop, which owns epochs, optimization, cadence-driven
             # validation, and stop requests from here.
             self.state.set_running_stage("training")
-            module._running_stage: str | None = "training"
+            module._running_stage = "training"
 
             with torch.autograd.set_detect_anomaly(self._detect_anomaly):
                 self.fit_loop.run()
@@ -975,8 +1022,8 @@ class Trainer:
             # The module's stage markers are cleared and the epoch loop's
             # resume markers reset, so the module and loops leave fit inert
             # rather than carrying live-run state into later stages.
-            module._running_stage: str | None = None
-            module._current_fx_name: str | None = None
+            module._running_stage = None
+            module._current_fx_name = None
             self.state.finish()
             self._active_exception = None
             self._is_mid_epoch_validation = False
@@ -1017,7 +1064,7 @@ class Trainer:
         self._total_val_batches: int | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
-        module._trainer: Trainer | None = self
+        module._trainer = self
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1069,8 +1116,8 @@ class Trainer:
             if not stage_completed:
                 module_mode.restore(module)
             cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "validate")
-            module._running_stage: str | None = None
-            module._current_fx_name: str | None = None
+            module._running_stage = None
+            module._current_fx_name = None
             self.state.finish()
             self._active_exception = None
             if cleanup_exception is not None:
@@ -1109,7 +1156,7 @@ class Trainer:
         self._total_test_batches: int | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
-        module._trainer: Trainer | None = self
+        module._trainer = self
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1161,8 +1208,8 @@ class Trainer:
             if not stage_completed:
                 module_mode.restore(module)
             cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "test")
-            module._running_stage: str | None = None
-            module._current_fx_name: str | None = None
+            module._running_stage = None
+            module._current_fx_name = None
             self.state.finish()
             self._active_exception = None
             if cleanup_exception is not None:
@@ -1214,7 +1261,7 @@ class Trainer:
         self._total_predict_batches: int | None = None
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
-        module._trainer: Trainer | None = self
+        module._trainer = self
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1258,7 +1305,7 @@ class Trainer:
                     callback.setup(self, module, "predict")
                 module.setup("predict")
 
-            self.predict_loop.return_predictions: bool = return_predictions
+            self.predict_loop.return_predictions = return_predictions
             predictions: list[ModelOutput] = self.predict_loop.run()
             stage_completed: bool = True
         except BaseException as exception:
@@ -1267,8 +1314,8 @@ class Trainer:
             if not stage_completed:
                 module_mode.restore(module)
             cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "predict")
-            module._running_stage: str | None = None
-            module._current_fx_name: str | None = None
+            module._running_stage = None
+            module._current_fx_name = None
             self.state.finish()
             self._active_exception = None
             if cleanup_exception is not None:
@@ -1365,12 +1412,12 @@ class Trainer:
         # Attaches this trainer to every loop, giving each loop access to the
         # shared collaborators (strategy, state, callbacks, dataloaders,
         # metrics) through its trainer property.
-        self.fit_loop.trainer: Trainer = self
+        self.fit_loop.trainer = self
         assert self.fit_loop.epoch_loop is not None
-        self.fit_loop.epoch_loop.trainer: Trainer = self
-        self.validate_loop.trainer: Trainer = self
-        self.test_loop.trainer: Trainer = self
-        self.predict_loop.trainer: Trainer = self
+        self.fit_loop.epoch_loop.trainer = self
+        self.validate_loop.trainer = self
+        self.test_loop.trainer = self
+        self.predict_loop.trainer = self
 
     def _configure_model(self, module: Module) -> None:
         has_legacy_override: bool = is_overridden("configure_sharded_model", module, ModelHooks)
@@ -1686,7 +1733,7 @@ class Trainer:
                 callback.on_sanity_check_start(self, module)
 
         self.state.set_running_stage("sanity_checking")
-        module._running_stage: str | None = "sanity_checking"
+        module._running_stage = "sanity_checking"
         self._sanity_checking: bool = True
 
         try:
@@ -1696,7 +1743,7 @@ class Trainer:
 
         self._validation_schedule.mark_validation_end()
 
-        self.validate_loop.epoch_metrics: dict[str, float] = {}
+        self.validate_loop.epoch_metrics = {}
         module._reset_logged_metrics()
         self._callback_metrics.clear()
         self._reset_progress_bar_metrics("validating")
@@ -1705,7 +1752,7 @@ class Trainer:
             for callback in self.callbacks:
                 callback.on_sanity_check_end(self, module)
 
-        module._running_stage: str | None = "training"
+        module._running_stage = "training"
 
     def _restore_checkpoint(self, path: Path, module: Module) -> None:
         # Restores a full checkpoint onto the live objects: model, optimizer,
@@ -1733,15 +1780,15 @@ class Trainer:
             precision_plugin=self.precision_plugin
         )
         self.state.load_state_dict({"current_epoch": epoch, "global_step": global_step})
-        module._current_epoch: int = epoch
-        module._global_step: int = global_step
+        module._current_epoch = epoch
+        module._global_step = global_step
         if self.fit_loop.epoch_loop is not None:
             if completed_batches > 0:
-                self.fit_loop.epoch_loop._completed_batches: int = completed_batches
+                self.fit_loop.epoch_loop._completed_batches = completed_batches
             if total_batch_idx >= 0:
-                self.fit_loop.epoch_loop._total_batches_processed: int = total_batch_idx + 1
+                self.fit_loop.epoch_loop._total_batches_processed = total_batch_idx + 1
             if epoch_rng_state is not None:
-                self.fit_loop.epoch_loop._resume_rng_state: CheckpointDict | None = epoch_rng_state
+                self.fit_loop.epoch_loop._resume_rng_state = epoch_rng_state
         with module._hook_context("on_load_checkpoint"):
             if hasattr(module, "on_load_checkpoint"):
                 module.on_load_checkpoint(checkpoint)
@@ -1828,8 +1875,12 @@ class Trainer:
             lambda: self._call_module_teardown(module, stage),
             failures
         )
-        if self.logger is not None:
-            self._attempt_teardown("logger.finalize", self.logger.finalize, failures)
+        for index, configured_logger in enumerate(self.loggers):
+            self._attempt_teardown(
+                f"logger[{index}].finalize",
+                configured_logger.finalize,
+                failures
+            )
 
         exception_notified: bool = False
         if failures and self._active_exception is None:
@@ -1958,6 +2009,44 @@ class Trainer:
                 )
             return self.max_steps
         return self.max_epochs
+
+    def _log_metrics(self, metrics: dict[str, float], step: int) -> None:
+        for configured_logger in self._loggers:
+            configured_logger.log_metrics(metrics, step=step)
+
+    def _log_hyperparams(self, params: HyperparameterDict) -> None:
+        for configured_logger in self._loggers:
+            configured_logger.log_hyperparams(params)
+
+    @property
+    def logger(self) -> Logger | None:
+        return self._loggers[0] if self._loggers else None
+
+    @logger.setter
+    def logger(self, logger: Logger | None) -> None:
+        if logger is not None and not isinstance(logger, Logger):
+            raise TypeError("`logger` must be a Logger or None.")
+        self._loggers = [] if logger is None else [logger]
+
+    @property
+    def loggers(self) -> list[Logger]:
+        return self._loggers
+
+    @loggers.setter
+    def loggers(self, loggers: list[Logger] | None) -> None:
+        resolved_loggers: list[Logger] = [] if loggers is None else list(loggers)
+        if not all(isinstance(logger, Logger) for logger in resolved_loggers):
+            raise TypeError("`loggers` must contain only Logger instances.")
+        self._loggers = resolved_loggers
+
+    @property
+    def default_root_dir(self) -> str:
+        return str(self._default_root_dir)
+
+    @property
+    def log_dir(self) -> str:
+        logger: Logger | None = self.logger
+        return str(logger.log_dir if logger is not None else self._default_root_dir)
 
     @property
     def current_epoch(self) -> int:

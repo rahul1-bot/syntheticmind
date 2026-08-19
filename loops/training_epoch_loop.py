@@ -56,7 +56,6 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.core.optimizer import SyntheticOptimizer, do_nothing_closure
-from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
@@ -228,7 +227,6 @@ class TrainingEpochLoop(Loop):
         optimizer: torch.optim.Optimizer | None = trainer.optimizer
         train_dataloader: DataLoader | None = trainer.train_dataloader  # type: ignore[type-arg]
         assert train_dataloader is not None
-        log_fn: Logger | None = trainer.logger
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model
         assert model is not None
@@ -348,7 +346,6 @@ class TrainingEpochLoop(Loop):
             self._dispatch_step_metrics(
                 module,
                 state,
-                log_fn,
                 epoch_accum,
                 epoch_logger_names,
                 epoch_progress_bar_names,
@@ -423,7 +420,6 @@ class TrainingEpochLoop(Loop):
         self._dispatch_epoch_metrics(
             epoch_accum,
             state,
-            log_fn,
             epoch_logger_names,
             epoch_progress_bar_names
         )
@@ -655,7 +651,7 @@ class TrainingEpochLoop(Loop):
             for wrapped_optimizer in trainer._synthetic_optimizers
             if wrapped_optimizer.optimizer is optimizer
         )
-        synthetic_optimizer._automatic_step: bool = True
+        synthetic_optimizer._automatic_step = True
         try:
             with module._hook_context("optimizer_step"):
                 module.optimizer_step(
@@ -665,7 +661,7 @@ class TrainingEpochLoop(Loop):
                     closure
                 )
         finally:
-            synthetic_optimizer._automatic_step: bool = False
+            synthetic_optimizer._automatic_step = False
         self._increment_global_step(state, module)
         self.update_lr_schedulers(
             trainer,
@@ -775,7 +771,7 @@ class TrainingEpochLoop(Loop):
         # value onto the module so Module.global_step stays consistent with
         # trainer state between checkpoints.
         state.increment_global_step()
-        module._global_step: int = state.global_step
+        module._global_step = state.global_step
 
     def _run_scheduled_validation(
         self,
@@ -808,7 +804,6 @@ class TrainingEpochLoop(Loop):
         self,
         module: Module,
         state: TrainerState,
-        log_fn: Logger | None,
         epoch_accum: dict[str, MetricAccumulator],
         epoch_logger_names: set[str],
         epoch_progress_bar_names: set[str],
@@ -854,9 +849,15 @@ class TrainingEpochLoop(Loop):
 
         self.trainer._callback_metrics.update(callback_step_metrics)
         self.trainer._update_progress_bar_metrics("training", progress_bar_step_metrics)
-        if step_metrics and log_fn is not None and not is_accumulating and state.global_step % self.log_every_n_steps == 0:
+        if (
+            step_metrics
+            and self.trainer.loggers
+            and self.log_every_n_steps > 0
+            and not is_accumulating
+            and state.global_step % self.log_every_n_steps == 0
+        ):
             if DistributedUtils.is_rank_zero():
-                log_fn.log_metrics(step_metrics, step=state.global_step)
+                self.trainer._log_metrics(step_metrics, step=state.global_step)
 
         module._reset_logged_metrics()
 
@@ -864,7 +865,6 @@ class TrainingEpochLoop(Loop):
         self,
         epoch_accum: dict[str, MetricAccumulator],
         state: TrainerState,
-        log_fn: Logger | None,
         epoch_logger_names: set[str],
         epoch_progress_bar_names: set[str]
     ) -> None:
@@ -885,7 +885,7 @@ class TrainingEpochLoop(Loop):
             if name in epoch_progress_bar_names
         }
         self.trainer._update_progress_bar_metrics("training", progress_bar_reduced)
-        if log_fn is None:
+        if not self.trainer.loggers:
             return
         if not DistributedUtils.is_rank_zero():
             return
@@ -893,4 +893,4 @@ class TrainingEpochLoop(Loop):
             k: v for k, v in all_reduced.items() if k in epoch_logger_names
         }
         if logger_reduced:
-            log_fn.log_metrics(logger_reduced, step=state.global_step)
+            self.trainer._log_metrics(logger_reduced, step=state.global_step)

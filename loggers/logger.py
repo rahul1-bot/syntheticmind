@@ -82,10 +82,14 @@ class Logger(ABC):
     def log_dir(self) -> Path:
         # Fully resolved output directory (save_dir/name[/version]), created on
         # access so callers can immediately open files inside it.
+        directory: Path = self._log_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def _log_directory(self) -> Path:
         directory: Path = self._save_dir / self._name
         if self._version is not None:
             directory: Path = directory / self._version
-        directory.mkdir(parents=True, exist_ok=True)
         return directory
 
     def __repr__(self) -> str:

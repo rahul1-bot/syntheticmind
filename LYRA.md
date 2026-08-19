@@ -133,3 +133,12 @@
     4. Anomaly detection reaches the real backward execution path and restores process state after failure, while deterministic and benchmark settings survive spawned worker transfer.
     5. CPU, MPS, forked Gloo, and spawned DDP evidence establishes the supported local contract; CUDA-specific deterministic kernels remain bounded by the unavailable NVIDIA runtime.
     6. The next phase must resume the pinned Trainer capability surface in dependency order and select the earliest unresolved execution collaborator rather than introducing isolated convenience flags.
+
+| Strategic Note | Experiment Logger Composition | Date: 19 August 2026 | Time: 03:26 PM | Name: Ghost |
+
+    1. ✅ The Trainer now distinguishes default logging, explicit enablement, explicit disablement, one backend, and multiple backends through the established public configuration meanings.
+    2. Every configured backend receives the same hyperparameters and metric events, while the first logger remains the standard singular integration surface and rank zero remains the sole persistent writer.
+    3. Default run directories are SyntheticMind-owned, versioned lazily, and consistent across external, forked, and spawned distributed execution. Fast development runs preserve callable logger integrations without producing experiment artifacts.
+    4. Step-cadence zero suppresses only step traffic, preserving epoch metrics. Cleanup attempts every backend even when one finalizer fails, preventing an early failure from abandoning later buffers or file handles.
+    5. CPU, MPS, CSV, multiple custom backends, callback singleton, malformed configuration, teardown failure, and distributed ownership paths are verified; all modified files are type-clean and compile successfully without invoking a linter.
+    6. The next sequential boundary is Trainer-owned default checkpoint composition. It must preserve standard callback ownership, directory semantics, disabling behavior, user conflicts, and fast-development suppression before model-summary or profiler composition is considered.

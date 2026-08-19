@@ -73,9 +73,9 @@ class ThroughputMonitor(Callback):
         batch_size: int = self._infer_batch_size(batch)
         self._epoch_samples += batch_size
 
-        if module.global_step % self.log_every_n_steps == 0 and trainer.logger is not None:
+        if module.global_step % self.log_every_n_steps == 0 and trainer.loggers:
             samples_per_sec: float = batch_size / batch_time if batch_time > 0 else 0.0
-            trainer.logger.log_metrics(
+            trainer._log_metrics(
                 {"throughput/samples_per_sec": samples_per_sec, "throughput/batch_time_ms": batch_time * 1000},
                 step=module.global_step
             )
@@ -87,8 +87,8 @@ class ThroughputMonitor(Callback):
         if not is_rank_zero():
             return
         epoch_time: float = time.perf_counter() - self._epoch_start_time
-        if epoch_time > 0 and trainer.logger is not None:
-            trainer.logger.log_metrics(
+        if epoch_time > 0 and trainer.loggers:
+            trainer._log_metrics(
                 {"throughput/epoch_samples_per_sec": self._epoch_samples / epoch_time},
                 step=module.global_step
             )
@@ -102,11 +102,11 @@ class ThroughputMonitor(Callback):
         if isinstance(batch, torch.Tensor):
             return batch.shape[0]
         if isinstance(batch, dict):
-            first: torch.Tensor | None = next(iter(batch.values()), None)
+            first: Batch | None = next(iter(batch.values()), None)
             if isinstance(first, torch.Tensor):
                 return first.shape[0]
         if isinstance(batch, (tuple, list)) and len(batch) > 0:
-            first_item: torch.Tensor = batch[0]
+            first_item: Batch = batch[0]
             if isinstance(first_item, torch.Tensor):
                 return first_item.shape[0]
         return 1

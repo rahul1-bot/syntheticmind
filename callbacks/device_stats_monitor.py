@@ -54,8 +54,8 @@ class DeviceStatsMonitor(Callback):
         device_idx: int = torch.cuda.current_device()
         allocated_mb: float = torch.cuda.memory_allocated(device_idx) / (1024 * 1024)
         reserved_mb: float = torch.cuda.memory_reserved(device_idx) / (1024 * 1024)
-        if trainer.logger is not None:
-            trainer.logger.log_metrics(
+        if trainer.loggers:
+            trainer._log_metrics(
                 {"device/memory_allocated_mb": allocated_mb, "device/memory_reserved_mb": reserved_mb},
                 step=module.global_step
             )

@@ -47,7 +47,7 @@ class LearningRateMonitor(Callback):
         # key for a single group and indexed keys for several.
         if not is_rank_zero():
             return
-        if trainer.optimizer is None or trainer.logger is None:
+        if trainer.optimizer is None or not trainer.loggers:
             return
 
         current_step: int = module.global_step
@@ -60,5 +60,5 @@ class LearningRateMonitor(Callback):
                 lr_metrics[f"lr_group_{idx}"] = lr
 
         if lr_metrics:
-            trainer.logger.log_metrics(lr_metrics, step=current_step)
+            trainer._log_metrics(lr_metrics, step=current_step)
             self._last_logged_step: int = current_step
