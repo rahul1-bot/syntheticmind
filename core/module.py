@@ -40,7 +40,8 @@ import numbers
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import IO, TYPE_CHECKING, ClassVar, Literal, cast, overload, override
+from pathlib import Path
+from typing import IO, TYPE_CHECKING, ClassVar, Literal, Self, cast, overload, override
 
 import torch
 import torch.distributed as dist
@@ -50,6 +51,7 @@ from torch import nn
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.hooks import DataHooks, MetricLoggingContract, ModelHooks
 from syntheticmind.core.hyperparameters import HyperparametersMixin
+from syntheticmind.core.model_checkpoint_loader import ModelCheckpointLoader
 from syntheticmind.core.optimizer import (
     LRSchedulerTypeUnion,
     SyntheticOptimizer,
@@ -65,6 +67,7 @@ from syntheticmind.utilities.types import (
     Batch,
     GatherData,
     GatherResult,
+    MapLocation,
     ModelOutput,
     Reduction,
     StepOutput
@@ -250,6 +253,26 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         self._current_fx_name: str | None = None
         self._current_dataloader_idx: int | None = None
         self._param_requires_grad_state: dict[torch.nn.Parameter, bool] = {}
+
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path: str | Path | IO[bytes],
+        map_location: MapLocation = None,
+        hparams_file: str | Path | None = None,
+        strict: bool | None = None,
+        weights_only: bool | None = None,
+        **kwargs: object
+    ) -> Self:
+        return ModelCheckpointLoader.load(
+            cls,
+            checkpoint_path,
+            map_location,
+            hparams_file,
+            strict,
+            weights_only,
+            kwargs
+        )
 
     @contextmanager
     def _hook_context(self, hook_name: str) -> Iterator[None]:

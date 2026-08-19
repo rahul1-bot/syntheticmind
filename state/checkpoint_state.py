@@ -26,6 +26,7 @@
 # Author: Rahul Sawhney
 
 import random
+import warnings
 from typing import cast
 
 import numpy as np
@@ -235,7 +236,8 @@ class CheckpointState:
         callbacks: list[Callback],
         datamodule: DataModule | None = None,
         precision_plugin: Precision | None = None,
-        restore_datamodule_state: bool = True
+        restore_datamodule_state: bool = True,
+        strict: bool = True
     ) -> tuple[int, int, int, int, CheckpointDict | None]:
         # Rehydrates live objects from the payload and returns the resume
         # coordinates (epoch, global step, completed batches, epoch RNG state).
@@ -247,7 +249,31 @@ class CheckpointState:
         )
         if not isinstance(model_state_dict_raw, dict):
             raise KeyError("Checkpoint is missing a model `state_dict`.")
-        model.load_state_dict(model_state_dict_raw)  # type: ignore[arg-type]
+        incompatible_keys: object = model.load_state_dict(
+            model_state_dict_raw,
+            strict=strict
+        )  # type: ignore[arg-type]
+        if not strict:
+            missing_keys: object = getattr(incompatible_keys, "missing_keys", [])
+            unexpected_keys: object = getattr(
+                incompatible_keys,
+                "unexpected_keys",
+                []
+            )
+            if missing_keys:
+                warnings.warn(
+                    "Found keys that are in the model state dict but not in the "
+                    f"checkpoint: {missing_keys}",
+                    UserWarning,
+                    stacklevel=3
+                )
+            if unexpected_keys:
+                warnings.warn(
+                    "Found keys that are not in the model state dict but in the "
+                    f"checkpoint: {unexpected_keys}",
+                    UserWarning,
+                    stacklevel=3
+                )
         optimizer_state_dicts_raw: CheckpointValue | None = checkpoint.get(
             "optimizer_states",
             checkpoint.get("optimizer_state_dicts")

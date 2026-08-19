@@ -179,7 +179,7 @@ type CheckpointValue = (
 type CheckpointDict = dict[str, CheckpointValue]
 
 type MapLocation = (
-    Callable[[torch.types.Storage, str], torch.types.Storage]
+    Callable[[torch.types.Storage, str], torch.types.Storage | None]
     | torch.device
     | str
     | dict[str, str]

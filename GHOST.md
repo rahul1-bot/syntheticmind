@@ -1,474 +1,89 @@
-| Strategic Direction | SyntheticMind Harness Hardening | Date: 19 August 2026 | Time: 04:31 AM | Name: Ghost |
-
-    1. SyntheticMind is a private machine-learning harness created from the ground up for Rahul's FAU study work, independent research, experimentation, and the enjoyment of controlling the complete workflow directly.
-    2. The project exists to provide end-to-end ownership of training, validation, testing, prediction, optimization, checkpointing, logging, callbacks, devices, precision, and distributed execution without surrendering the runtime to a larger framework.
-    3. The harness is intentionally incomplete. Its current status must not be represented as production-ready, release-ready, or capability-complete.
-    4. The active program is code hardening and capability implementation supported by proportionate behavioral verification. Code behavior and demonstrated operational capability control the work queue.
-    5. Public-release ceremony, promotional work, and documentation creation are excluded unless Rahul explicitly reopens them. Architecture notes, issue documents, and documentation parity are not deliverables.
-    6. PyTorch Lightning is the controlling reference for user-facing capability parity, established Trainer terminology, parameter semantics, lifecycle behavior, extension hooks, and failure handling; SyntheticMind retains its own guideline-compliant internal architecture.
-
-| Architecture Decision | Public Terminology and Python Standards | Date: 19 August 2026 | Time: 04:31 AM | Name: Ghost |
-
-    1. Established machine-learning terminology is a compatibility boundary. SyntheticMind must use recognizable industry-standard names and meanings when a stable convention already exists.
-    2. New public terms are prohibited when they merely rename an established concept. A project-specific term is acceptable only when it represents genuinely different semantics and that difference is enforced by code and tests.
-    3. The generic Python engineering rules governing this codebase are stored at `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md`.
-    4. Public API terminology follows machine-learning conventions, while internal structure follows the generic Python guidelines. Any conflict must be resolved explicitly rather than allowing accidental architectural drift.
-    5. The local PyTorch Lightning checkout under `docs/references/code/pytorch_lightning/pytorch-lightning` is read-only comparative material and is excluded from SyntheticMind's Git history with the complete `docs/` tree.
-    6. Public base classes are extension contracts. Their inheritance order, method-resolution order, cooperative `super()` behavior, overridable method names, parameter names and order, defaults, return contracts, invocation frequency, and lifecycle semantics must remain recognizable to experienced PyTorch and PyTorch Lightning users.
-    7. Industry-standard machine-learning concepts and key terms control the public vocabulary. Cosmetic aliases, renamed hooks, and project-specific substitutes for established concepts are prohibited because downstream users inherit these classes and override methods by name.
-    8. The complete `code-guidelines.md` is mandatory implementation policy rather than optional style guidance. New and modified code must be reviewed directly against it while preserving the stronger public compatibility boundary where inheritance and machine-learning conventions apply.
-
-| Architecture Decision | Framework Ownership and Reference Taxonomy | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
-
-    1. SyntheticMind is an independent machine-learning harness. PyTorch Lightning is evidence for mature capabilities and runtime contracts, not a product identity, source template, drop-in namespace, or naming authority.
-    2. Public vocabulary must be classified before adoption: universal machine-learning and PyTorch terminology is preserved, descriptive extension contracts are adopted only through an explicit SyntheticMind decision, and Lightning-branded vocabulary is rejected or translated into SyntheticMind-owned language.
-    3. `LightningOptimizer` is not an optimizer algorithm or an industry-standard term. It is Lightning's public framework wrapper around a user-supplied `torch.optim.Optimizer` for managed stepping, precision, profiling, progress accounting, closures, and optimizer toggling.
-    4. SyntheticMind requires the same managed-optimizer capability under the public name `SyntheticOptimizer`. The underlying algorithm remains a standard `torch.optim.Optimizer`, and the wrapper must remain transparent about that distinction.
-    5. The rejected `LightningOptimizer`, `use_pl_optimizer`, and `_lightning_optimizers` identifiers have been removed. The accepted managed surface is `SyntheticOptimizer`, `use_synthetic_optimizer`, and the private `_synthetic_optimizers` collection, while explicit raw access continues to return `torch.optim.Optimizer` instances.
-    6. The copied callback parameter name `pl_module` was Lightning-owned branding without a broader machine-learning meaning. Every SyntheticMind callback hook and built-in override now uses `module`, preserving method names, parameter order, defaults, positional invocation, and override compatibility inside the SyntheticMind inheritance contract.
-    7. Capability parity means that users can complete the same core workflows with equivalent semantics. It does not require copying Lightning-specific class names, prefixes, internal decomposition, or historical implementation baggage.
-    8. Ownership correction is accepted only with executable evidence: the source contains no remaining Lightning-branded Python identifiers, callback override signatures match the corrected base, dynamic wrappers retain their underlying PyTorch optimizer inheritance, and automatic, manual multi-optimizer, LBFGS closure, scheduler, toggling, and raw-access paths execute successfully.
-
-| Repository Policy | Main and Development Branches | Date: 19 August 2026 | Time: 04:31 AM | Name: Ghost |
-
-    1. The GitHub repository is private and uses `origin` as the canonical remote.
-    2. `main` holds the stable project baseline, including all four root ledgers. Direct feature and hardening work does not begin on `main`.
-    3. `dev` is the default working branch for Trainer hardening and future implementation work.
-    4. Every accepted development commit must be pushed to `origin/dev` before the work is treated as synchronized or complete.
-    5. Local `dev` and `origin/dev` must remain at the same commit after each completed commit-and-push cycle. Divergence is a defect to resolve before beginning unrelated work.
-    6. Changes reach `main` only through an intentional stabilization decision after relevant tests and review pass; ordinary development commits are not mirrored directly onto `main`.
-    7. Third-party source repositories used for research belong under the ignored `external/` directory and must never enter SyntheticMind's project history.
-    8. The ledgers record current objectives, durable decisions, reusable evidence, and live progress. Git commits, diffs, and logs are the canonical timeline and must not be duplicated into ledger chronology.
-
-| Architecture Decision | PyTorch Lightning Functional Parity End State | Date: 19 August 2026 | Time: 05:19 AM | Name: Ghost |
-
-    1. The required end state is full user-facing capability parity with the core PyTorch Lightning framework: workflows available to a PyTorch Lightning user must become executable through SyntheticMind.
-    2. Fabric is excluded from the current parity boundary. PyTorch Lightning documentation, release machinery, and replication of its upstream test suite are excluded because they are not harness capabilities; SyntheticMind still requires focused verification of its own behavior.
-    3. Public variables, methods, parameters, accepted values, defaults, meanings, state counters, errors, hook signatures, hook order, and lifecycle effects must follow established machine-learning and PyTorch Lightning conventions wherever those conventions describe the same concept.
-    4. Inheritance and method overriding are compatibility-critical behavior. Stable extension points must retain recognizable names and contracts so experienced machine-learning users do not need to translate an invented SyntheticMind vocabulary.
-    5. Divergence is permitted only when SyntheticMind implements a genuinely different algorithm or semantic contract. Every divergence requires an explicit technical rationale and must not silently reuse an established name with a different meaning.
-    6. Functional parity does not require copying PyTorch Lightning's internal architecture. SyntheticMind internals remain governed by the generic Python guidelines at `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md`.
-    7. Existing source comments remain untouched during the current phase. Comment cleanup and new source-code comments are deferred unless Rahul explicitly changes this constraint.
-
-| Execution Doctrine | Sequential Capability Reconstruction | Date: 19 August 2026 | Time: 05:19 AM | Name: Ghost |
-
-    1. The codebase must not be expanded through isolated patches applied in the middle of an unmapped runtime. That approach would compound incompatible state, naming, and lifecycle assumptions.
-    2. Work proceeds in dependency order: establish the capability boundary from source evidence, define compatibility contracts, harden foundational state and lifecycle behavior, verify the completed layer, and then add higher-level capabilities.
-    3. Each subsystem must be understood end to end before implementation begins, including its public surface, runtime path, inherited hooks, state transitions, failure behavior, and interactions with already hardened components.
-    4. Each completed layer must be verified before dependent layers begin. Capability breadth is accumulated deliberately rather than simulated through unused parameters or placeholder methods.
-    5. Documentation artifacts are not created for this program. Necessary reasoning is expressed through code structure, focused tests, concise durable ledger state, and reviewable Git commits.
-
-| Operational Doctrine | Evidence Escalation and Persistence | Date: 19 August 2026 | Time: 08:21 AM | Name: Ghost |
-
-    1. Uncertainty is a research trigger rather than a stopping condition. The first evidence sources are SyntheticMind's complete runtime path, the pinned local PyTorch Lightning source, installed package behavior, and focused executable probes on the MacBook.
-    2. If local evidence is insufficient, current official documentation, primary technical sources, repository history, and carefully selected external implementations must be investigated before a design decision is made.
-    3. Useful third-party repositories may be cloned under `external/` as ignored read-only references. Selection must be driven by a concrete unresolved capability or implementation question rather than indiscriminate collection.
-    4. `git log`, `git show`, and diffs provide the authoritative development timeline and earlier decision evidence. Ledgers must remain concise indexes rather than accumulating session logs.
-    5. A phase is complete only after its code is implemented, relevant behavior is verified, the diff is reviewed, and the commit is pushed so `dev` and `origin/dev` resolve to the same commit.
-    6. Persistence does not permit speculative interfaces, copied baggage, or false completion. When evidence exposes a weak assumption, the implementation direction must be corrected and work must continue from the strongest supported design.
-    7. Python dependencies may be installed when verification requires them, including global installation through `python -m pip install --break-system-packages`. The existing dependency graph must be inspected first, and targeted or isolated installation is preferred whenever a global change could destabilize unrelated workloads.
-
-| Verification Policy | Executable Evidence Without Linters | Date: 19 August 2026 | Time: 11:10 PM | Name: Ghost |
-
-    1. `ruff`, `mypy`, `pyright`, all other linters, and all static type-checking tools are excluded from the active hardening workflow and must not be invoked.
-    2. Compliance with `code-guidelines.md` is established through deliberate source review rather than automated lint or static-analysis output.
-    3. Capability claims require focused runtime assertions, end-to-end execution, exception-path probes, signature and method-resolution inspection, source-backed contract comparison, and Python compilation where relevant.
-    4. Verification must prioritize observable behavior, public compatibility, and inheritance safety. Automated stylistic or type-checking output cannot substitute for correct lifecycle semantics, parameter meaning, override behavior, or direct guideline review.
-    5. Historical ledger references to earlier static-analysis results describe evidence collected before this prohibition and do not authorize future invocation.
-
-| Architecture Decision | Optimization Extension Contract | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
-
-    1. `configure_optimizers` currently accepts an optimizer, an optimizer sequence, the paired optimizer-and-scheduler sequence form, optimizer dictionaries, optimizer-plus-scheduler dictionaries, dictionary sequences, and `None`. These structures are deliberately supported capability contracts and must not be described as universal terminology merely because Lightning also supports them.
-    2. `torch.optim.Optimizer` is the canonical optimizer-algorithm contract. SyntheticMind's framework-managed public adapter is named `SyntheticOptimizer`; scheduler configuration types remain subject to the same ownership and terminology audit before their public status is finalized.
-    3. `Module` exposes optimizer and scheduler accessors and override methods whose behavior remains compatibility-critical. Automatic and manual optimization may receive a `SyntheticOptimizer` where Trainer-owned stepping is required, while raw optimizer access must remain explicit and return the underlying PyTorch optimizer.
-    4. Optimizer closures own training-step execution, zeroing, backward, pre-step hooks, gradient clipping, and optimizer execution in the required order. This preserves LBFGS re-entry, gradient accumulation, mixed-precision scaling, manual backward arguments, and optimizer-step-based global progress.
-    5. Scheduler configuration preserves interval, frequency, plateau-monitor, strictness, name, optimizer attachment, custom-scheduler override, and checkpoint-state contracts. Optimizer state is placed on the execution device while the top-level optimizer step counter remains on its required device.
-    6. Parameter toggling preserves originally frozen parameters, shared optimizer parameters, unmanaged parameters, and exception-safe restoration. The standard context managers yield no value and remain safe when invoked through compiled model code.
-    7. The optimization foundation is accepted under SyntheticMind ownership. Existing behavioral verification covers accepted and rejected configuration shapes, public signatures and runtime annotations, inheritance order, CPU automatic and manual training, LBFGS closure repetition, scaler ordering, clipping conflicts, scheduler cadence, checkpoint resume, prebuilt optimizer state on MPS, managed-versus-raw access, and callback signature consistency without invoking a linter.
-
-| Architecture Decision | Minimal Terminal Presentation Contract | Date: 19 August 2026 | Time: 11:28 AM | Name: Ghost |
-
-    1. SyntheticMind adopts a restrained status-line terminal experience inspired by the progressive-disclosure model used by current coding agents. It does not adopt a dense monitoring dashboard, boxed control panel, or interactive agent command interface.
-    2. An interactive terminal displays one live line for the active stage. The default information budget is stage, progress, at most two user-selected metrics, and an estimated remaining duration only when the progress horizon is knowable.
-    3. Validation replaces the active training line rather than opening a competing bar. Each completed epoch leaves one compact permanent result line, and each completed fit, validation, test, or prediction stage leaves one compact final summary.
-    4. Parameter counts, device utilization, memory, throughput, learning rate, logger paths, profiler counters, and other diagnostics remain available through structured experiment logging and profiling but are excluded from default terminal output.
-    5. Actionable warnings may interrupt the compact presentation; routine Loguru timestamps, module names, source locations, and diagnostic chatter must not pollute the interactive progress surface.
-    6. Rendering occurs only on global rank zero. Non-interactive and redirected execution emits stable plain-text epoch and stage lines without ANSI control sequences, spinners, carriage-return rewriting, or fabricated progress percentages for unsized dataloaders.
-    7. Presentation depends on truthful stage-isolated measurements. Training, validation, testing, prediction, and sanity-check timing must not overwrite or contaminate one another, and metric routing must prevent stale values from crossing stage boundaries.
-
-| Architecture Decision | Stage Metrics and Runtime Timing | Date: 19 August 2026 | Time: 11:54 AM | Name: Ghost |
-
-    1. Progress-bar metrics are a dedicated presentation contract rather than an alias for callback monitoring metrics or experiment-logger metrics. Only values explicitly configured with `progress_bar=True` enter this surface.
-    2. Training, validation, testing, prediction, and sanity checking have isolated metric mappings. Training resets at every epoch, evaluation resets at every pass, each public entry point clears run-local state, and the sanity pass is discarded before real training begins.
-    3. Step-scoped values publish the latest scalar while epoch-scoped values publish the configured reduction. Metrics logged in training, validation, and test epoch-end module hooks are retained under the same stage contract.
-    4. `Trainer.progress_bar_metrics` returns a defensive snapshot for the active or most recently completed stage. Monitoring callbacks continue to consume `callback_metrics`, preventing console selection from changing early-stopping, checkpointing, or scheduler behavior.
-    5. The standard `Timer` callback exposes public wall-clock queries for training, validation, testing, prediction, and sanity-check stages while retaining separate internal epoch measurements for presentation. Public training time includes validation performed after training starts, internal epoch timing pauses during validation, sanity validation is excluded from run timing, standalone stages reset before execution, and exception handling closes every active segment.
-    6. Prediction now records its real dataloader horizon alongside the existing training, validation, and test horizons. Unknown lengths remain `None` so the renderer cannot invent percentages or estimated completion times.
-    7. The terminal renderer must consume these authoritative measurements and may not reconstruct timing or metric truth from mixed callback state, logger output, or presentation-local guesses.
-
-| Architecture Decision | Runtime Console Implementation | Date: 19 August 2026 | Time: 12:17 PM | Name: Ghost |
-
-    1. `ProgressBarCallback` now orchestrates one SyntheticMind console across fit, validation, testing, and prediction. A focused `ConsoleRenderer` owns terminal width, refresh throttling, spinner frames, line replacement, permanent output, value formatting, duration formatting, and I/O failure containment.
-    2. Interactive terminals receive one mutable active line. Validation replaces training while it runs, completed epochs become compact permanent lines, and each stage receives one final summary. Redirected output emits headers, completed epochs, and stage summaries only, with no ANSI sequences or carriage-return rewriting.
-    3. Known dataloader horizons produce percentages and an estimated remaining duration only after enough elapsed work exists for a meaningful estimate. Unsized dataloaders display completed batch counts and never fabricate percentages or estimated completion times.
-    4. The renderer displays no more than two metrics explicitly selected through `progress_bar=True`. Experiment logger metrics, callback monitoring metrics, checkpoint telemetry, throughput, hardware diagnostics, and routine framework chatter remain outside the default console.
-    5. The default progress surface receives a `Timer` without a duration, while the same standard callback may enforce a configured wall-clock limit. Caller-owned callback lists are copied instead of mutated, duplicate progress callbacks are rejected, and `enable_progress_bar=False` conflicts with an explicitly supplied progress callback rather than producing ambiguous behavior.
-    6. `ProgressBarCallback.enable`, `ProgressBarCallback.disable`, `is_enabled`, and `is_disabled` provide the standard runtime display controls. Rendering remains restricted to global rank zero and a disabled callback remains silent across later setup calls until explicitly enabled.
-    7. Completed-epoch output is deferred until the epoch has passed its module hook and scheduler boundary; a failure within that boundary removes the pending success line. Interruptions and failures clear the active TTY line and emit one compact terminal outcome.
-    8. Routine epoch, sanity-check, checkpoint-save, resume, early-stopping, and throughput Loguru information no longer competes with the console. Throughput remains available through the experiment logger, while actionable warning and error paths retain their diagnostic role.
-
-| Architecture Decision | Transactional Stage Teardown | Date: 19 August 2026 | Time: 12:27 PM | Name: Ghost |
-
-    1. Every fit, validation, test, and prediction entry point now dispatches the standard module `setup(stage)` and `teardown(stage)` extension hooks in addition to the existing datamodule and callback lifecycle.
-    2. Stage teardown is one best-effort transaction. Strategy, datamodule, ordinary callbacks, module, logger, and terminal progress cleanup are each attempted even when an earlier component raises.
-    3. The first failure remains the primary exception. Failures from later teardown operations or exception hooks are attached as exception notes so diagnostics are retained without replacing the cause that terminated execution.
-    4. `KeyboardInterrupt`, `SystemExit`, and ordinary runtime exceptions follow the same `BaseException` boundary, preserve their original identity and traceback, and cannot be masked by secondary cleanup failures.
-    5. The progress callback finalizes only after all non-presentation cleanup has succeeded. A teardown failure therefore produces one failed or interrupted outcome and cannot leave a false stage-complete summary.
-    6. Trainer and module stage markers are cleared after every outcome, while interrupted status survives finalization. A Trainer remains reusable after a failed cleanup once the failing collaborator is corrected.
-    7. Focused verification covers normal setup and teardown across all four entry points, simultaneous cleanup and exception-hook failures, runtime-primary preservation, setup failure, fatal base exceptions, terminal outcome truth, logger finalization, repeated Trainer use, and Python compilation without invoking a linter.
-
-| Architecture Decision | Training Termination Contract | Date: 19 August 2026 | Time: 12:41 PM | Name: Ghost |
-
-    1. `Trainer` construction is keyword-only and now exposes the established `max_epochs`, `min_epochs`, `max_steps`, and `min_steps` parameters with the pinned PyTorch Lightning signature defaults.
-    2. An unspecified epoch maximum resolves to 1000 when no step maximum exists and to an unlimited epoch horizon when `max_steps` is finite. Explicit `max_epochs=-1` means no epoch limit rather than the previous incorrect zero-epoch execution.
-    3. `max_steps` is a hard optimizer-step boundary for automatic optimization, gradient accumulation, manual optimization through `SyntheticOptimizer`, LBFGS closure re-entry, scheduler cadence, and checkpoint resumption. A hard epoch or step maximum terminates even when a configured minimum is larger.
-    4. `min_epochs` and `min_steps` gate only cooperative stop requests such as EarlyStopping. A stop request remains visible while training continues until both configured minima are satisfied.
-    5. `Trainer.should_stop` is the standard public stop surface and is backed by the authoritative Trainer state. EarlyStopping and loop control now use that contract instead of reaching through `trainer.state`.
-    6. `estimated_stepping_batches` respects zero-batch runs, finite step caps, finite epoch caps, accumulation, and unlimited horizons. The terminal renders unlimited runs as `epoch N` without a false negative denominator.
-    7. Global-step validation checks now require a real optimizer-step transition, preventing repeated validation on accumulation microbatches that leave `global_step` unchanged.
-    8. Checkpoint save and restore no longer emit routine Loguru chatter. Atomic-save temporary files are removed for every `BaseException`, including interruption, while the original exception is preserved.
-    9. Focused verification covers signature shape and validation, automatic and manual optimization, accumulation, zero limits, unlimited epochs, minimum-gated cooperative stopping, hard-limit precedence, LBFGS, step schedulers, real EarlyStopping, checkpoint resume at and below the limit, quiet checkpoint I/O, interruption cleanup, console labels, and Python compilation without invoking a linter.
-
-| Architecture Decision | Standard Validation Scheduling Contract | Date: 19 August 2026 | Time: 12:55 PM | Name: Ghost |
-
-    1. `Trainer` now exposes the established `val_check_interval` and `check_val_every_n_epoch` parameters with the pinned PyTorch Lightning names, defaults, accepted duration forms, and epoch-gating meanings. The project-specific `val_check_interval_scope` and `validate_at_epoch_end` controls are removed.
-    2. Integer intervals count raw training batches. With a finite epoch cadence they reset per eligible epoch; with `check_val_every_n_epoch=None` they count continuously across epoch boundaries and remain independent of optimizer steps and gradient accumulation.
-    3. Float intervals resolve against the effective limited training horizon, including zero for every batch and one for the final batch. Unsized dataloaders accept the standard end-of-epoch value, integer cadence, or elapsed-time cadence and reject fractional positions that cannot be resolved truthfully.
-    4. Time-based intervals accept `DD:HH:MM:SS`, `datetime.timedelta`, and `timedelta` keyword dictionaries. Elapsed time carries through ineligible epochs, resets after each validation pass, and never creates a batch-based surrogate.
-    5. Sanity validation obeys epoch eligibility and resets the time cadence. Cooperative stop requests may force one eligible validation pass after minimum training requirements are satisfied, while hard step termination does not fabricate an unscheduled final pass.
-    6. Validation scheduling is owned by a focused internal collaborator rather than copied Lightning loop internals. Fit, reload, sized, unsized, automatic, manual, and accumulation paths consume the same normalized contract.
-    7. Checkpoints persist cumulative raw-batch progress in addition to optimizer progress and within-epoch replay state. Final-batch validation saves the next epoch boundary, while mid-epoch validation and exception recovery preserve the exact continuation coordinate.
-    8. Focused verification covers public signatures, invalid configurations, fractional, integer, global-batch and time cadences, epoch gating, sanity behavior, dataloader reloads, validation disabling, cooperative and hard stops, checkpoint continuation, validation exceptions, all public stages, quiet redirected execution, comment preservation, and Python compilation without invoking a linter.
-
-| Architecture Decision | Standard Batch and Sanity Limits | Date: 19 August 2026 | Time: 01:02 PM | Name: Ghost |
-
-    1. The four standard `limit_train_batches`, `limit_val_batches`, `limit_test_batches`, and `limit_predict_batches` parameters retain the pinned signature default of `None` and normalize to the established runtime default of `1.0`.
-    2. An integer selects an absolute batch count and is capped by a sized dataloader; a float in `[0.0, 1.0]` selects a fraction. Explicit `1` means one batch, `1.0` means the complete loader, and zero disables the stage rather than silently executing one batch.
-    3. A positive fraction that resolves below one batch raises a configuration error with the minimum viable fraction. Empty dataloaders remain valid zero-batch stages, and unsized dataloaders accept only an integer count, `1.0`, or zero.
-    4. Trainer-owned normalized limits are the single runtime authority used by training, validation, testing, prediction, validation scheduling, scheduler estimation, and terminal horizon reporting. The duplicated loop-local interpretations are removed.
-    5. `num_sanity_val_steps` retains the pinned signature default of `None`, normalizes to two steps, accepts `-1` as all available validation batches, clips against `limit_val_batches`, and is skipped during checkpoint continuation.
-    6. The standard `num_training_batches`, `num_val_batches`, `num_sanity_val_batches`, `num_test_batches`, and `num_predict_batches` inspection surfaces report the effective resolved horizons and preserve infinity for unsized execution.
-    7. Focused verification covers normalization and rejected values, integer-versus-float identity, every stage, zero and empty loaders, too-small fractions, unsized loaders, sanity clipping and all-batch execution, reloads, accumulation, checkpoint continuation, validation cadence, quiet output, comment preservation, and Python compilation without invoking a linter.
-
-| Architecture Decision | Standard Wall-Clock Termination | Date: 19 August 2026 | Time: 01:15 PM | Name: Ghost |
-
-    1. `Trainer` now exposes the established keyword-only `max_time` parameter after `min_steps`, accepting `DD:HH:MM:SS`, `datetime.timedelta`, keyword dictionaries compatible with `timedelta`, or `None` with the standard disabled default.
-    2. `Timer` is the public callback name because timer is established technical vocabulary and contains no framework branding. SyntheticMind does not retain the project-specific `TimerCallback` alias, and the progress renderer consumes the standard class directly.
-    3. A duration requests cooperative termination at a training-batch or training-epoch boundary according to `interval`. `min_epochs` and `min_steps` may intentionally delay termination, while hard `max_epochs` and `max_steps` remain independent boundaries.
-    4. Training elapsed time begins at `on_train_start`, includes validation wall time, survives callback checkpoint restoration as an offset, and detects an already depleted duration at `on_fit_start` before resumed training consumes another batch.
-    5. Distributed strategies combine time-limit decisions with logical-OR semantics so expiration on any rank becomes one synchronized stop request. Validation may still execute through the established cooperative-stop scheduling contract before the fit exits.
-    6. An explicit user `Timer` takes precedence over `Trainer(max_time=...)` with an actionable conflict warning. Trainer-installed timers remain quiet and the compact final fit summary reports `max_time reached` without introducing routine Loguru output.
-    7. Focused verification covers signature and duration parsing, rejected formats and intervals, zero duration, step and epoch boundaries, unlimited epochs, minimum overrides, validation wall time, public stage timing, distributed agreement, exception closure, checkpoint depletion and resumption, compact redirected output, comment preservation, compilation, and targeted type checking without invoking a linter.
-
-| Architecture Decision | Standard Debugging Batch Controls | Date: 19 August 2026 | Time: 01:26 PM | Name: Ghost |
-
-    1. `Trainer` now exposes the established `fast_dev_run` and `overfit_batches` parameters with defaults of `False` and `0.0`, preserving their distinct smoke-test and deterministic-subset meanings without importing Lightning branding.
-    2. An enabled `fast_dev_run` bounds training, validation, testing, and prediction to the requested batch count, forces one epoch, caps optimizer steps, disables sanity validation, and restores end-of-epoch validation cadence even when conflicting limits were supplied.
-    3. User callbacks remain attached so ordinary extension behavior can still be exercised, while `EarlyStopping`, `ModelCheckpoint`, and experiment persistence are suppressed. A private no-operation logger preserves module code that accesses `self.logger.experiment` without writing user records.
-    4. An enabled `overfit_batches` controls only the training and validation batch budgets, but deterministic sequential sampling is enforced across every public stage and dataloader reload. Distributed training receives an unshuffled distributed sampler so the selected subset remains stable between epochs.
-    5. When both controls are enabled, `overfit_batches` retains authority over training and validation subsets while `fast_dev_run` retains its test, prediction, epoch, step, sanity, logging, checkpointing, and validation-cadence effects.
-    6. Sampler replacement preserves current PyTorch dataloader construction fields and reconstructs compatible custom `BatchSampler` subclasses rather than silently destroying their batching contract.
-    7. Focused verification covers signatures and rejected values, precedence, every public stage, conflicting limits, logger and monitoring suppression, exception checkpoint suppression, stable subsets across epochs and reloads, fractions, custom batch samplers, distributed shuffle state, source-comment preservation, compilation, and changed-region type checking without invoking a linter.
-
-| Architecture Decision | Standard Hardware Topology | Date: 19 August 2026 | Time: 01:39 PM | Name: Ghost |
-
-    1. `Trainer` now begins with the established `accelerator`, `strategy`, `devices`, and `num_nodes` parameter sequence. Their defaults are `"auto"`, `"auto"`, `"auto"`, and `1`, and device input accepts a positive count, explicit device identifiers, comma-separated identifiers, `-1` for all available GPU devices, or automatic selection where the accelerator supports that form.
-    2. Each accelerator owns device parsing, availability validation, automatic device count, concrete parallel-device construction, device-type validation, and process binding. Explicit unavailable accelerators and unavailable, negative, duplicate, empty, or structurally invalid device selections fail during configuration rather than during model execution.
-    3. A single validated topology supplies the accelerator, ordered parallel devices, and node count to the strategy. Strategy root-device resolution preserves explicit GPU identifier order, while the standard Trainer rank, node, world-size, device-identifier, device-count, and global-zero inspection surfaces delegate to this runtime authority.
-    4. Automatic strategy selection uses distributed data parallel whenever the topology spans multiple devices or nodes, including CPU execution. CPU distributed execution defaults to Gloo, CUDA defaults to NCCL, MPS rejects unsupported distributed configurations, and a non-distributed strategy cannot silently accept a distributed topology.
-    5. `DDPStrategy` uses the established `process_group_backend` parameter and validates launcher rank values, required rendezvous variables, launched or pre-existing process-group world size, and local-rank device bounds before execution. Each process maps its local rank through the configured ordered device list rather than assuming that visible identifier order starts at zero.
-    6. Focused evidence covers constructor signatures and invalid inputs, strategy-owned topology, mocked CUDA and MPS availability, explicit GPU identifier mapping, initialized and uninitialized process-group failures, real CPU and MPS single-device fits, and a real two-process CPU `torchrun` fit with synchronized parameters and correct per-rank progress.
-
-| Architecture Decision | Trainer-Owned Distributed Launch | Date: 19 August 2026 | Time: 02:17 PM | Name: Ghost |
-
-    1. `DDPStrategy` now preserves the established `start_method` vocabulary and default: `"popen"` re-executes the current script, while `"spawn"`, `"fork"`, and `"forkserver"` use multiprocessing. Trainer aliases `ddp`, `ddp_spawn`, `ddp_fork`, and `ddp_notebook` map to those meanings without introducing Lightning-branded public types.
-    2. The default local launcher creates one process per configured device, transports the original module or script invocation and arguments, establishes validated rank and rendezvous variables, applies a bounded CPU thread budget, and requires externally managed launch for multi-node execution.
-    3. Script re-execution is process-lifetime behavior rather than stage-lifetime behavior. Workers remain aligned with the parent across consecutive fit, validation, test, and prediction calls, and the distributed process group remains alive across successful stage teardown so a faster rank cannot reconnect to a stale rendezvous generation.
-    4. Successful DDP teardown unwraps the strategy-managed model, process exit releases the process group, and exception handling destroys a broken group immediately. Parent-launch failure restores environment and thread state, while worker failure terminates the local job so no surviving rank remains blocked in a collective.
-    5. Multiprocessing launch returns rank-zero model weights, Trainer state and counters, stop state, callback and progress metrics, callback state, datamodule state, stage metrics, batch horizons, and global random state to the parent process. Prediction retention remains explicitly unsupported for multiprocessing launch because arbitrary distributed prediction aggregation is not yet a truthful contract.
-    6. Unsized iterable exhaustion inside a DDP gradient-accumulation window now synchronizes the pending gradients before the tail optimizer step. Gradient presence is coordinated per parameter so rank-specific unused parameters cannot deadlock or silently diverge; sparse tail gradients fail collectively with an explicit unsupported-path error.
-    7. Focused verification covers launcher aliases and signatures, partial and invalid environments, local and external process creation, sequential public stages, guarded spawn and fork, parent-state recovery, distributed sampler warning ownership, unsized and partial-gradient tails, parent and worker failures, post-failure relaunch, late worker death, process cleanup, Python compilation, and targeted type checking without invoking a linter.
-    8. Real CPU execution validates Gloo launch behavior on this MacBook. CUDA process execution remains unverified because no CUDA runtime is available; CUDA start-method and random-state behavior therefore remain source-backed contracts requiring later hardware verification.
-
-| Architecture Decision | Standard Precision Execution | Date: 19 August 2026 | Time: 03:01 PM | Name: Ghost |
-
-    1. `Trainer.precision` now preserves the established `None` signature default, normalizes to `32-true`, accepts the standard integer and string aliases, exposes the resolved precision, and rejects contradictory explicit plugins or strategy-owned plugins before execution.
-    2. The SyntheticMind-owned extension surface consists of `Precision`, `MixedPrecision`, `HalfPrecision`, `DoublePrecision`, and `TransformerEnginePrecision`. These are descriptive precision contracts rather than Lightning-branded identities, and their standard connect, conversion, initialization, step-context, backward, optimizer-step, clipping, state, checkpoint, and teardown methods remain overridable.
-    3. True float16, bfloat16, float32, and float64 modes convert module parameters and floating inputs while preserving integer and complex-value semantics. Mixed float16 and bfloat16 modes apply autocast consistently to training, validation, testing, and prediction, with the standard CPU float16 fallback to bfloat16.
-    4. Automatic and manual optimization now share one precision authority through the strategy. Custom `Module.backward`, strategy pre-backward and post-backward hooks, optimizer closures, unscaled-gradient inspection, gradient clipping, skipped steps, fused optimizer behavior, and LBFGS rejection execute in the required order.
-    5. Mixed precision owns its `GradScaler`, permits caller-supplied scalers, prevents duplicate unscaling, preserves scaler checkpoint state, and clears cached autocast casts after nested gradient-disabled contexts so later gradient-enabled forwards in the same step remain differentiable.
-    6. Precision plugins may connect or wrap the strategy-managed model without replacing the underlying SyntheticMind `Module` extension identity. This wrapper path is preserved through single-device execution, DDP forward redirection, multiprocessing state transfer, and all four public stages.
-    7. Transformer Engine flags and constructor parameters are supported with delayed optional imports, a minimum `transformer_engine` version boundary, recipe handling, optional layer replacement, fallback autocast, and actionable dependency failure. Real FP8 and CUDA AMP execution remain unverified because this MacBook has no NVIDIA runtime; mocked dependency and layer-replacement probes establish only the configuration and integration contract.
-    8. Strategy-specific precision implementations for future FSDP, DeepSpeed, XLA, and third-party quantization capabilities remain coupled to those not-yet-implemented strategy or integration phases. Their absence is not concealed as complete framework parity.
-
-| Architecture Decision | Standard Execution Context Controls | Date: 19 August 2026 | Time: 03:10 PM | Name: Ghost |
-
-    1. `Trainer` now exposes the established `deterministic`, `benchmark`, `inference_mode`, and `detect_anomaly` parameter names, accepted values, relative order, and defaults. `deterministic` accepts `True`, `False`, `"warn"`, or `None`; `None` preserves the active PyTorch deterministic-algorithm state.
-    2. Deterministic-algorithm policy is independent of random-number seeding. Explicit deterministic modes configure PyTorch warning or error behavior, deterministic modes disable an unspecified cuDNN benchmark setting, contradictory explicit benchmark requests warn, and the required cuBLAS workspace configuration propagates through worker environments.
-    3. Trainer seeding now changes Python, NumPy, torch, CUDA, and hash random state without silently enabling or disabling deterministic algorithms, cuDNN deterministic selection, or benchmark autotuning.
-    4. Standalone validation, testing, and prediction execute their complete loop lifecycle under `torch.inference_mode` by default and under `torch.no_grad` when requested. Fit-scheduled validation and sanity checking always use `torch.no_grad`, preserving the standard ability to re-enter gradient tracking locally when a validation algorithm requires it.
-    5. Initialized Gloo process groups force evaluation and prediction onto `torch.no_grad` because inference-mode tensors are not a safe distributed contract for that backend. This backend rule is centralized and shared by both loop families.
-    6. Autograd anomaly detection wraps the fit loop, including the optimizer closure and backward path, while constructor setup and sanity validation remain outside its scope. The context restores the caller's prior anomaly state on both successful and failed execution.
-    7. Focused verification covers public signatures and rejected values, process-global flag preservation and transitions, seed repeatability, whole-loop hook contexts, gradient re-entry, fit validation and sanity behavior, NaN backward diagnosis, CPU and MPS execution, real two-process Gloo evaluation and prediction, spawned DDP flag propagation, Python compilation, comment preservation, and targeted type checking without invoking a linter.
-
-| Architecture Decision | Standard Logger Orchestration | Date: 19 August 2026 | Time: 03:26 PM | Name: Ghost |
-
-    1. `Trainer.logger` now preserves the established configuration meanings: `None` and `True` select a default experiment logger, `False` disables logging, one `Logger` selects one backend, and an iterable selects multiple ordered backends. `callbacks` accepts either one `Callback` or a callback list without weakening item validation.
-    2. `log_every_n_steps=None` resolves to the established cadence of 50, while zero disables step emissions without suppressing epoch-reduced metrics. `enable_progress_bar=None` resolves to enabled, and `default_root_dir` supplies the project-wide artifact root.
-    3. The default backend is TensorBoard when its dependency is available and CSV otherwise. SyntheticMind owns the destination namespace `syntheticmind_logs/version_N`; directory allocation is lazy so independently constructed distributed ranks select the same version before rank zero creates artifacts.
-    4. `Trainer.logger` exposes the first configured backend for standard singular access, `Trainer.loggers` exposes the ordered collection, and `Trainer.log_dir` follows the first backend or the default root when logging is disabled. Hyperparameters, training metrics, evaluation metrics, learning rates, device statistics, throughput, checkpoint telemetry, and profiler metrics are broadcast identically to every configured backend.
-    5. Persistent writes remain rank-zero operations. External Gloo launch, local fork launch, and local spawn launch were exercised with one artifact owner and an agreed default log directory across ranks.
-    6. Fast development runs replace enabled logging with a no-operation logger so module integrations remain callable without creating artifacts; an explicitly disabled logger remains disabled. Logger finalization is best-effort across the complete collection, preserving the first failure while attaching later cleanup failures as diagnostic notes.
-    7. CSV logger construction no longer creates its run directory, while the first real write or explicit `log_dir` access still materializes the destination. Malformed checkpoint callback state is narrowed safely instead of relying on invalid recursive-state coercion exposed by the touched logger telemetry path.
-    8. Focused verification covers constructor defaults and invalid values, singleton callbacks, iterable loggers, property mutation, multiple-backend equality, zero cadence, default CSV all-stage persistence, lazy directories, fast-development suppression, teardown failures, CPU and MPS execution, Gloo and multiprocessing launch, Python compilation, comment preservation, and zero type-checking errors across every modified file without invoking a linter.
-
-| Architecture Decision | Standard Checkpoint Orchestration | Date: 19 August 2026 | Time: 04:11 PM | Name: Ghost |
-
-    1. `Trainer` now implements the established `enable_checkpointing` contract, composes one default `ModelCheckpoint` when enabled, recognizes the generic `Checkpoint` extension family, orders checkpoint callbacks after ordinary callbacks, rejects contradictory disabling, and suppresses persistence during fast development runs.
-    2. `ModelCheckpoint` preserves the pinned public constructor, overridable method surface, monitor and mode behavior, step, epoch, time, validation, exception, top-k, last-link, filename, version-counter, state-restoration, and artifact-root semantics without importing Lightning-owned branding or internal architecture.
-    3. Checkpoints write standard primary state names for model weights, optimizers, schedulers, callbacks, and datamodules while retaining legacy SyntheticMind aliases for backward loading compatibility. Full and weights-only files have distinct verified restoration boundaries.
-    4. Public `fit`, `validate`, `test`, and `predict` checkpoint selection supports explicit paths plus standard best and last resolution, and public `save_checkpoint` shares the same state authority. Unsupported high-performance-computing and registry selectors fail explicitly instead of simulating unavailable integrations.
-    5. Exact continuation preserves completed batches, cumulative raw batches, optimizer and scheduler progress, callback and datamodule state, module checkpoint hooks, epoch coordinates, and stochastic execution. Mid-epoch replay restores both the epoch-start random state needed to reconstruct data order and the interruption-time random state needed for the first unfinished model operation.
-    6. Distributed checkpoint decisions execute on every rank so callback state remains identical, while rank zero alone mutates the filesystem. Generic strategy object broadcasting, synchronized existence checks, all-rank state construction, barriers, and parent-state recovery were verified through fork, spawn, and external two-process Gloo execution.
-    7. Verification also exposed asynchronous MPS host transfer as a data-corruption path. Nonblocking recursive transfer is now restricted to CUDA, and finite MPS training, checkpoint creation, best and last restoration, weights-only restoration, validation, testing, and prediction execute correctly.
-    8. Signature and public-method comparison against pinned revision `fcef404516264798b6c582ef556eaa17e5c29bfb`, stochastic interruption equivalence, exception recovery, atomic persistence, standard checkpoint schema, CPU and MPS execution, distributed ownership, Python compilation, and targeted type checking pass without invoking a linter.
-    9. CUDA checkpoint execution remains hardware-unverified on this MacBook.
-
-| Architecture Decision | Standard Model Summary Composition | Date: 19 August 2026 | Time: 04:26 PM | Name: Ghost |
-
-    1. `Trainer` now exposes `enable_model_summary` in the pinned parameter position with the standard `None` default and enabled normalization. Disabling prevents only Trainer-owned default composition, while an explicitly supplied `ModelSummary` remains authoritative and suppresses duplicate default insertion.
-    2. The public callback and utility surfaces preserve the established `ModelSummary`, `RichModelSummary`, `LayerSummary`, `summarize`, depth, summary-data, parameter-count, model-size, training-mode, shape, and FLOP contracts. SyntheticMind retains the generic `module` parameter spelling rather than adopting Lightning-owned callback branding.
-    3. Example-input summarization executes after model configuration, strategy placement, precision conversion, checkpoint restoration, and callback setup. It applies the module batch-transfer hook chain and precision forward context so reported shapes and operations describe the model that training will actually execute.
-    4. The probe forward is observational infrastructure rather than hidden training work. Per-submodule train and evaluation modes, Python, NumPy, CPU torch, CUDA, and MPS random state are restored, and every temporary forward hook is detached on both success and failure.
-    5. Nested depth, unused modules, direct root parameters, lazy parameters, mixed input structures, scripted children, trainable and non-trainable counts, precision-aware size estimates, module modes, and per-layer and total FLOPs retain distinct representations. Uninitialized parameters produce one actionable warning rather than repeated terminal noise.
-    6. The Trainer-owned default remains the formal plain renderer so an installed optional package cannot silently replace the approved SyntheticMind terminal surface. `RichModelSummary` is available as an explicit standard opt-in with dependency validation, column styling, size formatting, shapes, modes, and FLOPs.
-    7. Summary computation occurs on every distributed rank so model-side execution remains symmetric, while rendering occurs only on global rank zero. External two-process Gloo, local fork, and local spawn each produced two rank-local computations and exactly one rendered result.
-    8. Focused evidence covers exact Trainer parameter position and default, callback public-method and override-call compatibility, enablement and custom-callback rules, repeated fits, fast development, exception cleanup, terminal I/O containment, redirected console composition, CPU and MPS execution, Rich rendering, optional dependency failure, Python compilation, and targeted type checking without invoking a linter.
-    9. CUDA random-state restoration is source-backed but hardware-unverified, and DeepSpeed-specific sharded parameter reporting remains coupled to the future DeepSpeed strategy phase.
-
-| Architecture Decision | Standard Profiling Contract | Date: 19 August 2026 | Time: 05:07 PM | Name: Ghost |
-
-    1. `Trainer` now exposes the standard `profiler` parameter immediately after `use_distributed_sampler`, with the established `None` default and support for a custom `Profiler` instance or the `simple`, `advanced`, `pytorch`, and `xla` selectors.
-    2. The public extension hierarchy consists of `Profiler`, `PassThroughProfiler`, `SimpleProfiler`, `AdvancedProfiler`, `PyTorchProfiler`, and `XLAProfiler`. Constructor parameter names, order, defaults, start and stop semantics, report preparation, and custom inheritance remain recognizable without importing Lightning-owned branding.
-    3. SyntheticMind owns its profiler identity and emitted record prefixes. Standard capability is preserved through SyntheticMind-specific module, callback, datamodule, strategy, training-batch, training-epoch, dataloader, optimizer, backward, checkpoint, and public-stage action boundaries rather than copied framework namespaces.
-    4. Profile reports and traces follow an explicit profiler directory when supplied, otherwise the first experiment logger's directory or `default_root_dir`. Distributed files include the local rank, and the pass-through default does not materialize an artifact directory.
-    5. Simple timing, nested deterministic cProfile recording, raw statistics, PyTorch operator traces, module-name ranges, custom schedules, trace callbacks, Chrome export, flame-stack export, optional NVTX, and the optional XLA server boundary are executable capability contracts.
-    6. Profiler setup, stage reuse, exception unwinding, stop failures, summary failures, teardown failures, post-stage checkpoint saves, and module replacement are isolated so profiling cannot replace the primary runtime exception, leak an active recording, or silently restart after stage completion.
-    7. Focused verification covers public signatures and selectors, direct and Trainer-managed execution, all four stages, automatic checkpoint saves, nested actions, repeated use, CPU and MPS execution, external, forked, spawned, and subprocess Gloo ranks, custom trace schedules, invalid configurations, artifact ownership, compilation, and targeted type checking without invoking a linter.
-    8. CUDA operator and NVTX execution and real XLA tracing remain hardware or optional-dependency bounded.
-
-| Architecture Decision | Standard Barebones Execution | Date: 19 August 2026 | Time: 05:20 PM | Name: Ghost |
-
-    1. `Trainer` now exposes the standard `barebones` parameter immediately after `detect_anomaly`, with the established `False` default and strict boolean validation.
-    2. Enabled barebones execution normalizes checkpointing, experiment logging, progress rendering, model-summary composition, metric cadence, sanity validation, development-run behavior, anomaly detection, and profiling to their disabled states.
-    3. Explicit attempts to enable an excluded service fail during Trainer construction with the conflicting parameter and value identified. Explicit disabled or zero values remain valid configuration.
-    4. `Module.log` and `Module.log_dict` become rank-zero warning no-operations while barebones mode is active, including prediction and setup contexts, so inherited model code cannot accidentally restore metric infrastructure or fail on a logging call.
-    5. Barebones isolates framework overhead rather than disabling the training contract. User callbacks, optimization, validation scheduling, precision, distributed execution, and `max_time` remain operational; explicit checkpoint and progress callbacks retain their normal conflicts, while an explicit model-summary callback remains user-owned.
-    6. Every public stage emits one restrained rank-zero SyntheticMind status line because the progress surface is absent. The mode remains artifact-free unless an independently permitted user extension deliberately owns persistence.
-    7. Focused verification covers exact signature placement and defaults, the complete conflict matrix, disabled normalization, all four public stages, metric no-operation behavior, ordinary logging regression, callback composition, wall-clock control, exception and teardown behavior, CPU, MPS, two-process Gloo execution, compilation, and targeted type checking without invoking a linter.
-
-| Architecture Decision | Standard Core Plugin Composition | Date: 19 August 2026 | Time: 05:46 PM | Name: Ghost |
-
-    1. `Trainer.plugins` now accepts one plugin or a list containing at most one `Precision`, `CheckpointIO`, `ClusterEnvironment`, and `LayerSync`, preserving the pinned parameter position, extension names, method signatures, parameter meanings, and duplicate-family rules.
-    2. These names describe established execution capabilities and contain no Lightning product identity. SyntheticMind's default unmanaged cluster implementation is named `LocalEnvironment`; Lightning-branded environment and optimizer names remain prohibited.
-    3. Strategy-owned and Trainer-owned plugin configuration are mutually exclusive per family. Precision, checkpoint persistence, cluster topology, and layer synchronization each retain one authoritative runtime owner and fail construction when configured through contradictory paths.
-    4. Checkpoint save, load, removal, storage options, full and weights-only restoration, ModelCheckpoint retention, and teardown now route through `CheckpointIO`. `TorchCheckpointIO` retains atomic local persistence, while `AsyncCheckpointIO` snapshots mutable state, serializes writes, drains before reads or removal, and preserves the first asynchronous failure through cleanup.
-    5. `ClusterEnvironment` owns rendezvous values and rank topology for local and externally launched DDP. `LayerSync` applies before precision conversion and distributed wrapping during fit, reverts the actual converted module during transactional teardown, and powers the standard `sync_batchnorm` composition and conflict contract.
-    6. Focused verification covers plugin signatures, map-location forms, duplicate and ownership conflicts, custom and asynchronous checkpoint I/O, repeated stages, save-last links, failure notes, direct and strategy-owned plugins, nested layer conversion, replacement precision modules, CPU, MPS, fork, spawn, subprocess, and external Gloo execution without invoking a linter.
-    7. Default protocol-aware remote checkpoint storage and scheduler-specific cluster environments remain future integration capabilities and are not represented as complete. Real synchronized batch normalization remains CUDA-hardware bounded.
-
-| Architecture Decision | Standard Dataloader Reload Contract | Date: 19 August 2026 | Time: 06:04 PM | Name: Ghost |
-
-    1. `Trainer.reload_dataloaders_every_n_epochs` retains the pinned keyword-only name, position, integer annotation, and zero default. Negative values, booleans, non-integral numbers, and strings fail during construction instead of becoming ambiguous epoch intervals.
-    2. Training and validation loaders now maintain independent last-actual-load epochs. A positive interval is measured from the loader's previous construction rather than by absolute epoch modulo, preserving the expected cadence after checkpoint continuation.
-    3. Training loaders are requested only when training is enabled and are refreshed at eligible epoch starts. Validation loaders are requested only when validation actually runs, remain stable across multiple validation passes in one epoch, and follow their own cadence when validation is less frequent than training.
-    4. Sanity validation always exercises an enabled validation path before fresh training. Its loader establishes the reload anchor only when epoch zero is validation-eligible, matching the pinned interaction among sanity steps, validation epoch cadence, and loader reload cadence.
-    5. One Trainer-owned construction path validates the single-`DataLoader` contract, reapplies deterministic overfit and distributed sampling, preserves compatible custom batch samplers, refreshes effective batch horizons, synchronizes ranks, and warns about the unstable persistent-worker and pinned-memory combination.
-    6. `DataModule.trainer` is now the standard attached Trainer reference across fit, validation, testing, prediction, and multiprocessing parent-state restoration. Checkpoint continuation restores the epoch and datamodule state before requesting a loader while reading the checkpoint exactly once.
-    7. Focused verification covers the complete pinned reload matrix, frequent validation, disabled-stage laziness, dynamic lengths, iterable and custom batching paths, repeated fits, failure cleanup, exact checkpoint-relative cadence, CPU, MPS, external Gloo, and local fork, spawn, and subprocess execution without invoking a linter.
-    8. Real CUDA execution remains hardware-bounded.
-
-| Architecture Decision | Standard Artifact Root and Filesystem Contract | Date: 19 August 2026 | Time: 06:38 PM | Name: Ghost |
-
-    1. `Trainer.default_root_dir` now preserves the pinned keyword-only name, position, `None` default, current-working-directory fallback, local user expansion and normalization, path-like acceptance, and remote protocol URI identity.
-    2. Logger directories, version discovery, checkpoint persistence and selection, profiler reports and native traces, runtime telemetry, and callback sidecars now share one protocol-aware filesystem boundary instead of converting remote URIs through `Path`.
-    3. TensorBoard and CSV logging support local and remote roots. Remote CSV and profiler streams do not assume object-store append capability, while native cProfile and PyTorch trace exporters use bounded local staging before protocol-aware publication.
-    4. `TorchCheckpointIO` and `ModelCheckpoint` support protocol-aware save, load, removal, best and last selection, retention, exception rescue, YAML state, and telemetry. `save_last="link"` remains explicitly local because symbolic links have no truthful generic object-store contract.
-    5. `Trainer.log_dir` follows the first standard logger's run directory, a custom logger's save directory, or the default root when logging is disabled. Its distributed broadcast remains an all-rank collective, and every internal caller now enters that collective before rank-zero-only persistence begins.
-    6. Artifact allocation remains lazy so independently initialized ranks agree on one version. Rank zero alone writes persistent outputs, runtime-profiler artifacts are run-scoped, and fast development execution leaves the configured root untouched.
-    7. Focused verification covers normalized local paths, `file://` paths, in-memory remote storage, remote storage with append deliberately rejected, CSV schema widening, TensorBoard events, checkpoint continuation and links, native profiler artifacts, exception checkpoints, CPU, MPS, and real two-rank Gloo ownership.
-    8. TensorBoard `2.21.0` is installed in the current Python environment so the preferred default backend is directly exercised. Python compilation and targeted Pyright inspection pass without invoking a linter; real cloud credentials and CUDA hardware remain environment-bounded.
-
-| Architecture Decision | Standard Hyperparameter Capture and Autologging | Date: 19 August 2026 | Time: 06:57 PM | Name: Ghost |
-
-    1. `Trainer.enable_autolog_hparams` now preserves the pinned keyword-only position after `default_root_dir`, the established `True` default, and a strict boolean configuration boundary.
-    2. `Module` and `DataModule` expose the established `save_hyperparameters`, `hparams`, and `hparams_initial` inheritance contracts through one cooperative `HyperparametersMixin`. Constructor-frame capture, inherited constructors, dataclasses, explicit names, mappings, namespaces, ignore lists, attribute access, initial-state isolation, and per-source logger suppression are executable behaviors.
-    3. Automatic logging publishes the initial model and datamodule hyperparameters during fit, validation, testing, and prediction. Fit publication follows `on_fit_start`; multiple loggers receive the same merged mapping; `_class_path` remains internal; and persistent dispatch remains global-rank-zero owned.
-    4. Shared model and datamodule keys require identical types and values, while tensors require object identity. Inconsistent keys fail before stage work instead of allowing one source to overwrite the other silently.
-    5. Full and weights-only checkpoints persist model and datamodule hyperparameters under the established checkpoint keys independently of the autologging flag. Hyperparameter argument names are retained, unpicklable values are removed with a warning, and OmegaConf containers preserve both interpolation behavior and container type metadata.
-    6. CSV and TensorBoard backends accept arbitrary hyperparameter keys and values through deterministic string normalization at their serialization boundaries. Fast development and explicit autologging disablement create no hyperparameter records.
-    7. Focused verification covers constructor capture, inheritance, dataclasses, namespaces, OmegaConf `2.3.1`, immutable initial snapshots, suppression, collision failures, all four public stages, local and remote logger storage, checkpoint round trips, CPU, MPS, and real two-rank Gloo ownership.
-    8. Python compilation, diff validation, direct guideline review, and targeted Pyright inspection pass without invoking a linter. The existing unrelated strict-type debt in `Module` remains unchanged at its verified baseline.
-
-| Architecture Decision | Registry Integration Ownership | Date: 19 August 2026 | Time: 07:11 PM | Name: Ghost |
-
-    1. The pinned `model_registry` parameter is an integration with Lightning AI's LitModels client and Lightning Cloud registry rather than an industry-standard Trainer primitive. Its `registry:` checkpoint grammar, organization and teamspace addressing, authentication, upload lifecycle, and checkpoint callback substitution are product-specific contracts.
-    2. SyntheticMind will not place Lightning Cloud or LitModels product semantics in the core Trainer merely to reproduce a reference signature. Equivalent registry capability remains open and must be introduced through a provider-neutral integration boundary only after provider ownership, authentication, artifact identity, versioning, failure handling, and checkpoint interaction are designed end to end.
-    3. The pinned `suggest_integrations` parameter emits promotional notices for optional Lightning products and contributes no training, validation, testing, prediction, or persistence capability. It is excluded from SyntheticMind rather than represented as a false parity requirement.
-    4. The official LitModels implementation was inspected at ignored external revision `8fa1c77f21e49b01eb0349e8fadc7cb14ba37225`. The audit confirms that its checkpoint adapter inherits Lightning classes and authenticates against Lightning Cloud, so it is evidence for a future integration design rather than reusable SyntheticMind core code.
-
-| Architecture Decision | Standard Trainer Runtime Inspection Surface | Date: 19 August 2026 | Time: 07:11 PM | Name: Ghost |
-
-    1. Trainer runtime state now exposes the standard `training`, `validating`, `testing`, `predicting`, `evaluating`, and `sanity_checking` properties and setters from one authoritative `TrainerState.running_stage` value.
-    2. Sanity validation retains `sanity_checking` throughout its start hook, validation batches, end hook, metric suppression, timer suppression, checkpoint suppression, and progress suppression. The evaluation loop no longer overwrites that state with ordinary validation before inherited hooks can inspect it.
-    3. `Trainer.model` exposes the strategy-managed model, including a distributed or precision wrapper, while `Trainer.module` remains the underlying SyntheticMind extension object used for hooks and user methods. This distinction preserves established wrapped-versus-unwrapped access semantics without introducing Lightning branding.
-    4. Standard callback inspection now includes `early_stopping_callback`, `early_stopping_callbacks`, and `progress_bar_callback`; `Trainer.print` writes from local rank zero; and `distributed_sampler_kwargs` exposes and drives explicit world-size and rank configuration for distributed samplers.
-    5. Focused verification covers property mutation and validation, callback selection, complete fit, sanity, validation, test, and prediction hook states, model identity, CPU execution, two-process Gloo sampler ownership, rank-zero printing, Python compilation, diff validation, and zero targeted type errors across the changed runtime surface.
-    6. `is_last_batch`, signal receipt, and multiple-dataloader inspection remain separate execution capabilities because truthful implementation requires data-fetcher progress, signal lifecycle, and multi-loader support rather than cosmetic properties.
-
-| Architecture Decision | Standard Module Initialization Context | Date: 19 August 2026 | Time: 07:23 PM | Name: Ghost |
-
-    1. `Trainer.init_module(empty_init=None)` now delegates module construction to the active strategy so device placement, precision-specific initialization dtype, and future strategy-specific allocation remain owned by one runtime boundary.
-    2. True float16, bfloat16, float32, and float64 precision modes construct floating tensors directly in their resolved dtype, while mixed precision preserves float32 construction and applies lower precision during execution.
-    3. `empty_init=True` suppresses the complete exercised `torch.nn.init` mutation family and its random-number consumption while retaining ordinary real-device tensor allocation for the current single-device and distributed data-parallel strategies.
-    4. The implementation accounts for PyTorch 2.9 initialization paths that use direct mutation, output tensors, indexed assignment, and internal random permutations rather than assuming every initializer reaches one dispatched public function.
-    5. Initialization contexts restore the caller's default device, default dtype, and exception state after successful, nested, and failed construction. Invalid `empty_init` values fail at the strategy boundary before allocation.
-    6. Multiprocessing parent reconciliation now restores the rank-zero module into both `Trainer.module` and the strategy-managed `Trainer.model` surface, preventing wrapped-model inspection from becoming stale after worker completion.
-    7. Focused verification covers signature and delegation contracts, custom strategies, every true and mixed precision dtype, CPU and MPS construction and fit, the standard initializer family, composite PyTorch modules, random-state preservation, state loading, two-process fork execution, compilation, comment preservation, and zero targeted type errors without invoking a linter.
-    8. Meta-device and sharded parameter initialization remain future FSDP or model-parallel strategy responsibilities.
-
-| Architecture Decision | Signal Lifecycle and Last-Batch Truth | Date: 19 August 2026 | Time: 07:42 PM | Name: Ghost |
-
-    1. `Trainer.received_sigterm` now reports process-lifecycle signal state, and a received termination request becomes `SIGTERMException` with the conventional exit status `143` at a safe Trainer boundary rather than raising asynchronously inside arbitrary user code.
-    2. Signal registration is main-thread-safe, nesting-safe, pickle-safe, composes an existing callable `SIGTERM` handler, restores that exact handler when SyntheticMind still owns the process registration, and retains receipt state for post-stage inspection until the next stage begins.
-    3. A first local termination request propagates to active subprocess, spawn, fork, or forkserver workers. Worker termination state transfers back to a dormant multiprocessing parent, and signal exits are distinguished from ordinary worker crashes during peer cleanup and exception translation.
-    4. Distributed receipt uses logical-OR agreement at boundaries reached by every rank. Prediction deliberately avoids per-batch collectives because the unrepeated distributed sampler may produce unequal batch counts; one common end-of-stage agreement preserves termination without deadlocking the shorter rank.
-    5. A private data fetcher supplies one-batch lookahead for unsized iterables and trusts the resolved horizon for sized loaders. Finite limits never consume an additional source batch, while exhaustion is known before the final unsized batch enters its hooks and step path.
-    6. `Trainer.is_last_batch` is true during the final training batch, including an early exit requested by `on_train_batch_start`, and remains inspectable after fit. The state drives final gradient synchronization, accumulation closure, and validation scheduling instead of acting as a cosmetic alias.
-    7. Multiprocessing reconciliation transfers signal receipt and final-batch state together with existing Trainer progress, preserving the same public inspection result in both worker-owned and parent-owned execution models.
-    8. Focused verification covers sized, unsized, empty, limited, accumulated, early-exit, validation, and checkpoint-continuation paths; every public stage; real `SIGTERM`; callable-handler restoration; CPU and MPS; external two-rank Gloo; unequal-rank prediction; and local fork, spawn, and subprocess launch without invoking a linter.
-    9. Scheduler-specific requeue behavior remains a future cluster-environment integration.
-
-| Architecture Decision | Standard Multiple-Dataloader Execution | Date: 19 August 2026 | Time: 08:40 PM | Name: Ghost |
-
-    1. SyntheticMind now owns a public `CombinedLoader` with the established `min_size`, `max_size_cycle`, `max_size`, and `sequential` modes, nested collection preservation, per-iterable limits, sampler inspection, worker-safe reset, pickling, and stateful-loader delegation.
-    2. Ordinary training loader collections default to `max_size_cycle`; validation, testing, and prediction collections default to `sequential`; an explicitly supplied `CombinedLoader` retains its selected mode, while prediction rejects non-sequential modes because output ownership would be ambiguous.
-    3. The standard Trainer inspection boundary consists of singular `train_dataloader`, plural `val_dataloaders`, `test_dataloaders`, and `predict_dataloaders`, plus per-loader evaluation batch counts and list-shaped validation and test results.
-    4. Evaluation and prediction pass `dataloader_idx` only for multiple loaders in sequential mode, preserve the standard default-value requirement for single loaders, support positional varargs, reset `batch_idx` per loader, and always give transfer hooks the actual loader index.
-    5. Metrics logged from sequential evaluation loaders receive the standard `/dataloader_idx_N` suffix by default, may disable automatic suffixing through `add_dataloader_idx`, and retain separate accumulation, logger, callback, and progress routing per loader.
-    6. Distributed processing replaces samplers for every eligible loader leaf, preserves unrepeated prediction partitions, synchronizes equal-length evaluation metrics, and returns retained predictions only for local or subprocess execution unless the caller requests otherwise.
-    7. Simultaneous-mode limits define the combined epoch horizon without truncating each child iterator independently; sequential-mode limits remain per-loader ceilings. This distinction is required for parity with the pinned reference and prevents silent sample-order drift.
-    8. Stateful loader methods are exposed by `CombinedLoader`, but Trainer checkpoint integration remains a separate unresolved capability because cursor restoration cannot be combined with the current deterministic prefix-replay algorithm without proving that completed batches are not skipped twice.
-
-| Architecture Decision | Standard Trainer Data Attachment | Date: 19 August 2026 | Time: 08:58 PM | Name: Ghost |
-
-    1. `Trainer.fit`, `validate`, `test`, and `predict` now preserve the pinned public parameter names, order, defaults, optional model reuse, positional `DataModule` compatibility, and direct dataloader arguments without introducing a SyntheticMind-specific data vocabulary.
-    2. Every stage selects exactly one data owner in the order direct dataloader argument, attached `DataModule`, or established model dataloader hook. Supplying direct loaders together with a datamodule fails before execution rather than selecting one source silently.
-    3. Model preparation and model or datamodule setup complete before model-owned dataloader hooks execute. `Trainer.datamodule` remains truthfully optional instead of manufacturing an adapter object that would distort inheritance, checkpoint, hook, and hyperparameter identity.
-    4. The distributed launcher transports direct loader collections explicitly and restores optional datamodule state only when a real datamodule exists. Fork, spawn, subprocess, and external process ownership therefore retain the same public attachment semantics.
-    5. Batch conversion and transfer now complete before batch-start hooks and step-argument construction in training, evaluation, and prediction. The former order passed CPU tensors to an MPS model and exposed pre-transfer batches through inherited hooks.
-    6. Focused verification covers exact signatures, source conflicts, direct and model-owned loaders, nested collections, model reuse, datamodule compatibility, setup order, transfer-hook precedence, full and weights-only checkpoint paths, exception teardown, CPU, MPS, fork, spawn, and subprocess execution.
-    7. Python compilation, diff validation, and targeted Pyright inspection pass without invoking Ruff or another linter. The accepted `verbose` parameter does not yet alter result presentation, and omitted-model checkpoint selection remains subject to the later checkpoint-selection audit.
-
-| Architecture Decision | Stateful Dataloader Checkpoint Continuation | Date: 19 August 2026 | Time: 09:21 PM | Name: Ghost |
-
-    1. Training checkpoints persist stateful loader cursors under the established `loops.fit_loop.state_dict.combined_loader` checkpoint path and reject malformed state or loader-count drift with an explicit diagnostic.
-    2. A restored cursor owns physical data position, while checkpoint progress owns the logical `batch_idx`, accumulation, and validation coordinates. Deterministic prefix replay remains the fallback only when no stateful loader state exists, preventing the completed prefix from being skipped twice.
-    3. Mixed collections retain the pinned behavior: stateful leaves continue from their saved cursor and stateless leaves restart, while the remaining combined horizon and logical batch indices continue from checkpoint progress.
-    4. Unsized-loader lookahead snapshots the cursor after the batch returned to the loop but before the next prefetch. Checkpoints therefore cannot lose an unseen prefetched batch, and an exception on the first batch can restore the initial cursor.
-    5. Sampler injection now reconstructs the concrete dataloader subclass and its available constructor state rather than replacing a `StatefulDataLoader` or compatible subclass with a plain PyTorch `DataLoader` during distributed or overfit preparation.
-    6. Premature step-limited completion retains the last rank-zero loader state across Trainer teardown and multiprocessing parent reconciliation. Natural epoch exhaustion clears that state so a completed cursor is not loaded into the next epoch.
-    7. NumPy random state now uses a tensor-backed, restricted-unpickler-safe checkpoint representation while legacy ndarray state remains readable. Full checkpoints with standard state can therefore load through `weights_only=True` without surrendering exact Python, NumPy, and torch random continuation.
-    8. Focused verification covers custom and TorchData `0.11.0` stateful loaders, stateless fallback, mixed and cycling collections, empty and unsized streams, failure checkpoints, full and weights-only loading, stochastic worker datasets, subtype reconstruction, CPU, MPS, fork, spawn, subprocess, and external two-rank Gloo execution.
-    9. Python compilation, diff validation, source-comment preservation, and targeted Pyright inspection pass without invoking Ruff or another linter.
-
-| Architecture Decision | Trainer Checkpoint Path Contract | Date: 19 August 2026 | Time: 09:33 PM | Name: Ghost |
-
-    1. The pinned Trainer surface audit found no absent universal public name: accelerator, strategy, optimizers, and learning-rate scheduler configurations already exist as public SyntheticMind attributes, while `lightning_module`, model registry, and integration suggestions are vendor-owned concepts and remain excluded.
-    2. A stage call with an explicitly supplied model and `ckpt_path=None` now uses that model's current weights. A validation, test, or prediction call that omits the model defaults to the first ModelCheckpoint callback's best saved path and reports that selection through a warning.
-    3. The public `trainer.ckpt_path` property now has stateful ownership. Its value controls subsequent stage calls until explicitly reset, while an explicit stage-level `ckpt_path` has higher precedence and reports the override.
-    4. `ckpt_path='best'` uses the first ModelCheckpoint callback deterministically and diagnoses missing best state. `ckpt_path='last'` selects the newest available last checkpoint and degrades to a warning with current weights when no candidate exists.
-    5. Checkpoint selection occurs before process launch so omitted-model intent and stateful property ownership survive spawn and subprocess boundaries without adding private parameters to the public stage signatures.
-    6. Focused verification covers best and last weights, explicit and omitted models, stateful and overridden paths, constructor-level resume precedence, validation, test, prediction, CPU, MPS, spawn DDP, subprocess DDP, stateful-loader continuation, and direct multiple-dataloader regressions.
-    7. Registry and HPC checkpoint aliases remain explicitly unavailable because their corresponding product integrations are outside current scope.
-
-| Architecture Decision | Minimal Evaluation Result Rendering | Date: 19 August 2026 | Time: 09:38 PM | Name: Ghost |
-
-    1. The established `verbose` parameter now controls complete standalone validation and test result rendering. `verbose=False` suppresses the result record, while fit-owned validation and sanity checking remain silent because they do not enter the standalone stage boundary.
-    2. SyntheticMind renders one formal record per dataloader through its existing ConsoleRenderer: a stage label followed by deterministically ordered metric-value pairs. Multiple loaders use positional identity without exposing automatic metric suffixes in the display.
-    3. The renderer uses no table borders, color dependency, animation, or dense runtime telemetry. Numeric formatting is shared with the progress system, including concise finite values, scientific notation, and explicit non-finite values.
-    4. Records wrap to terminal width without dropping fields or introducing ellipsis. Non-interactive execution retains the same bounded, plain-text output for logs, captured streams, subprocesses, and continuous-integration systems.
-    5. Rank zero exclusively owns rendering. Parent-side and worker-side execution therefore produce one result record under single-device, spawn, and subprocess strategies without altering returned metric mappings.
-    6. When the progress callback is active, its standalone completion line omits duplicate metrics under `verbose=True`; the subsequent result record owns complete metric presentation while the completion line retains stage duration.
-    7. Focused verification covers deterministic order, silent and empty output, multiple dataloaders, suffix removal, long names, terminal wrapping, finite and non-finite values, progress de-duplication, fit and sanity silence, CPU, MPS, spawn, and subprocess execution.
-
-| Architecture Decision | Standard Trainer Metric Inspection State | Date: 19 August 2026 | Time: 09:51 PM | Name: Ghost |
-
-    1. `Trainer.logged_metrics` is now an independent standard inspection surface containing only metrics configured for experiment logging. It no longer aliases validation epoch results, include `logger=False` values, omit training and testing values, or retain a stale prior stage.
-    2. Every public stage clears its run-local logged state. Fit retains logger-visible training and scheduled-validation values, standalone validation and testing replace prior-stage values, prediction remains empty, and sanity validation is discarded before real training.
-    3. Batch-end callbacks and module hooks observe the current step metric state at the established lifecycle boundary. Training step metrics enter callback, logged, and progress mappings according to routing flags; evaluation step metrics enter logged and progress mappings but do not become callback-monitoring values before epoch reduction.
-    4. Multiple evaluation dataloaders retain the standard `/dataloader_idx_N` identity. Public metric mappings are defensive copies, and logger availability does not change whether a `logger=True` metric is inspectable.
-    5. Each buffered metric computes its scalar and optional distributed mean once. Hook inspection, loop accumulation, experiment dispatch, and terminal presentation reuse that cached value, preventing duplicate collectives and rank-local progress output.
-    6. Multiprocessing launch transfers logged metric state back to the parent. `ConsoleRenderer` now serializes without its process-local terminal stream, so the default progress callback remains usable under spawn, and the renderer consumes synchronized rather than rank-local metric values.
-    7. Focused verification covers callback and module batch-end inspection, stage replacement, sanity isolation, hidden metrics, multiple dataloaders, defensive snapshots, CPU, MPS, subprocess, spawn, fork, notebook-fork, synchronized two-rank progress rendering, compilation, and targeted type inspection without invoking a linter.
-
-| Architecture Decision | Standard Module Logging API and Reduction Contract | Date: 19 August 2026 | Time: 10:21 PM | Name: Ghost |
-
-    1. `Module.log` and `log_dict` now expose the established machine-learning parameter vocabulary directly: `prog_bar`, `logger`, `on_step`, `on_epoch`, `reduce_fx`, `enable_graph`, `sync_dist`, `sync_dist_group`, `add_dataloader_idx`, `batch_size`, `metric_attribute`, and `rank_zero_only` retain their standard names, order, defaults, and meanings.
-    2. Numeric values require one scalar element, accepted reductions are mean, sum, min, and max with the standard average alias and callable forms, and contradictory or non-publishing definitions fail at the logging boundary rather than during later presentation.
-    3. Calls routed to both scopes publish distinct `_step` and `_epoch` names while callback monitoring retains the unsuffixed base name. Storage identity includes the originating hook and applicable dataloader identity, preventing unrelated inherited hooks or sequential dataloaders from corrupting one another.
-    4. Epoch means infer and apply the active batch size, explicit batch sizes may vary across batches, and distributed means synchronize numerator and denominator rather than averaging already averaged rank values. Sum, minimum, and maximum use their corresponding collective operations and honor an explicit process group.
-    5. TorchMetrics `Metric` and `MetricCollection` values are supported through registered module attributes, preserve their own state and synchronization semantics, and reset at the completed reduction boundary. TorchMetrics loading is lazy so ordinary scalar logging does not initialize unrelated optional runtime systems before process creation.
-    6. The hook contract now permits the established backward, optimizer-step, gradient-clipping, and optimizer-zero-gradient extension points while continuing to reject prediction, scheduling, configuration, checkpoint, transfer, and exception contexts that do not support module logging.
-    7. Logger, callback, progress, evaluation-result, and checkpoint-monitor routes are independently resolved. Evaluation results contain logger-routed epoch values, evaluation step values never become callback monitors, and epoch-only metrics do not leak into live progress or step-cadence checkpoint selection.
-    8. Verification covers scalar validation, variable batch weighting, duplicate metadata, detached modules, logger defaults, graph retention in the logging buffer, TorchMetrics, optimization-hook inheritance, CPU, MPS, subprocess DDP, spawn, fork, notebook-fork, rank-zero-only calls, multiple dataloaders, every distributed reduction, checkpoint selection, compilation checks available under Python 3.14, source-comment preservation, and targeted type inspection without a linter.
-
-| Architecture Decision | Tensor Metric State and Scalar Boundaries | Date: 19 August 2026 | Time: 10:39 PM | Name: Ghost |
-
-    1. `Trainer.callback_metrics` and `Trainer.logged_metrics` now expose scalar tensors with their resolved dtype, execution device, and graph state, matching the established metric-inspection contract instead of prematurely converting framework state into Python floats.
-    2. `enable_graph=True` governs cached step computation and epoch accumulation as well as initial buffering. Reduction explicitly restores gradient recording when an enclosing evaluation context disabled it, while the default path remains detached and executes without constructing autograd state.
-    3. Python scalar conversion occurs only at boundaries that require it: experiment logger backends, terminal progress presentation, and the public validation and test result records.
-    4. Early stopping now retains a tensor best score, plateau schedulers receive the monitored tensor, and checkpoint selection receives detached CPU candidates so control and persistence state cannot retain a live training graph.
-    5. Spawn and fork parent reconciliation returns detached CPU tensors because an autograd graph cannot cross process ownership safely. Live workers and subprocess execution retain graphful values through callback and logged inspection when explicitly requested.
-    6. CPU, MPS, distributed reductions, subprocess DDP, spawn, fork, multiple dataloaders, TorchMetrics, checkpoint selection, early stopping, plateau scheduling, logger conversion, compilation, and targeted type inspection establish the implemented boundary without a linter.
-
-| Architecture Decision | Model-Owned Callback Configuration | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
-
-    1. The remaining pinned `Module` audit identified `configure_callbacks` as the earliest missing universal extension contract. Logger access, rank-safe printing, collective gathering, loading, and export utilities remain later boundaries; Fabric and Lightning-branded identities remain excluded.
-    2. `Module.configure_callbacks()` now accepts one `Callback` or a callback sequence and is invoked once per user stage before callback setup, checkpoint restoration, and stage execution.
-    3. Model callbacks extend Trainer callbacks, replace matching trainer callback classes when the model type is the same or a subclass, remain stable across repeated stages, and place every `Checkpoint` callback last.
-    4. Callback configuration is transactional: invalid returns and duplicate state keys fail before mutating the active callback collection, and logging from the configuration hook is rejected through the standard hook contract.
-    5. Trainer attachment now propagates recursively through nested SyntheticMind modules. Module serialization removes the Trainer back-reference, preserving spawn safety without weakening the live inheritance contract.
-    6. Parent-side configuration and a stage-scoped invocation guard keep callback composition identical across subprocess, spawn, and fork execution while preventing duplicate hook calls during launcher re-entry.
-    7. Focused CPU, MPS, checkpoint, repeated-stage, failure, serialization, subprocess, spawn, and fork verification passes together with compilation, diff validation, source-comment preservation, and targeted type inspection without invoking a linter.
-
-| Architecture Decision | Standard Model Runtime Access | Date: 19 August 2026 | Time: 11:01 PM | Name: Ghost |
-
-    1. `Module.loggers` now exposes the attached Trainer's ordered logger collection and returns an empty collection while detached; the singular `Module.logger` continues to expose the first logger or `None`.
-    2. `Module.print` preserves Python's standard `args`, `sep`, `end`, `file`, and `flush` meanings while emitting exclusively from global rank zero. The separate `Trainer.print` contract remains local-rank-zero output on each node.
-    3. An enabled progress callback owns model output routing so inherited progress implementations may preserve their display. SyntheticMind's callback clears an active terminal line before user output, while a disabled or absent callback delegates directly to Python printing.
-    4. The runtime contract remains inheritance-safe: custom progress callbacks receive the complete print call, logger order and identity remain Trainer-owned, and detached printing fails because no global-rank authority exists.
-    5. Focused verification covers detached and attached access, multiple loggers, exact signatures and keyword behavior, custom and disabled progress callbacks, active interactive rendering, redirected output, CPU, MPS, and global-rank suppression under subprocess, spawn, and fork DDP.
-    6. Compilation, diff validation, source-comment preservation, and targeted type inspection pass without invoking a linter; the existing unrelated `Module` type-checking baseline remains unchanged.
-    7. The next dependency-ordered boundary was completed through the independent collective contract recorded below.
-
-| Architecture Decision | Standard Model Collective Gathering | Date: 19 August 2026 | Time: 11:16 PM | Name: Ghost |
-
-    1. `Module.all_gather(data, group=None, sync_grads=False)` now preserves the established public names, order, defaults, inheritance surface, and nested tensor-collection meaning without adopting Lightning-owned identities or internal architecture.
-    2. Tensor, NumPy array, boolean, integer, and floating-point inputs move to the model device with established collective-compatible dtypes, while nested dictionaries, lists, tuples, and named tuples retain their structure.
-    3. Single-device execution returns each tensor without an artificial leading dimension. Distributed execution adds a leading dimension equal to the selected process-group size and preserves exact rank order.
-    4. Default gathering returns graph-free distributed results, while `sync_grads=True` uses PyTorch's differentiable collective so backward propagation accumulates contributions across participating ranks.
-    5. Process-group selection is owned by the Strategy boundary. Every supported stage initializes the distributed environment before model setup hooks, and callers remain responsible for entering the collective on every participating rank with equal tensor shapes.
-    6. Focused verification covers detached failure, scalar and nested conversion, named tuples, non-contiguous and empty tensors, single-device CPU and MPS, explicit subgroups, synchronized gradients, subprocess, spawn, fork, and direct two-rank Gloo execution.
-    7. Direct `code-guidelines.md` review, Python compilation, signature and inheritance inspection, exception probes, and diff review pass. No linter or static type checker was invoked after the governing prohibition.
-    8. The next dependency-ordered universal model capability is standard checkpoint-based class loading; device-mesh and export surfaces remain separate later phases.
+| Strategic Direction | SyntheticMind Harness Hardening | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. SyntheticMind is Rahul's private machine-learning harness for FAU study, independent research, experimentation, and direct end-to-end control of machine-learning workflows.
+    2. The harness is intentionally incomplete and must not be represented as production-ready, release-ready, or capability-complete.
+    3. The active objective is full user-facing capability parity with core PyTorch Lightning while retaining an independent SyntheticMind architecture.
+    4. Fabric, public documentation, release machinery, promotional work, and replication of the upstream PyTorch Lightning test suite are excluded.
+    5. Code behavior, inherited extension compatibility, failure handling, and proportionate executable verification control the work queue.
+    6. Existing source comments remain untouched, and new source-code comments remain prohibited until Rahul explicitly changes that constraint.
+
+| Architecture Decision | Public Terminology and Framework Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. Established machine-learning and PyTorch terminology is a public compatibility boundary. Standard concepts retain their recognized names, parameter names, defaults, meanings, and lifecycle effects.
+    2. Public base classes are inheritance contracts. Method-resolution order, cooperative initialization, overridable names, signatures, invocation frequency, return meanings, and state transitions require executable preservation.
+    3. PyTorch Lightning is the pinned capability and behavior reference, not a namespace, product identity, implementation template, or source of vendor branding for SyntheticMind.
+    4. New public terms are prohibited when they merely rename an established concept. Project-specific terminology requires genuinely different semantics enforced by implementation and verification.
+    5. `LightningOptimizer` is vendor-owned wrapper terminology rather than an optimizer algorithm. SyntheticMind exposes `SyntheticOptimizer` for its managed adapter while the underlying algorithm remains `torch.optim.Optimizer`.
+    6. Callback parameters use the SyntheticMind-owned name `module`; Lightning-branded `pl_module`, `use_pl_optimizer`, and equivalent copied identifiers remain prohibited.
+    7. Internal architecture follows `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md` without blindly reproducing Lightning internals.
+
+| Repository Policy | Private Development and Reference Boundaries | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. The GitHub repository is private, `origin` is canonical, `main` is the stable baseline, and active implementation occurs on `dev`.
+    2. Every completed development phase must be committed locally, pushed to `origin/dev`, and verified to leave local `dev` and `origin/dev` at the same commit.
+    3. Promotion to `main` requires an explicit stabilization decision; ordinary hardening commits do not enter `main` automatically.
+    4. The complete `docs/` tree is ignored. The pinned PyTorch Lightning checkout under `docs/references/code/pytorch_lightning/pytorch-lightning` remains read-only comparative evidence.
+    5. Additional source references may be cloned only into ignored `external/` when they answer a concrete unresolved engineering question.
+    6. The four ledgers contain current direction, durable decisions, reusable knowledge, and live progress. Git commits, diffs, and logs are the authoritative chronology.
+
+| Execution Doctrine | Sequential Capability Reconstruction | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. Hardening proceeds in dependency order from source-backed contracts through foundational state, lifecycle, execution, and higher-level capabilities.
+    2. Each subsystem is traced end to end before modification, including public surfaces, inherited hooks, data flow, state ownership, failure paths, and interactions with completed layers.
+    3. A phase is complete only after implementation, focused runtime evidence, failure probes, source and diff review, Python compilation, ledger maintenance, commit, push, and branch synchronization.
+    4. Uncertainty triggers inspection of SyntheticMind, the pinned reference, installed runtime behavior, repository history, official primary sources, and carefully selected external implementations as needed.
+    5. Placeholders, unused compatibility parameters, speculative interfaces, copied framework baggage, and surface-only parity claims are prohibited.
+    6. Python packages may be installed with `python -m pip install --break-system-packages` when a verified dependency gap requires them and the existing environment has been inspected first.
+
+| Verification Policy | Executable Evidence Without Static Analysis | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. `ruff`, `mypy`, `pyright`, every other linter, and every static type checker are prohibited and must not be invoked.
+    2. `code-guidelines.md` compliance is established through deliberate direct source review rather than automated style or type analysis.
+    3. Capability claims require focused runtime assertions, end-to-end execution, exception probes, signature and method-resolution inspection, source comparison, Python compilation, and diff validation where relevant.
+    4. CPU, MPS, distributed, subprocess, spawn, fork, notebook, persistence, and optional-dependency paths are exercised in proportion to the capability's real execution surface.
+    5. Historical references to static-analysis evidence describe work performed before the prohibition and do not authorize any future invocation.
+
+| Architecture State | Hardened Trainer Runtime Foundation | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. ✅ Standard fit, validation, test, and prediction lifecycles preserve hook order, nested execution context, model modes, stage state, failure causality, and transactional teardown.
+    2. ✅ Epoch, optimizer-step, validation-cadence, batch-limit, sanity, wall-clock, fast-development, overfit, stop, reload, and unsized-loader controls use established public meanings.
+    3. ✅ CPU, CUDA, MPS, device parsing, node topology, distributed sampler ownership, subprocess, spawn, fork, notebook-fork, signal coordination, and parent-state reconciliation form one execution layer.
+    4. ✅ Precision, inference mode, gradient enablement, deterministic execution, anomaly detection, clipping, accumulation, automatic optimization, manual optimization, scheduler cadence, and optimizer-state placement are executable.
+    5. ✅ Logger orchestration, checkpoint callbacks and paths, profiling, model summaries, barebones mode, plugin composition, artifact roots, remote filesystems, and asynchronous checkpoint I/O retain independent ownership.
+    6. ✅ The terminal renderer uses minimal rank-zero output, honest stage timing, one active status line, bounded selected metrics, stable redirected text, and no dense telemetry dump.
+
+| Architecture State | Hardened Data, Metrics, and Continuation | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. ✅ Model-owned, datamodule-owned, and direct Trainer dataloaders share explicit ownership without fabricated adapters or identity loss.
+    2. ✅ Multiple and nested loaders use standard combination modes, loader indices, metric suffixes, batch limits, prediction ordering, transfer hooks, and distributed sharding.
+    3. ✅ Stateful and stateless loader continuation preserves logical progress, cursor ownership, random streams, unsized prefetch boundaries, subclass reconstruction, and distributed parent reconciliation.
+    4. ✅ `Module.log` and `log_dict` preserve standard parameter vocabulary, scalar validation, step and epoch routing, weighted reductions, distributed process groups, TorchMetrics ownership, and multiple-dataloader identity.
+    5. ✅ Callback, logged, progress, logger, evaluation-result, scheduler, early-stopping, and checkpoint-monitor metric consumers retain distinct routing and tensor-versus-scalar boundaries.
+    6. ✅ Tensor metric state preserves dtype, device, detachment, explicit graph propagation, safe persistence, and safe multiprocessing transfer.
+
+| Architecture State | Hardened Model Extension Surface | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. ✅ `ModelHooks`, `DataHooks`, `CheckpointHooks`, and Callback method families preserve the pinned extension names, positional shapes, defaults, and dispatch points under SyntheticMind ownership.
+    2. ✅ `configure_callbacks` composes model callbacks transactionally before setup and checkpoint restoration with inheritance-based replacement, stable ordering, and launcher-safe invocation.
+    3. ✅ `Module.loggers` exposes ordered logger ownership, and `Module.print` retains Python print semantics with globally rank-safe, progress-compatible output.
+    4. ✅ `Module.all_gather(data, group=None, sync_grads=False)` preserves nested structures, device conversion, world-size-one identity, subgroup rank order, and optional differentiable gathering.
+    5. ✅ `Module.load_from_checkpoint` reconstructs subclasses from saved or external hyperparameters, applies explicit overrides, honors map location and strictness, runs configuration and load hooks before state application, and restores the mapped device.
+    6. ✅ Live Trainer checkpoint restoration shares the model classmethod's hook order and strictness meanings while retaining complete optimizer, scheduler, callback, datamodule, precision, loop, loader, and random state.
+
+| Architecture Decision | Checkpoint Construction Security and Compatibility | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. Saved constructor hyperparameters, historical SyntheticMind keys, YAML or CSV replacement files, and explicit keyword overrides follow deterministic precedence.
+    2. Unknown saved values are filtered when a subclass has no arbitrary keyword parameter, while wrapper-style `hparams` constructors receive overrides within their wrapped mapping.
+    3. Local, remote-filesystem, and seekable binary checkpoint sources are supported with PyTorch-compatible explicit map-location forms and automatic unavailable-accelerator fallback to CPU.
+    4. `configure_model` executes before `on_load_checkpoint`, and the load hook executes before `load_state_dict`, allowing deferred layers and payload mutation to participate correctly.
+    5. Explicit model `strict_loading` and call-level `strict` settings are consistent across class reconstruction and Trainer restoration; conflicts fail and relaxed key differences remain visible.
+    6. Checkpoint-controlled external instantiators are rejected because CLI integration code does not own SyntheticMind model construction and arbitrary import paths are executable behavior.
+    7. Three focused checkpoint services separate payload I/O, hyperparameter reconstruction, and model restoration without copied Lightning internals or new source comments.
+    8. Manual, Trainer-produced, CPU, MPS, unavailable-device, subprocess, spawn, fork, stateful-continuation, and direct two-rank Gloo evidence establishes the current contract without static-analysis tools.
+
+| Active Next Step | Remaining Module Surface Audit | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+
+    1. Recompute the unresolved pinned `Module` public surface after checkpoint reconstruction.
+    2. Classify legacy device conveniences, device-mesh ownership, TorchScript, ONNX, and TensorRT export by universality, runtime dependency, and inheritance impact.
+    3. Select and complete the earliest coherent capability rather than grouping unrelated exports or inserting model-parallel behavior before its Strategy dependency exists.
+    4. Preserve the active exclusions and verification policy throughout the next phase.

@@ -2793,6 +2793,13 @@ class Trainer:
             if checkpoint is None
             else checkpoint
         )
+        self._call_module_hook(
+            module,
+            "on_load_checkpoint",
+            module.on_load_checkpoint,
+            loaded_checkpoint
+        )
+        self._call_callback_hooks(module, "on_load_checkpoint", loaded_checkpoint)
         self.precision_plugin.on_load_checkpoint(loaded_checkpoint)
         epoch: int
         global_step: int
@@ -2808,7 +2815,8 @@ class Trainer:
             callbacks=self.callbacks,
             datamodule=self.datamodule,
             precision_plugin=self.precision_plugin,
-            restore_datamodule_state=restore_datamodule_state
+            restore_datamodule_state=restore_datamodule_state,
+            strict=module.strict_loading
         )
         combined_loader_states: list[dict[str, object]] = (
             CheckpointState.combined_loader_states(loaded_checkpoint)
@@ -2852,14 +2860,6 @@ class Trainer:
                     CheckpointDict,
                     checkpoint_rng_state
                 )
-        if hasattr(module, "on_load_checkpoint"):
-            self._call_module_hook(
-                module,
-                "on_load_checkpoint",
-                module.on_load_checkpoint,
-                loaded_checkpoint
-            )
-        self._call_callback_hooks(module, "on_load_checkpoint", loaded_checkpoint)
 
     def _select_checkpoint_path(
         self,
