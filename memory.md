@@ -381,3 +381,12 @@
     4. Logger and terminal consumers own scalar conversion, while validation and test return values remain ordinary floats. ModelCheckpoint and multiprocessing transfer own explicit detachment because persistence and cross-process transport cannot preserve a meaningful live graph.
     5. macOS process `fork` remains unsafe after a parent imports TorchMetrics and triggers Objective-C or MPS initialization. Lazy TorchMetrics discovery protects ordinary numeric fork execution, while TorchMetrics execution is verified through subprocess and spawn paths rather than falsely claiming the external fork limitation is solved.
     6. Tensor-valued monitoring remains compatible with EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, multiple dataloaders, Gloo reductions, MPS execution, custom loggers, and defensive mapping snapshots.
+
+| Memory | Model Callback Attachment Semantics | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
+
+    1. Model-owned callbacks must be composed before callback setup and checkpoint restoration or they exist in the public surface without participating in the lifecycle and persistence contracts they were created to extend.
+    2. Callback override precedence follows concrete inheritance: a model callback replaces trainer callbacks whose concrete class it matches or subclasses, while unrelated callbacks retain their order and checkpoint callbacks execute last.
+    3. Local process launch requires parent-side callback composition because multiprocessing state reconciliation pairs worker callback state with the dormant parent's callback objects. Worker-only composition creates structurally different callback collections.
+    4. Parent composition alone can invoke `configure_callbacks` twice when a launcher re-enters the public stage. A stage-scoped guard survives process serialization and preserves one user-hook invocation per process and stage.
+    5. Recursively assigning `Module.trainer` preserves nested SyntheticMind extension behavior. Removing that back-reference during serialization prevents the complete Trainer graph from being captured through an attached module.
+    6. Callback collection mutation must follow validation rather than precede it. Invalid items and duplicate state identities therefore leave the prior Trainer callback collection intact and permit a corrected retry.

@@ -100,7 +100,7 @@ class _WorkerStateTransfer:
         trainer.module = module
         trainer.strategy.model = module
         trainer.datamodule = datamodule
-        module._trainer = trainer
+        module.trainer = trainer
         if datamodule is not None:
             datamodule.trainer = trainer
         trainer.state.load_state_dict(worker_output.trainer_state_dict)

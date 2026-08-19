@@ -38,7 +38,7 @@ from __future__ import annotations
 import builtins
 import numbers
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, overload, override
 
@@ -47,6 +47,7 @@ import torch.distributed as dist
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 
+from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.hooks import DataHooks, MetricLoggingContract, ModelHooks
 from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.core.optimizer import (
@@ -443,6 +444,9 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         )
         return None
 
+    def configure_callbacks(self) -> Callback | Sequence[Callback]:
+        return []
+
     @torch.compiler.disable
     def log(
         self,
@@ -546,6 +550,18 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
                 )
                 self._logging_warning_keys.add(warning_key)
             return
+        current_fx_name: str | None = self._current_fx_name
+        if current_fx_name is None:
+            raise MisconfigurationError(
+                "self.log() must be called inside a trainer-managed hook or step method."
+            )
+        resolved_on_step: bool
+        resolved_on_epoch: bool
+        resolved_on_step, resolved_on_epoch = MetricLoggingContract.resolve(
+            hook_name=current_fx_name,
+            on_step=on_step,
+            on_epoch=on_epoch
+        )
         if self._running_stage is None:
             raise MisconfigurationError(
                 "self.log() can only be called from within a hook or step method "
@@ -561,18 +577,6 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
                 f"self.log() received metric name {name!r} containing "
                 "`/dataloader_idx_` while add_dataloader_idx=True."
             )
-        current_fx_name: str | None = self._current_fx_name
-        if current_fx_name is None:
-            raise MisconfigurationError(
-                "self.log() must be called inside a trainer-managed hook or step method."
-            )
-        resolved_on_step: bool
-        resolved_on_epoch: bool
-        resolved_on_step, resolved_on_epoch = MetricLoggingContract.resolve(
-            hook_name=current_fx_name,
-            on_step=on_step,
-            on_epoch=on_epoch
-        )
         if not resolved_on_step and not resolved_on_epoch:
             raise MisconfigurationError(
                 "self.log(on_step=False, on_epoch=False) does not publish a metric."
@@ -1210,6 +1214,13 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             raise RuntimeError("Module is not attached to a Trainer. Call trainer.fit(module, ...) first")
         return self._trainer
 
+    @trainer.setter
+    def trainer(self, trainer: Trainer | None) -> None:
+        for child in self.children():
+            if isinstance(child, Module):
+                child.trainer = trainer
+        self._trainer = trainer
+
     @property
     def example_input_array(self) -> torch.Tensor | tuple[object, ...] | dict[str, object] | None:
         # Optional example input registered by the model for tooling that
@@ -1313,6 +1324,12 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         # Copy of the current logging buffer; returned as a new dictionary so
         # loop-side draining and model-side inspection cannot interfere.
         return list(self._logged_metrics)
+
+    @override
+    def __getstate__(self) -> dict[str, object]:
+        state: dict[str, object] = dict(self.__dict__)
+        state["_trainer"] = None
+        return state
 
     def _reset_logged_metrics(self) -> None:
         # Clears the logging buffer; invoked by the loops after each dispatch

@@ -449,3 +449,13 @@
     5. Spawn and fork parent reconciliation returns detached CPU tensors because an autograd graph cannot cross process ownership safely. Live workers and subprocess execution retain graphful values through callback and logged inspection when explicitly requested.
     6. CPU, MPS, distributed reductions, subprocess DDP, spawn, fork, multiple dataloaders, TorchMetrics, checkpoint selection, early stopping, plateau scheduling, logger conversion, compilation, and targeted type inspection establish the implemented boundary without a linter.
     7. The next dependency-ordered phase is a complete pinned audit of the remaining universal `Module` public surface before selecting another implementation target.
+
+| Architecture Decision | Model-Owned Callback Configuration | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
+
+    1. The remaining pinned `Module` audit identified `configure_callbacks` as the earliest missing universal extension contract. Logger access, rank-safe printing, collective gathering, loading, and export utilities remain later boundaries; Fabric and Lightning-branded identities remain excluded.
+    2. `Module.configure_callbacks()` now accepts one `Callback` or a callback sequence and is invoked once per user stage before callback setup, checkpoint restoration, and stage execution.
+    3. Model callbacks extend Trainer callbacks, replace matching trainer callback classes when the model type is the same or a subclass, remain stable across repeated stages, and place every `Checkpoint` callback last.
+    4. Callback configuration is transactional: invalid returns and duplicate state keys fail before mutating the active callback collection, and logging from the configuration hook is rejected through the standard hook contract.
+    5. Trainer attachment now propagates recursively through nested SyntheticMind modules. Module serialization removes the Trainer back-reference, preserving spawn safety without weakening the live inheritance contract.
+    6. Parent-side configuration and a stage-scoped invocation guard keep callback composition identical across subprocess, spawn, and fork execution while preventing duplicate hook calls during launcher re-entry.
+    7. Focused CPU, MPS, checkpoint, repeated-stage, failure, serialization, subprocess, spawn, and fork verification passes together with compilation, diff validation, source-comment preservation, and targeted type inspection without invoking a linter.

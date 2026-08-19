@@ -211,8 +211,15 @@
     3. ✅ EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, multiprocessing reconciliation, multiple dataloaders, and TorchMetrics consume or transfer the tensor contract without retaining unsafe graphs in persistence state.
     4. ✅ Focused CPU, MPS, subprocess DDP, spawn, fork, distributed reduction, graph-gradient, checkpoint, scheduler, logger, compilation, diff, and targeted type checks pass without invoking a linter.
 
-| Progress Todo | Remaining Module Surface Audit | Date: 19 August 2026 | Time: 10:39 PM | Name: Ghost |
+| Progress Complete | Model-Owned Callback Configuration | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
 
-    1. Compare the complete public `Module` method and property surface with the pinned reference, including signatures, defaults, override behavior, runtime dispatch, and state ownership.
-    2. Exclude Fabric and Lightning-owned branding, classify universal machine-learning capabilities, and select the earliest unresolved dependency rather than adding an isolated alias.
-    3. Implement and verify the selected capability across applicable local, accelerator, checkpoint, and distributed paths before the next synchronized development checkpoint.
+    1. ✅ The complete pinned `Module` surface was classified by public meaning, framework ownership, runtime dependency, and extension importance; `configure_callbacks` was selected as the earliest unresolved universal capability.
+    2. ✅ Model callbacks now compose before setup across fit, validation, test, and prediction, preserve inheritance-based override precedence, remain idempotent across repeated stages, and keep checkpoint callbacks last.
+    3. ✅ Nested Trainer attachment, serialization-safe back-reference removal, transactional validation, hook-specific logging rejection, real ModelCheckpoint participation, and callback state restoration are implemented.
+    4. ✅ Focused CPU, MPS, subprocess DDP, spawn, fork, repeated-stage, invalid-return, duplicate-state, checkpoint, serialization, compilation, diff, and targeted type checks pass without invoking a linter.
+
+| Progress Todo | Module Runtime Access Surface | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
+
+    1. Audit and implement the next coherent standard `Module` runtime-access boundary, beginning with multiple logger access and rank-safe model printing against existing Trainer ownership.
+    2. Verify detached, single-device, MPS, progress-enabled, redirected-output, and distributed behavior before advancing to the separate collective `all_gather` contract.
+    3. Continue classifying loading, export, device-mesh, and legacy convenience surfaces by dependency and ownership rather than adding unrelated aliases together.

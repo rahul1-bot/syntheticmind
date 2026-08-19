@@ -301,3 +301,11 @@
     3. Monitoring callbacks and plateau schedulers consume tensors directly, while checkpoint and multiprocessing boundaries detach intentionally to prevent persistence or transport from owning a live autograd graph.
     4. Live CPU, MPS, subprocess, spawn, fork, Gloo, multiple-loader, TorchMetrics, checkpoint, and scheduler evidence establishes this boundary without using a linter.
     5. The next sequential action is a complete remaining `Module` surface audit against the pinned reference before another capability is adopted.
+
+| Strategic Note | Model-Owned Callback Extension | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
+
+    1. ✅ Models can now provide callbacks through the established `configure_callbacks` inheritance contract without changing Trainer construction or adopting Lightning-owned identity.
+    2. Model callbacks participate in setup, every public stage, checkpoint persistence, failure handling, and distributed state reconciliation with deterministic override and ordering semantics.
+    3. Nested SyntheticMind modules receive the same Trainer attachment, while serialization removes the live back-reference so spawn and ordinary model persistence remain bounded.
+    4. Invalid configuration is rejected transactionally, repeated stages do not accumulate duplicate callbacks, and launcher re-entry cannot execute the configuration hook twice in one stage.
+    5. The next dependency-ordered boundary is the standard model runtime access surface, followed separately by collective gathering and later loading or export capabilities.

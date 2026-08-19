@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from syntheticmind.core.module import Module
 from syntheticmind.utilities.types import (
     Batch,
     CheckpointDict,
@@ -42,6 +41,7 @@ from syntheticmind.utilities.types import (
 )
 
 if TYPE_CHECKING:
+    from syntheticmind.core.module import Module
     from syntheticmind.core.trainer import Trainer
 
 __all__: list[str] = ["Callback"]

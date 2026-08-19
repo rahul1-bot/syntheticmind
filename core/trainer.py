@@ -43,7 +43,7 @@ import inspect
 import math
 import os
 import warnings
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from pathlib import Path
@@ -823,6 +823,8 @@ class Trainer:
             if isinstance(callback, Checkpoint)
         ]
         self.callbacks = non_checkpoint_callbacks + checkpoint_callbacks
+        self._model_callbacks: list[Callback] = []
+        self._model_callback_configuration: tuple[TrainerStage, Module] | None = None
 
         self._loggers: list[Logger] = resolved_loggers
         self.profiler: Profiler = _resolve_profiler(profiler)
@@ -975,20 +977,25 @@ class Trainer:
             model_provided=True,
             ckpt_path_provided=ckpt_path is not None
         )
+        self._attach_model_callbacks(module, "fit")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
-            launcher.launch(
-                "fit",
-                self,
-                module,
-                datamodule,
-                {
-                    "train_dataloaders": train_dataloaders,
-                    "val_dataloaders": val_dataloaders,
-                    "ckpt_path": resume_path,
-                    "weights_only": weights_only
-                }
-            )
+            try:
+                launcher.launch(
+                    "fit",
+                    self,
+                    module,
+                    datamodule,
+                    {
+                        "train_dataloaders": train_dataloaders,
+                        "val_dataloaders": val_dataloaders,
+                        "ckpt_path": resume_path,
+                        "weights_only": weights_only
+                    }
+                )
+            finally:
+                self._clear_model_callback_configuration("fit")
+                self.state.finish()
             return
         # Clear every run-local surface before anything executes, so a second
         # fit call on the same trainer inherits no stop request, cached
@@ -1282,6 +1289,7 @@ class Trainer:
             self.state.finish()
             self._active_exception = None
             self._is_mid_epoch_validation = False
+            self._clear_model_callback_configuration("fit")
             if self.fit_loop.epoch_loop is not None:
                 self.fit_loop.epoch_loop.reset_on_teardown()
             if cleanup_exception is not None:
@@ -1330,23 +1338,28 @@ class Trainer:
             model_provided=model_provided,
             ckpt_path_provided=ckpt_path is not None
         )
+        self._attach_model_callbacks(module, "validate")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
-            return cast(
-                list[dict[str, float]],
-                launcher.launch(
-                    "validate",
-                    self,
-                    module,
-                    datamodule,
-                    {
-                        "dataloaders": dataloaders,
-                        "ckpt_path": selected_checkpoint_path,
-                        "verbose": verbose,
-                        "weights_only": weights_only
-                    }
+            try:
+                return cast(
+                    list[dict[str, float]],
+                    launcher.launch(
+                        "validate",
+                        self,
+                        module,
+                        datamodule,
+                        {
+                            "dataloaders": dataloaders,
+                            "ckpt_path": selected_checkpoint_path,
+                            "verbose": verbose,
+                            "weights_only": weights_only
+                        }
+                    )
                 )
-            )
+            finally:
+                self._clear_model_callback_configuration("validate")
+                self.state.finish()
         self.state.set_stage("validate")
         self._active_exception = None
         self._callback_metrics.clear()
@@ -1400,6 +1413,7 @@ class Trainer:
             module._current_fx_name = None
             self.state.finish()
             self._active_exception = None
+            self._clear_model_callback_configuration("validate")
             if cleanup_exception is not None:
                 raise cleanup_exception
 
@@ -1449,23 +1463,28 @@ class Trainer:
             model_provided=model_provided,
             ckpt_path_provided=ckpt_path is not None
         )
+        self._attach_model_callbacks(module, "test")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
-            return cast(
-                list[dict[str, float]],
-                launcher.launch(
-                    "test",
-                    self,
-                    module,
-                    datamodule,
-                    {
-                        "dataloaders": dataloaders,
-                        "ckpt_path": selected_checkpoint_path,
-                        "verbose": verbose,
-                        "weights_only": weights_only
-                    }
+            try:
+                return cast(
+                    list[dict[str, float]],
+                    launcher.launch(
+                        "test",
+                        self,
+                        module,
+                        datamodule,
+                        {
+                            "dataloaders": dataloaders,
+                            "ckpt_path": selected_checkpoint_path,
+                            "verbose": verbose,
+                            "weights_only": weights_only
+                        }
+                    )
                 )
-            )
+            finally:
+                self._clear_model_callback_configuration("test")
+                self.state.finish()
         self.state.set_stage("test")
         self._active_exception = None
         self._callback_metrics.clear()
@@ -1519,6 +1538,7 @@ class Trainer:
             module._current_fx_name = None
             self.state.finish()
             self._active_exception = None
+            self._clear_model_callback_configuration("test")
             if cleanup_exception is not None:
                 raise cleanup_exception
 
@@ -1573,23 +1593,28 @@ class Trainer:
             model_provided=model_provided,
             ckpt_path_provided=ckpt_path is not None
         )
+        self._attach_model_callbacks(module, "predict")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
-            return cast(
-                list[ModelOutput] | list[list[ModelOutput]] | None,
-                launcher.launch(
-                    "predict",
-                    self,
-                    module,
-                    datamodule,
-                    {
-                        "dataloaders": dataloaders,
-                        "return_predictions": return_predictions,
-                        "ckpt_path": selected_checkpoint_path,
-                        "weights_only": weights_only
-                    }
+            try:
+                return cast(
+                    list[ModelOutput] | list[list[ModelOutput]] | None,
+                    launcher.launch(
+                        "predict",
+                        self,
+                        module,
+                        datamodule,
+                        {
+                            "dataloaders": dataloaders,
+                            "return_predictions": return_predictions,
+                            "ckpt_path": selected_checkpoint_path,
+                            "weights_only": weights_only
+                        }
+                    )
                 )
-            )
+            finally:
+                self._clear_model_callback_configuration("predict")
+                self.state.finish()
         self.state.set_stage("predict")
         self._active_exception = None
         self._callback_metrics.clear()
@@ -1648,6 +1673,7 @@ class Trainer:
             module._current_fx_name = None
             self.state.finish()
             self._active_exception = None
+            self._clear_model_callback_configuration("predict")
             if cleanup_exception is not None:
                 raise cleanup_exception
 
@@ -1687,9 +1713,106 @@ class Trainer:
     ) -> None:
         self.module = module
         self.datamodule = datamodule
-        module._trainer = self
+        module.trainer = self
         if datamodule is not None:
             datamodule.trainer = self
+
+    def _attach_model_callbacks(
+        self,
+        module: Module,
+        stage: TrainerStage
+    ) -> None:
+        self.state.set_stage(stage)
+        try:
+            self.module = module
+            module.trainer = self
+            active_configuration = self._model_callback_configuration
+            if (
+                active_configuration is not None
+                and active_configuration[0] == stage
+                and active_configuration[1] is module
+            ):
+                return
+            self._model_callback_configuration = (stage, module)
+            configured_callbacks: object = self._call_module_hook(
+                module,
+                "configure_callbacks",
+                module.configure_callbacks
+            )
+            if configured_callbacks is None:
+                return
+            if isinstance(configured_callbacks, Callback):
+                raw_callbacks: list[object] = [configured_callbacks]
+            elif isinstance(configured_callbacks, Sequence):
+                raw_callbacks = list(configured_callbacks)
+            else:
+                raise TypeError(
+                    "configure_callbacks() must return a Callback, a sequence of Callback instances, or None."
+                )
+            if not all(isinstance(callback, Callback) for callback in raw_callbacks):
+                raise TypeError(
+                    "configure_callbacks() must return only Callback instances."
+                )
+            model_callbacks: list[Callback] = cast(
+                list[Callback],
+                raw_callbacks
+            )
+            if not model_callbacks:
+                return
+            previous_model_callback_ids: set[int] = {
+                id(callback) for callback in self._model_callbacks
+            }
+            trainer_callbacks: list[Callback] = [
+                callback
+                for callback in self.callbacks
+                if id(callback) not in previous_model_callback_ids
+            ]
+            model_callback_types: set[type[Callback]] = {
+                type(callback) for callback in model_callbacks
+            }
+            trainer_callback_types: set[type[Callback]] = {
+                type(callback) for callback in trainer_callbacks
+            }
+            trainer_callback_types.discard(Callback)
+            override_types: set[type[Callback]] = {
+                trainer_callback_type
+                for model_callback_type in model_callback_types
+                for trainer_callback_type in trainer_callback_types
+                if issubclass(model_callback_type, trainer_callback_type)
+            }
+            merged_callbacks: list[Callback] = [
+                callback
+                for callback in trainer_callbacks
+                if type(callback) not in override_types
+            ]
+            merged_callbacks.extend(model_callbacks)
+            merged_callbacks = self._reorder_callbacks(merged_callbacks)
+            self._validate_callback_state_keys(merged_callbacks)
+            self.callbacks = merged_callbacks
+            self._model_callbacks = model_callbacks
+        except BaseException:
+            self._model_callback_configuration = None
+            self.state.finish()
+            raise
+
+    def _clear_model_callback_configuration(self, stage: TrainerStage) -> None:
+        active_configuration = self._model_callback_configuration
+        if active_configuration is not None and active_configuration[0] == stage:
+            self._model_callback_configuration = None
+
+    @staticmethod
+    def _reorder_callbacks(callbacks: list[Callback]) -> list[Callback]:
+        regular_callbacks: list[Callback] = [
+            callback
+            for callback in callbacks
+            if not isinstance(callback, Checkpoint)
+        ]
+        checkpoint_callbacks: list[Callback] = [
+            callback
+            for callback in callbacks
+            if isinstance(callback, Checkpoint)
+        ]
+        return regular_callbacks + checkpoint_callbacks
 
     def _select_dataloader_source(
         self,
@@ -2220,7 +2343,7 @@ class Trainer:
         resolved_module: Module = converted_model
         if self._layer_sync_model is not None:
             self._layer_sync_model = resolved_module
-        resolved_module._trainer = self
+        resolved_module.trainer = self
         self.module = resolved_module
         self.profiler._attach_module(resolved_module)
         self._call_strategy_hook(
@@ -3201,7 +3324,7 @@ class Trainer:
             raise TypeError(
                 f"LayerSync.revert must return Module, got {type(reverted_model).__name__}."
             )
-        reverted_model._trainer = self
+        reverted_model.trainer = self
         self.module = reverted_model
         self.strategy.model = reverted_model
         self._layer_sync_model = None
@@ -3251,14 +3374,20 @@ class Trainer:
             description = f"{description}: {detail}"
         exception.add_note(f"{label} raised while handling the stage failure: {description}")
 
-    def _validate_callback_state_keys(self) -> None:
+    def _validate_callback_state_keys(
+        self,
+        callback_group: Iterable[Callback] | None = None
+    ) -> None:
         # Enforces state-key uniqueness across stateful callbacks before
         # fitting. Only callbacks that override the state methods participate,
         # so stateless callbacks of the same class may coexist freely, while
         # two stateful instances sharing a key would silently overwrite each
         # other inside checkpoints and are rejected instead.
         seen: dict[str, str] = {}
-        for cb in self.callbacks:
+        callbacks: Iterable[Callback] = (
+            self.callbacks if callback_group is None else callback_group
+        )
+        for cb in callbacks:
             if is_overridden("state_dict", cb, Callback) or is_overridden("load_state_dict", cb, Callback):
                 key: str = cb.state_key
                 if key in seen:
