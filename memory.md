@@ -390,3 +390,12 @@
     4. Parent composition alone can invoke `configure_callbacks` twice when a launcher re-enters the public stage. A stage-scoped guard survives process serialization and preserves one user-hook invocation per process and stage.
     5. Recursively assigning `Module.trainer` preserves nested SyntheticMind extension behavior. Removing that back-reference during serialization prevents the complete Trainer graph from being captured through an attached module.
     6. Callback collection mutation must follow validation rather than precede it. Invalid items and duplicate state identities therefore leave the prior Trainer callback collection intact and permit a corrected retry.
+
+| Memory | Model Runtime Access and Output Ownership | Date: 19 August 2026 | Time: 11:01 PM | Name: Ghost |
+
+    1. Model-level and Trainer-level rank-safe printing have intentionally different scopes. `Module.print` emits once for the distributed job through global rank zero, while `Trainer.print` emits once per node through local rank zero.
+    2. Progress-safe printing is an extension contract rather than terminal formatting embedded in the model. Routing through the configured progress callback allows a subclass to preserve its own display mechanics before ordinary Python output occurs.
+    3. Python print compatibility requires retaining `sep`, `end`, `file`, and `flush` exactly. A convenience wrapper that accepts only a message string would break file redirection, non-newline output, and inherited user code.
+    4. `Module.loggers` is a live reference to Trainer ownership, matching the singular first-logger view without duplicating or independently mutating logger configuration. Detached access returns a new empty collection because no logger owner exists.
+    5. Rank suppression must occur before progress callback dispatch and file output. Real two-rank launcher evidence confirmed that nonzero ranks create no output bytes even when every process executes the same inherited model hook.
+    6. The adjacent collective API is semantically independent from console access. `all_gather` requires explicit nested-structure and autograd ownership rather than being grouped into this completed accessor phase.

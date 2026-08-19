@@ -309,3 +309,11 @@
     3. Nested SyntheticMind modules receive the same Trainer attachment, while serialization removes the live back-reference so spawn and ordinary model persistence remain bounded.
     4. Invalid configuration is rejected transactionally, repeated stages do not accumulate duplicate callbacks, and launcher re-entry cannot execute the configuration hook twice in one stage.
     5. The next dependency-ordered boundary is the standard model runtime access surface, followed separately by collective gathering and later loading or export capabilities.
+
+| Strategic Note | Model Runtime Access Ownership | Date: 19 August 2026 | Time: 11:01 PM | Name: Ghost |
+
+    1. ✅ Models now inspect every configured experiment logger through the standard plural accessor while retaining the first-logger singular contract and truthful detached behavior.
+    2. ✅ Model printing is globally rank-safe, preserves Python's complete output semantics, and delegates display integrity to the configured progress callback rather than coupling model code to SyntheticMind's renderer internals.
+    3. The global model scope deliberately differs from Trainer's node-local printing scope; both meanings are established and verified rather than collapsed into one ambiguous helper.
+    4. CPU, MPS, redirected and interactive output, custom progress inheritance, and every supported two-process launcher establish the completed access boundary without a linter.
+    5. The next sequential capability is collective gathering through `Module.all_gather`; loading, export, device-mesh, and legacy conveniences remain later independent phases.

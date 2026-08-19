@@ -22,8 +22,9 @@
 
 from __future__ import annotations
 
+import builtins
 import time
-from typing import TYPE_CHECKING, override
+from typing import IO, TYPE_CHECKING, override
 
 import torch
 
@@ -105,6 +106,17 @@ class ProgressBarCallback(Callback):
     def enable(self) -> None:
         self._enabled = True
         self._rendering = self._rank_zero
+
+    def print(
+        self,
+        *args: object,
+        sep: str | None = " ",
+        end: str | None = "\n",
+        file: IO[str] | None = None,
+        flush: bool = False
+    ) -> None:
+        self._renderer.clear_live()
+        builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
 
     @override
     def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:

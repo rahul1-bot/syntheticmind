@@ -187,7 +187,6 @@
     4. Automatic strategy selection uses distributed data parallel whenever the topology spans multiple devices or nodes, including CPU execution. CPU distributed execution defaults to Gloo, CUDA defaults to NCCL, MPS rejects unsupported distributed configurations, and a non-distributed strategy cannot silently accept a distributed topology.
     5. `DDPStrategy` uses the established `process_group_backend` parameter and validates launcher rank values, required rendezvous variables, launched or pre-existing process-group world size, and local-rank device bounds before execution. Each process maps its local rank through the configured ordered device list rather than assuming that visible identifier order starts at zero.
     6. Focused evidence covers constructor signatures and invalid inputs, strategy-owned topology, mocked CUDA and MPS availability, explicit GPU identifier mapping, initialized and uninitialized process-group failures, real CPU and MPS single-device fits, and a real two-process CPU `torchrun` fit with synchronized parameters and correct per-rank progress.
-    7. This phase establishes topology configuration and externally launched distributed execution. Full user capability still requires a Trainer-owned local process launcher so `Trainer(devices>1)` can start the required worker processes without a manual `torchrun` command; that launcher is the next dependency before precision and higher distributed features.
 
 | Architecture Decision | Trainer-Owned Distributed Launch | Date: 19 August 2026 | Time: 02:17 PM | Name: Ghost |
 
@@ -231,7 +230,6 @@
     6. Fast development runs replace enabled logging with a no-operation logger so module integrations remain callable without creating artifacts; an explicitly disabled logger remains disabled. Logger finalization is best-effort across the complete collection, preserving the first failure while attaching later cleanup failures as diagnostic notes.
     7. CSV logger construction no longer creates its run directory, while the first real write or explicit `log_dir` access still materializes the destination. Malformed checkpoint callback state is narrowed safely instead of relying on invalid recursive-state coercion exposed by the touched logger telemetry path.
     8. Focused verification covers constructor defaults and invalid values, singleton callbacks, iterable loggers, property mutation, multiple-backend equality, zero cadence, default CSV all-stage persistence, lazy directories, fast-development suppression, teardown failures, CPU and MPS execution, Gloo and multiprocessing launch, Python compilation, comment preservation, and zero type-checking errors across every modified file without invoking a linter.
-    9. Default checkpoint callback composition is deliberately not claimed by this phase. The next dependency-ordered boundary is the standard `enable_checkpointing` contract and its interaction with `default_root_dir`, user-provided checkpoint callbacks, resume behavior, and fast-development suppression.
 
 | Architecture Decision | Standard Checkpoint Orchestration | Date: 19 August 2026 | Time: 04:11 PM | Name: Ghost |
 
@@ -243,7 +241,7 @@
     6. Distributed checkpoint decisions execute on every rank so callback state remains identical, while rank zero alone mutates the filesystem. Generic strategy object broadcasting, synchronized existence checks, all-rank state construction, barriers, and parent-state recovery were verified through fork, spawn, and external two-process Gloo execution.
     7. Verification also exposed asynchronous MPS host transfer as a data-corruption path. Nonblocking recursive transfer is now restricted to CUDA, and finite MPS training, checkpoint creation, best and last restoration, weights-only restoration, validation, testing, and prediction execute correctly.
     8. Signature and public-method comparison against pinned revision `fcef404516264798b6c582ef556eaa17e5c29bfb`, stochastic interruption equivalence, exception recovery, atomic persistence, standard checkpoint schema, CPU and MPS execution, distributed ownership, Python compilation, and targeted type checking pass without invoking a linter.
-    9. CUDA checkpoint execution remains hardware-unverified on this MacBook. The next sequential Trainer boundary is the standard `enable_model_summary` contract because it immediately follows checkpoint and progress composition in the pinned public surface.
+    9. CUDA checkpoint execution remains hardware-unverified on this MacBook.
 
 | Architecture Decision | Standard Model Summary Composition | Date: 19 August 2026 | Time: 04:26 PM | Name: Ghost |
 
@@ -255,7 +253,7 @@
     6. The Trainer-owned default remains the formal plain renderer so an installed optional package cannot silently replace the approved SyntheticMind terminal surface. `RichModelSummary` is available as an explicit standard opt-in with dependency validation, column styling, size formatting, shapes, modes, and FLOPs.
     7. Summary computation occurs on every distributed rank so model-side execution remains symmetric, while rendering occurs only on global rank zero. External two-process Gloo, local fork, and local spawn each produced two rank-local computations and exactly one rendered result.
     8. Focused evidence covers exact Trainer parameter position and default, callback public-method and override-call compatibility, enablement and custom-callback rules, repeated fits, fast development, exception cleanup, terminal I/O containment, redirected console composition, CPU and MPS execution, Rich rendering, optional dependency failure, Python compilation, and targeted type checking without invoking a linter.
-    9. CUDA random-state restoration is source-backed but hardware-unverified, and DeepSpeed-specific sharded parameter reporting remains coupled to the future DeepSpeed strategy phase. The next sequential unresolved Trainer parameter is the standard `profiler` contract.
+    9. CUDA random-state restoration is source-backed but hardware-unverified, and DeepSpeed-specific sharded parameter reporting remains coupled to the future DeepSpeed strategy phase.
 
 | Architecture Decision | Standard Profiling Contract | Date: 19 August 2026 | Time: 05:07 PM | Name: Ghost |
 
@@ -266,7 +264,7 @@
     5. Simple timing, nested deterministic cProfile recording, raw statistics, PyTorch operator traces, module-name ranges, custom schedules, trace callbacks, Chrome export, flame-stack export, optional NVTX, and the optional XLA server boundary are executable capability contracts.
     6. Profiler setup, stage reuse, exception unwinding, stop failures, summary failures, teardown failures, post-stage checkpoint saves, and module replacement are isolated so profiling cannot replace the primary runtime exception, leak an active recording, or silently restart after stage completion.
     7. Focused verification covers public signatures and selectors, direct and Trainer-managed execution, all four stages, automatic checkpoint saves, nested actions, repeated use, CPU and MPS execution, external, forked, spawned, and subprocess Gloo ranks, custom trace schedules, invalid configurations, artifact ownership, compilation, and targeted type checking without invoking a linter.
-    8. CUDA operator and NVTX execution and real XLA tracing remain hardware or optional-dependency bounded. The next sequential unresolved Trainer parameter is the standard `barebones` contract immediately after `detect_anomaly`.
+    8. CUDA operator and NVTX execution and real XLA tracing remain hardware or optional-dependency bounded.
 
 | Architecture Decision | Standard Barebones Execution | Date: 19 August 2026 | Time: 05:20 PM | Name: Ghost |
 
@@ -277,7 +275,6 @@
     5. Barebones isolates framework overhead rather than disabling the training contract. User callbacks, optimization, validation scheduling, precision, distributed execution, and `max_time` remain operational; explicit checkpoint and progress callbacks retain their normal conflicts, while an explicit model-summary callback remains user-owned.
     6. Every public stage emits one restrained rank-zero SyntheticMind status line because the progress surface is absent. The mode remains artifact-free unless an independently permitted user extension deliberately owns persistence.
     7. Focused verification covers exact signature placement and defaults, the complete conflict matrix, disabled normalization, all four public stages, metric no-operation behavior, ordinary logging regression, callback composition, wall-clock control, exception and teardown behavior, CPU, MPS, two-process Gloo execution, compilation, and targeted type checking without invoking a linter.
-    8. The next sequential unresolved Trainer parameter is `plugins`. Its accepted plugin families, ownership taxonomy, duplicate and conflict rules, strategy integration, checkpoint state, distributed behavior, and public terminology require source-backed audit before implementation.
 
 | Architecture Decision | Standard Core Plugin Composition | Date: 19 August 2026 | Time: 05:46 PM | Name: Ghost |
 
@@ -288,7 +285,6 @@
     5. `ClusterEnvironment` owns rendezvous values and rank topology for local and externally launched DDP. `LayerSync` applies before precision conversion and distributed wrapping during fit, reverts the actual converted module during transactional teardown, and powers the standard `sync_batchnorm` composition and conflict contract.
     6. Focused verification covers plugin signatures, map-location forms, duplicate and ownership conflicts, custom and asynchronous checkpoint I/O, repeated stages, save-last links, failure notes, direct and strategy-owned plugins, nested layer conversion, replacement precision modules, CPU, MPS, fork, spawn, subprocess, and external Gloo execution without invoking a linter.
     7. Default protocol-aware remote checkpoint storage and scheduler-specific cluster environments remain future integration capabilities and are not represented as complete. Real synchronized batch normalization remains CUDA-hardware bounded.
-    8. The next sequential unresolved Trainer parameter is `reload_dataloaders_every_n_epochs`; its standard validation, reload cadence, sampler reconstruction, distributed state, and checkpoint-continuation behavior require an end-to-end audit.
 
 | Architecture Decision | Standard Dataloader Reload Contract | Date: 19 August 2026 | Time: 06:04 PM | Name: Ghost |
 
@@ -299,7 +295,7 @@
     5. One Trainer-owned construction path validates the single-`DataLoader` contract, reapplies deterministic overfit and distributed sampling, preserves compatible custom batch samplers, refreshes effective batch horizons, synchronizes ranks, and warns about the unstable persistent-worker and pinned-memory combination.
     6. `DataModule.trainer` is now the standard attached Trainer reference across fit, validation, testing, prediction, and multiprocessing parent-state restoration. Checkpoint continuation restores the epoch and datamodule state before requesting a loader while reading the checkpoint exactly once.
     7. Focused verification covers the complete pinned reload matrix, frequent validation, disabled-stage laziness, dynamic lengths, iterable and custom batching paths, repeated fits, failure cleanup, exact checkpoint-relative cadence, CPU, MPS, external Gloo, and local fork, spawn, and subprocess execution without invoking a linter.
-    8. Real CUDA execution remains hardware-bounded. The next sequential Trainer boundary is `default_root_dir`, followed by the currently absent pinned `enable_autolog_hparams`, `model_registry`, and `suggest_integrations` capabilities only after their ownership and dependency implications are audited.
+    8. Real CUDA execution remains hardware-bounded.
 
 | Architecture Decision | Standard Artifact Root and Filesystem Contract | Date: 19 August 2026 | Time: 06:38 PM | Name: Ghost |
 
@@ -311,7 +307,6 @@
     6. Artifact allocation remains lazy so independently initialized ranks agree on one version. Rank zero alone writes persistent outputs, runtime-profiler artifacts are run-scoped, and fast development execution leaves the configured root untouched.
     7. Focused verification covers normalized local paths, `file://` paths, in-memory remote storage, remote storage with append deliberately rejected, CSV schema widening, TensorBoard events, checkpoint continuation and links, native profiler artifacts, exception checkpoints, CPU, MPS, and real two-rank Gloo ownership.
     8. TensorBoard `2.21.0` is installed in the current Python environment so the preferred default backend is directly exercised. Python compilation and targeted Pyright inspection pass without invoking a linter; real cloud credentials and CUDA hardware remain environment-bounded.
-    9. The next dependency-ordered Trainer boundary is the pinned `enable_autolog_hparams` contract, followed by separate ownership audits for `model_registry` and `suggest_integrations`.
 
 | Architecture Decision | Standard Hyperparameter Capture and Autologging | Date: 19 August 2026 | Time: 06:57 PM | Name: Ghost |
 
@@ -322,7 +317,7 @@
     5. Full and weights-only checkpoints persist model and datamodule hyperparameters under the established checkpoint keys independently of the autologging flag. Hyperparameter argument names are retained, unpicklable values are removed with a warning, and OmegaConf containers preserve both interpolation behavior and container type metadata.
     6. CSV and TensorBoard backends accept arbitrary hyperparameter keys and values through deterministic string normalization at their serialization boundaries. Fast development and explicit autologging disablement create no hyperparameter records.
     7. Focused verification covers constructor capture, inheritance, dataclasses, namespaces, OmegaConf `2.3.1`, immutable initial snapshots, suppression, collision failures, all four public stages, local and remote logger storage, checkpoint round trips, CPU, MPS, and real two-rank Gloo ownership.
-    8. Python compilation, diff validation, direct guideline review, and targeted Pyright inspection pass without invoking a linter. The existing unrelated strict-type debt in `Module` remains unchanged at its verified baseline; the next dependency-ordered action is an ownership and capability audit of the pinned `model_registry` parameter.
+    8. Python compilation, diff validation, direct guideline review, and targeted Pyright inspection pass without invoking a linter. The existing unrelated strict-type debt in `Module` remains unchanged at its verified baseline.
 
 | Architecture Decision | Registry Integration Ownership | Date: 19 August 2026 | Time: 07:11 PM | Name: Ghost |
 
@@ -349,7 +344,7 @@
     5. Initialization contexts restore the caller's default device, default dtype, and exception state after successful, nested, and failed construction. Invalid `empty_init` values fail at the strategy boundary before allocation.
     6. Multiprocessing parent reconciliation now restores the rank-zero module into both `Trainer.module` and the strategy-managed `Trainer.model` surface, preventing wrapped-model inspection from becoming stale after worker completion.
     7. Focused verification covers signature and delegation contracts, custom strategies, every true and mixed precision dtype, CPU and MPS construction and fit, the standard initializer family, composite PyTorch modules, random-state preservation, state loading, two-process fork execution, compilation, comment preservation, and zero targeted type errors without invoking a linter.
-    8. Meta-device and sharded parameter initialization remain future FSDP or model-parallel strategy responsibilities. The next dependency-ordered runtime audit concerns signal receipt and truthful last-batch state.
+    8. Meta-device and sharded parameter initialization remain future FSDP or model-parallel strategy responsibilities.
 
 | Architecture Decision | Signal Lifecycle and Last-Batch Truth | Date: 19 August 2026 | Time: 07:42 PM | Name: Ghost |
 
@@ -361,7 +356,7 @@
     6. `Trainer.is_last_batch` is true during the final training batch, including an early exit requested by `on_train_batch_start`, and remains inspectable after fit. The state drives final gradient synchronization, accumulation closure, and validation scheduling instead of acting as a cosmetic alias.
     7. Multiprocessing reconciliation transfers signal receipt and final-batch state together with existing Trainer progress, preserving the same public inspection result in both worker-owned and parent-owned execution models.
     8. Focused verification covers sized, unsized, empty, limited, accumulated, early-exit, validation, and checkpoint-continuation paths; every public stage; real `SIGTERM`; callable-handler restoration; CPU and MPS; external two-rank Gloo; unequal-rank prediction; and local fork, spawn, and subprocess launch without invoking a linter.
-    9. Scheduler-specific requeue behavior remains a future cluster-environment integration. The next dependency-ordered runtime phase is multiple-dataloader support and its standard public Trainer inspection surfaces.
+    9. Scheduler-specific requeue behavior remains a future cluster-environment integration.
 
 | Architecture Decision | Standard Multiple-Dataloader Execution | Date: 19 August 2026 | Time: 08:40 PM | Name: Ghost |
 
@@ -373,7 +368,6 @@
     6. Distributed processing replaces samplers for every eligible loader leaf, preserves unrepeated prediction partitions, synchronizes equal-length evaluation metrics, and returns retained predictions only for local or subprocess execution unless the caller requests otherwise.
     7. Simultaneous-mode limits define the combined epoch horizon without truncating each child iterator independently; sequential-mode limits remain per-loader ceilings. This distinction is required for parity with the pinned reference and prevents silent sample-order drift.
     8. Stateful loader methods are exposed by `CombinedLoader`, but Trainer checkpoint integration remains a separate unresolved capability because cursor restoration cannot be combined with the current deterministic prefix-replay algorithm without proving that completed batches are not skipped twice.
-    9. The next dependency-ordered boundary is direct dataloader attachment through the public Trainer entry points, followed by the explicit stateful-loader checkpoint integration contract.
 
 | Architecture Decision | Standard Trainer Data Attachment | Date: 19 August 2026 | Time: 08:58 PM | Name: Ghost |
 
@@ -384,7 +378,6 @@
     5. Batch conversion and transfer now complete before batch-start hooks and step-argument construction in training, evaluation, and prediction. The former order passed CPU tensors to an MPS model and exposed pre-transfer batches through inherited hooks.
     6. Focused verification covers exact signatures, source conflicts, direct and model-owned loaders, nested collections, model reuse, datamodule compatibility, setup order, transfer-hook precedence, full and weights-only checkpoint paths, exception teardown, CPU, MPS, fork, spawn, and subprocess execution.
     7. Python compilation, diff validation, and targeted Pyright inspection pass without invoking Ruff or another linter. The accepted `verbose` parameter does not yet alter result presentation, and omitted-model checkpoint selection remains subject to the later checkpoint-selection audit.
-    8. Stateful dataloader cursor restoration is the next dependency-ordered phase. Its design must assign replay ownership per loader state so restored cursors and deterministic prefix replay cannot skip the completed prefix twice.
 
 | Architecture Decision | Stateful Dataloader Checkpoint Continuation | Date: 19 August 2026 | Time: 09:21 PM | Name: Ghost |
 
@@ -396,7 +389,7 @@
     6. Premature step-limited completion retains the last rank-zero loader state across Trainer teardown and multiprocessing parent reconciliation. Natural epoch exhaustion clears that state so a completed cursor is not loaded into the next epoch.
     7. NumPy random state now uses a tensor-backed, restricted-unpickler-safe checkpoint representation while legacy ndarray state remains readable. Full checkpoints with standard state can therefore load through `weights_only=True` without surrendering exact Python, NumPy, and torch random continuation.
     8. Focused verification covers custom and TorchData `0.11.0` stateful loaders, stateless fallback, mixed and cycling collections, empty and unsized streams, failure checkpoints, full and weights-only loading, stochastic worker datasets, subtype reconstruction, CPU, MPS, fork, spawn, subprocess, and external two-rank Gloo execution.
-    9. Python compilation, diff validation, source-comment preservation, and targeted Pyright inspection pass without invoking Ruff or another linter. The next phase returns to a complete pinned Trainer surface audit and selects the earliest unresolved universal capability in dependency order.
+    9. Python compilation, diff validation, source-comment preservation, and targeted Pyright inspection pass without invoking Ruff or another linter.
 
 | Architecture Decision | Trainer Checkpoint Path Contract | Date: 19 August 2026 | Time: 09:33 PM | Name: Ghost |
 
@@ -406,7 +399,7 @@
     4. `ckpt_path='best'` uses the first ModelCheckpoint callback deterministically and diagnoses missing best state. `ckpt_path='last'` selects the newest available last checkpoint and degrades to a warning with current weights when no candidate exists.
     5. Checkpoint selection occurs before process launch so omitted-model intent and stateful property ownership survive spawn and subprocess boundaries without adding private parameters to the public stage signatures.
     6. Focused verification covers best and last weights, explicit and omitted models, stateful and overridden paths, constructor-level resume precedence, validation, test, prediction, CPU, MPS, spawn DDP, subprocess DDP, stateful-loader continuation, and direct multiple-dataloader regressions.
-    7. Registry and HPC checkpoint aliases remain explicitly unavailable because their corresponding product integrations are outside current scope. The next Trainer phase implements the accepted `verbose` evaluation-result contract through the existing minimal terminal system.
+    7. Registry and HPC checkpoint aliases remain explicitly unavailable because their corresponding product integrations are outside current scope.
 
 | Architecture Decision | Minimal Evaluation Result Rendering | Date: 19 August 2026 | Time: 09:38 PM | Name: Ghost |
 
@@ -427,7 +420,6 @@
     5. Each buffered metric computes its scalar and optional distributed mean once. Hook inspection, loop accumulation, experiment dispatch, and terminal presentation reuse that cached value, preventing duplicate collectives and rank-local progress output.
     6. Multiprocessing launch transfers logged metric state back to the parent. `ConsoleRenderer` now serializes without its process-local terminal stream, so the default progress callback remains usable under spawn, and the renderer consumes synchronized rather than rank-local metric values.
     7. Focused verification covers callback and module batch-end inspection, stage replacement, sanity isolation, hidden metrics, multiple dataloaders, defensive snapshots, CPU, MPS, subprocess, spawn, fork, notebook-fork, synchronized two-rank progress rendering, compilation, and targeted type inspection without invoking a linter.
-    8. The next dependency-ordered boundary is the complete `Module.log` and `log_dict` contract, including scalar validation, step and epoch name forking, duplicate definitions, reduction semantics, and accepted metric value families.
 
 | Architecture Decision | Standard Module Logging API and Reduction Contract | Date: 19 August 2026 | Time: 10:21 PM | Name: Ghost |
 
@@ -448,7 +440,6 @@
     4. Early stopping now retains a tensor best score, plateau schedulers receive the monitored tensor, and checkpoint selection receives detached CPU candidates so control and persistence state cannot retain a live training graph.
     5. Spawn and fork parent reconciliation returns detached CPU tensors because an autograd graph cannot cross process ownership safely. Live workers and subprocess execution retain graphful values through callback and logged inspection when explicitly requested.
     6. CPU, MPS, distributed reductions, subprocess DDP, spawn, fork, multiple dataloaders, TorchMetrics, checkpoint selection, early stopping, plateau scheduling, logger conversion, compilation, and targeted type inspection establish the implemented boundary without a linter.
-    7. The next dependency-ordered phase is a complete pinned audit of the remaining universal `Module` public surface before selecting another implementation target.
 
 | Architecture Decision | Model-Owned Callback Configuration | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
 
@@ -459,3 +450,13 @@
     5. Trainer attachment now propagates recursively through nested SyntheticMind modules. Module serialization removes the Trainer back-reference, preserving spawn safety without weakening the live inheritance contract.
     6. Parent-side configuration and a stage-scoped invocation guard keep callback composition identical across subprocess, spawn, and fork execution while preventing duplicate hook calls during launcher re-entry.
     7. Focused CPU, MPS, checkpoint, repeated-stage, failure, serialization, subprocess, spawn, and fork verification passes together with compilation, diff validation, source-comment preservation, and targeted type inspection without invoking a linter.
+
+| Architecture Decision | Standard Model Runtime Access | Date: 19 August 2026 | Time: 11:01 PM | Name: Ghost |
+
+    1. `Module.loggers` now exposes the attached Trainer's ordered logger collection and returns an empty collection while detached; the singular `Module.logger` continues to expose the first logger or `None`.
+    2. `Module.print` preserves Python's standard `args`, `sep`, `end`, `file`, and `flush` meanings while emitting exclusively from global rank zero. The separate `Trainer.print` contract remains local-rank-zero output on each node.
+    3. An enabled progress callback owns model output routing so inherited progress implementations may preserve their display. SyntheticMind's callback clears an active terminal line before user output, while a disabled or absent callback delegates directly to Python printing.
+    4. The runtime contract remains inheritance-safe: custom progress callbacks receive the complete print call, logger order and identity remain Trainer-owned, and detached printing fails because no global-rank authority exists.
+    5. Focused verification covers detached and attached access, multiple loggers, exact signatures and keyword behavior, custom and disabled progress callbacks, active interactive rendering, redirected output, CPU, MPS, and global-rank suppression under subprocess, spawn, and fork DDP.
+    6. Compilation, diff validation, source-comment preservation, and targeted type inspection pass without invoking a linter; the existing unrelated `Module` type-checking baseline remains unchanged.
+    7. The next dependency-ordered boundary is `Module.all_gather`, including nested data structures, gradient preservation, synchronization barriers, shape semantics, and every supported process launcher.

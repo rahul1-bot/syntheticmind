@@ -218,8 +218,15 @@
     3. ✅ Nested Trainer attachment, serialization-safe back-reference removal, transactional validation, hook-specific logging rejection, real ModelCheckpoint participation, and callback state restoration are implemented.
     4. ✅ Focused CPU, MPS, subprocess DDP, spawn, fork, repeated-stage, invalid-return, duplicate-state, checkpoint, serialization, compilation, diff, and targeted type checks pass without invoking a linter.
 
-| Progress Todo | Module Runtime Access Surface | Date: 19 August 2026 | Time: 10:51 PM | Name: Ghost |
+| Progress Complete | Module Runtime Access Surface | Date: 19 August 2026 | Time: 11:01 PM | Name: Ghost |
 
-    1. Audit and implement the next coherent standard `Module` runtime-access boundary, beginning with multiple logger access and rank-safe model printing against existing Trainer ownership.
-    2. Verify detached, single-device, MPS, progress-enabled, redirected-output, and distributed behavior before advancing to the separate collective `all_gather` contract.
-    3. Continue classifying loading, export, device-mesh, and legacy convenience surfaces by dependency and ownership rather than adding unrelated aliases together.
+    1. ✅ `Module.loggers` now provides ordered multiple-logger access while preserving detached and singular-logger semantics.
+    2. ✅ `Module.print` preserves the standard Python print parameters, emits only from global rank zero, and delegates through an enabled progress callback without changing the distinct node-local `Trainer.print` contract.
+    3. ✅ Progress-safe output, custom callback routing, disabled fallback, detached failure, logger identity, exact signatures, CPU, MPS, redirected streams, and all three supported two-rank launch models pass focused verification.
+    4. ✅ Compilation, diff validation, source-comment preservation, and targeted type inspection pass without Ruff or another linter.
+
+| Progress Todo | Standard Collective Gathering | Date: 19 August 2026 | Time: 11:01 PM | Name: Ghost |
+
+    1. Audit the pinned `Module.all_gather` signature, nested-data contract, synchronization barrier, scalar and tensor shape rules, autograd behavior, and strategy ownership before implementation.
+    2. Verify detached failure, single-device identity, nested structures, supported dtypes, uneven or invalid inputs, gradient propagation, CPU Gloo, and subprocess, spawn, and fork launch behavior.
+    3. Keep device-mesh, loading, export, and legacy convenience surfaces separate until their own runtime dependencies are reached.

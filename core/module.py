@@ -40,7 +40,7 @@ import numbers
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, ClassVar, Literal, cast, overload, override
+from typing import IO, TYPE_CHECKING, ClassVar, Literal, cast, overload, override
 
 import torch
 import torch.distributed as dist
@@ -1293,6 +1293,29 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         if self._trainer is None:
             return None
         return self._trainer.logger
+
+    @property
+    def loggers(self) -> list[Logger]:
+        if self._trainer is None:
+            return []
+        return self._trainer.loggers
+
+    def print(
+        self,
+        *args: object,
+        sep: str | None = " ",
+        end: str | None = "\n",
+        file: IO[str] | None = None,
+        flush: bool = False
+    ) -> None:
+        trainer: Trainer = self.trainer
+        if not trainer.is_global_zero:
+            return
+        progress_bar = trainer.progress_bar_callback
+        if progress_bar is not None and progress_bar.is_enabled:
+            progress_bar.print(*args, sep=sep, end=end, file=file, flush=flush)
+            return
+        builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
 
     @property
     def current_epoch(self) -> int:
