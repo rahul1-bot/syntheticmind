@@ -359,6 +359,10 @@ class Strategy(ABC):
         return False
 
     @property
+    def distributed_sampler_kwargs(self) -> dict[str, int] | None:
+        return None
+
+    @property
     def launcher(self) -> _ProcessLauncher | None:
         return None
 

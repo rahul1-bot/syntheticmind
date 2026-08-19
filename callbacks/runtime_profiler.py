@@ -234,7 +234,7 @@ class RuntimeProfiler(Callback):
     def on_validation_start(self, trainer: Trainer, module: Module) -> None:
         # Opens the validation-stage measurement; sanity-check passes are
         # excluded so their bounded runs never contaminate the telemetry.
-        if trainer._sanity_checking:
+        if trainer.sanity_checking:
             return
         self._mark_stage_start("validation")
         self._last_batch_end_times["validation"] = time.perf_counter()
@@ -242,7 +242,7 @@ class RuntimeProfiler(Callback):
     @override
     def on_validation_end(self, trainer: Trainer, module: Module) -> None:
         # Closes the validation-stage measurement outside sanity checking.
-        if trainer._sanity_checking:
+        if trainer.sanity_checking:
             return
         self._record_stage_end(trainer, module, "validation", "runtime/validation_time_ms")
 
@@ -252,7 +252,7 @@ class RuntimeProfiler(Callback):
         dataloader_idx: int = 0
     ) -> None:
         # Marks the validation batch start outside sanity checking.
-        if trainer._sanity_checking:
+        if trainer.sanity_checking:
             return
         self._mark_batch_start(trainer, "validation")
 
@@ -262,7 +262,7 @@ class RuntimeProfiler(Callback):
         dataloader_idx: int = 0
     ) -> None:
         # Records the sampled validation batch event outside sanity checking.
-        if trainer._sanity_checking:
+        if trainer.sanity_checking:
             return
         self._record_batch_end(
             trainer=trainer,

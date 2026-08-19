@@ -115,3 +115,12 @@
     4. ✅ Full and weights-only checkpoints retain standard model and datamodule hyperparameter keys, argument names, unpicklable-value cleaning, and OmegaConf container and type preservation independently of automatic experiment logging.
     5. ✅ Focused verification covers CSV, TensorBoard, local and in-memory remote storage, all four public stages, CPU, MPS, real two-rank Gloo execution, checkpoint round trips, Python compilation, diff validation, and zero targeted type errors outside the unchanged pre-existing `Module` baseline without invoking a linter.
     6. CUDA remains hardware-bounded. The next dependency-ordered phase is the pinned `model_registry` ownership and capability audit before any external registry integration is adopted.
+
+| Progress Complete | Trainer Registry Audit and Runtime Inspection | Date: 19 August 2026 | Time: 07:11 PM | Name: Ghost |
+
+    1. ✅ The pinned `model_registry` path was traced through Trainer construction, checkpoint selection, LitModels download and upload behavior, Lightning Cloud authentication, and the official ignored external implementation; it is classified as vendor integration rather than core Trainer terminology.
+    2. ✅ Lightning-specific registry plumbing is excluded from core, provider-neutral registry support remains an open integration capability, and the promotional `suggest_integrations` surface is excluded from parity accounting.
+    3. ✅ Standard runtime properties now expose training, validation, testing, prediction, evaluation, and sanity state from one authority; sanity callbacks and validation batches retain the correct fine-grained stage.
+    4. ✅ Standard wrapped-model, callback-family, rank-safe printing, and distributed-sampler inspection surfaces are implemented without Lightning-owned names.
+    5. ✅ Focused CPU all-stage execution and real two-process Gloo execution verify hook state, wrapped model identity, callback selection, explicit sampler rank and world size, single-writer printing, compilation, diff integrity, and targeted type cleanliness without invoking a linter.
+    6. The next dependency-ordered phase is the standard `Trainer.init_module` initialization context. Signal receipt, truthful last-batch state, and multiple-dataloader public surfaces remain tracked as separate runtime capabilities.

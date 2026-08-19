@@ -113,9 +113,12 @@ class EvaluationLoop(Loop):
         assert model is not None
 
         running_stage: RunningStage = "validating" if self.stage == "validate" else "testing"
-        state.set_running_stage(running_stage)
-        module._running_stage = running_stage
-        if not trainer._sanity_checking:
+        active_running_stage: RunningStage = (
+            "sanity_checking" if trainer.sanity_checking else running_stage
+        )
+        state.set_running_stage(active_running_stage)
+        module._running_stage = active_running_stage
+        if not trainer.sanity_checking:
             trainer._reset_progress_bar_metrics(running_stage)
 
         dataloader: DataLoader = self._get_dataloader()  # type: ignore[type-arg]
@@ -123,7 +126,7 @@ class EvaluationLoop(Loop):
             dataloader.sampler.set_epoch(state.current_epoch)
         total_batches: int | None = self._safe_len(dataloader)
         max_batches: int | None = self._resolve_limit_batches(total_batches)
-        if trainer._sanity_checking and trainer.num_sanity_val_steps != float("inf"):
+        if trainer.sanity_checking and trainer.num_sanity_val_steps != float("inf"):
             sanity_steps: int = int(trainer.num_sanity_val_steps)
             max_batches = (
                 sanity_steps
@@ -385,7 +388,7 @@ class EvaluationLoop(Loop):
             )
 
         self.epoch_metrics: dict[str, float] = self._reduce_epoch_metrics(epoch_accum)
-        if not trainer._sanity_checking:
+        if not trainer.sanity_checking:
             progress_bar_epoch_metrics: dict[str, float] = {
                 name: value
                 for name, value in self.epoch_metrics.items()
@@ -550,7 +553,7 @@ class EvaluationLoop(Loop):
 
         if step_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
             self.trainer._log_metrics(step_metrics, step=state.global_step)
-        if not self.trainer._sanity_checking:
+        if not self.trainer.sanity_checking:
             self.trainer._update_progress_bar_metrics(
                 running_stage,
                 progress_bar_step_metrics
@@ -590,7 +593,7 @@ class EvaluationLoop(Loop):
                 hook_progress_bar_metrics[name] = value
         if hook_logger_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
             self.trainer._log_metrics(hook_logger_metrics, step=state.global_step)
-        if not self.trainer._sanity_checking:
+        if not self.trainer.sanity_checking:
             self.trainer._update_progress_bar_metrics(
                 running_stage,
                 hook_progress_bar_metrics

@@ -522,7 +522,7 @@ class ModelCheckpoint(Checkpoint):
         return (
             bool(trainer.fast_dev_run)
             or trainer.state.stage != "fit"
-            or trainer._sanity_checking
+            or trainer.sanity_checking
             or self._last_global_step_saved == trainer.global_step
         )
 

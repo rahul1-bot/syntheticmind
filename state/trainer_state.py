@@ -83,7 +83,7 @@ class TrainerState:
         self._stage: TrainerStage | None = stage
         self._status: TrainerStatus = "running"
 
-    def set_running_stage(self, running_stage: RunningStage) -> None:
+    def set_running_stage(self, running_stage: RunningStage | None) -> None:
         # Marks the fine-grained activity currently executing.
         self._running_stage: RunningStage | None = running_stage
 

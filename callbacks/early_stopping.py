@@ -89,7 +89,7 @@ class EarlyStopping(Callback):
         # patience counter on improvement, and otherwise advances it; when the
         # counter reaches patience, the decision is synchronized across ranks
         # and the trainer's stop flag is raised with the outcome logged.
-        if trainer.fast_dev_run or trainer._sanity_checking:
+        if trainer.fast_dev_run or trainer.sanity_checking:
             return
         metrics: dict[str, float] = trainer.callback_metrics
         current_score: float | None = metrics.get(self.monitor)
@@ -142,9 +142,21 @@ class EarlyStopping(Callback):
     def load_state_dict(self, state_dict: StateDict) -> None:
         # Restores the persisted counters with None-guarded coercion; missing
         # entries fall back to the freshly initialized values.
-        wait_count: int | str | float | bool | None = state_dict.get("wait_count", 0)
-        best_score: int | str | float | bool | None = state_dict.get("best_score", self.best_score)
-        stopped_epoch: int | str | float | bool | None = state_dict.get("stopped_epoch", 0)
+        wait_count: object = state_dict.get("wait_count", 0)
+        best_score: object = state_dict.get("best_score", self.best_score)
+        stopped_epoch: object = state_dict.get("stopped_epoch", 0)
+        scalar_types: tuple[type[bool], type[int], type[float], type[str]] = (
+            bool,
+            int,
+            float,
+            str
+        )
+        if wait_count is not None and not isinstance(wait_count, scalar_types):
+            raise TypeError("EarlyStopping wait_count checkpoint state must be scalar.")
+        if best_score is not None and not isinstance(best_score, scalar_types):
+            raise TypeError("EarlyStopping best_score checkpoint state must be scalar.")
+        if stopped_epoch is not None and not isinstance(stopped_epoch, scalar_types):
+            raise TypeError("EarlyStopping stopped_epoch checkpoint state must be scalar.")
         self.wait_count: int = int(wait_count if wait_count is not None else 0)
         self.best_score: float = float(best_score if best_score is not None else self.best_score)
         self.stopped_epoch: int = int(stopped_epoch if stopped_epoch is not None else 0)

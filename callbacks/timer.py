@@ -230,7 +230,7 @@ class Timer(Callback):
     @override
     def on_validation_start(self, trainer: Trainer, module: Module) -> None:
         # Marks the beginning of the validation pass.
-        if trainer._sanity_checking:
+        if trainer.sanity_checking:
             return
         if trainer.state.stage == "validate":
             self._elapsed_times["validate"] = 0.0
@@ -242,7 +242,7 @@ class Timer(Callback):
     def on_validation_end(self, trainer: Trainer, module: Module) -> None:
         # Accumulates the pass duration into the validation total and reports
         # it from rank zero.
-        if trainer._sanity_checking:
+        if trainer.sanity_checking:
             return
         self._stop_stage("validate")
         if trainer.state.stage == "fit" and trainer._is_mid_epoch_validation:

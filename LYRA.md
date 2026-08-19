@@ -211,3 +211,12 @@
     4. Ordinary mappings, namespaces, inherited constructors, dataclasses, and OmegaConf configurations retain their meaningful behavior while CSV and TensorBoard own the final serialization normalization.
     5. All public stages, CPU, MPS, local and remote storage, full and weights-only checkpoints, and two-process Gloo execution establish the supported contract. CUDA remains an explicit hardware boundary.
     6. The next sequential parameter is `model_registry`; its external service ownership, naming, dependency, checkpoint, and failure semantics require audit before SyntheticMind decides whether and how the capability belongs in the private harness.
+
+| Strategic Note | Runtime State and External Integration Boundaries | Date: 19 August 2026 | Time: 07:11 PM | Name: Ghost |
+
+    1. ✅ Runtime hooks can now inspect standard Trainer stage properties without reaching into private flags, and sanity checking remains distinguishable from ordinary validation for its complete lifecycle.
+    2. ✅ Wrapped model access, underlying module access, callback-family inspection, local-rank-zero printing, and distributed sampler metadata now have explicit public meanings verified under local and two-process execution.
+    3. The LitModels-backed `model_registry` parameter belongs to Lightning Cloud rather than universal Trainer vocabulary. SyntheticMind rejects that product coupling while retaining provider-neutral registry capability as honest future integration work.
+    4. Promotional integration suggestions are outside the capability objective and will not consume a core Trainer parameter.
+    5. Data-fetcher last-batch state, signal handling, and multiple dataloaders remain explicit gaps; they must be implemented with their complete runtime semantics rather than surfaced as inert compatibility aliases.
+    6. The next dependency-ordered audit is the standard `Trainer.init_module` context because precision and strategy initialization authorities are now established.

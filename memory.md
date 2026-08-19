@@ -272,3 +272,12 @@
     6. OmegaConf must remain a live container at the user boundary or interpolation semantics are lost. Checkpoints therefore retain the container and its type metadata, while experiment loggers receive backend-safe normalized values.
     7. Rank-zero persistence does not remove the need for all ranks to own equivalent captured state. Real two-process execution verified that every rank participates in the stage while exactly one rank invokes the logger.
     8. OmegaConf `2.3.1` was installed through the authorized Python package path to exercise preservation and checkpoint round trips directly rather than claiming optional-configuration support from structural inspection.
+
+| Memory | Trainer Runtime State and Registry Classification | Date: 19 August 2026 | Time: 07:11 PM | Name: Ghost |
+
+    1. Entry-point state and running-stage state are different coordinates. A fit entry point may move through sanity checking, training, and validation, so public state properties must derive from the fine-grained running stage rather than the outer function.
+    2. Sanity checking cannot coexist with a private boolean and a separately mutated validation stage without drift. One authoritative running-stage value lets callbacks, modules, timers, checkpointing, profiling, and presentation observe the same lifecycle truth.
+    3. The strategy-managed `model` may be a distributed or precision wrapper, while the user `module` remains the unwrapped extension identity. Conflating them breaks both forward execution inspection and inherited hook expectations.
+    4. Distributed sampler construction should receive explicit `num_replicas` and `rank` from the strategy contract. Depending only on ambient process-group discovery hides topology ownership and weakens custom strategy compatibility.
+    5. A parameter present on a mature Trainer is not automatically an industry convention. The pinned `model_registry` and `suggest_integrations` parameters are respectively a Lightning Cloud product integration and promotional surface, so mechanical adoption would violate SyntheticMind ownership without adding universal core capability.
+    6. Last-batch inspection for unsized iterables requires fetcher lookahead or equivalent progress state, and signal receipt requires process-lifecycle ownership. Neither can be implemented truthfully as a derived convenience boolean.

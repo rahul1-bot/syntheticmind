@@ -100,6 +100,14 @@ class DDPStrategy(Strategy):
         self._local_rank: int = 0
         self._process_group_cleanup_registered: bool = False
 
+    @property
+    @override
+    def distributed_sampler_kwargs(self) -> dict[str, int]:
+        return {
+            "num_replicas": self.world_size,
+            "rank": self.global_rank
+        }
+
     @override
     def setup_environment(self) -> None:
         # Initializes the process group exactly once per process. The method

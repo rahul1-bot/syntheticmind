@@ -47,7 +47,7 @@ from collections.abc import Callable, Iterable, Iterator, Sized
 from contextlib import AbstractContextManager, nullcontext
 from datetime import timedelta
 from pathlib import Path
-from typing import Literal, Never, cast
+from typing import IO, Literal, Never, cast
 
 import torch
 from loguru import logger as log
@@ -66,8 +66,10 @@ from syntheticmind.accelerators.mps import MPSAccelerator
 from syntheticmind.accelerators.topology import DeviceTopology, resolve_device_topology
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpoint import Checkpoint
+from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.callbacks.model_summary import ModelSummary
+from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
@@ -749,8 +751,6 @@ class Trainer:
             )
         if not configured_checkpoint_callbacks and resolved_enable_checkpointing:
             self.callbacks.append(ModelCheckpoint())
-        from syntheticmind.callbacks.progress_bar import ProgressBarCallback
-
         progress_callbacks: list[ProgressBarCallback] = [
             callback
             for callback in self.callbacks
@@ -823,7 +823,6 @@ class Trainer:
         self._loggers: list[Logger] = resolved_loggers
         self.profiler: Profiler = _resolve_profiler(profiler)
         self.state: TrainerState = TrainerState()
-        self._sanity_checking: bool = False
         self._is_mid_epoch_validation: bool = False
         self._validation_schedule: ValidationSchedule = ValidationSchedule(
             effective_val_check_interval,
@@ -2162,8 +2161,16 @@ class Trainer:
         # Rebuilds the dataloader around a DistributedSampler while carrying
         # over every construction parameter the DataLoader exposes, so the
         # wrapped loader differs from the original only in its sampling.
+        sampler_kwargs: dict[str, int] | None = self.distributed_sampler_kwargs
+        num_replicas: int | None = (
+            sampler_kwargs["num_replicas"] if sampler_kwargs is not None else None
+        )
+        rank: int | None = sampler_kwargs["rank"] if sampler_kwargs is not None else None
         sampler: DistributedSampler = DistributedSampler(
-            dataloader.dataset, shuffle=shuffle
+            dataloader.dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=shuffle,
         )
         return self._replace_dataloader_sampler(dataloader, sampler)
 
@@ -2174,8 +2181,16 @@ class Trainer:
         # Rebuilds the prediction dataloader around the unrepeated sampler,
         # which partitions without padding so no rank emits duplicate
         # predictions; all other construction parameters carry over unchanged.
+        sampler_kwargs: dict[str, int] | None = self.distributed_sampler_kwargs
+        num_replicas: int | None = (
+            sampler_kwargs["num_replicas"] if sampler_kwargs is not None else None
+        )
+        rank: int | None = sampler_kwargs["rank"] if sampler_kwargs is not None else None
         sampler: _UnrepeatedDistributedSampler = _UnrepeatedDistributedSampler(
-            dataloader.dataset, shuffle=False
+            dataloader.dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=False,
         )
         return self._replace_dataloader_sampler(dataloader, sampler)
 
@@ -2266,30 +2281,25 @@ class Trainer:
         # a finally block, and every trace of the sanity pass (epoch metrics,
         # the module's logging buffer, callback metrics) is discarded so
         # sanity results cannot influence monitoring or checkpointing.
-        self.state.set_running_stage("sanity_checking")
+        self.sanity_checking = True
         module._running_stage = "sanity_checking"
-        self._sanity_checking: bool = True
 
         try:
             self._ensure_val_dataloader()
             self._call_callback_hooks(module, "on_sanity_check_start")
             self.validate_loop.run()
+            if not self._validation_schedule.is_epoch_eligible(self.current_epoch):
+                self._last_val_dataloader_reload_epoch = None
+            self._validation_schedule.mark_validation_end()
+            self.validate_loop.epoch_metrics = {}
+            module._reset_logged_metrics()
+            self._callback_metrics.clear()
+            self._reset_progress_bar_metrics("validating")
+            self._call_callback_hooks(module, "on_sanity_check_end")
         finally:
-            self._sanity_checking: bool = False
-
-        if not self._validation_schedule.is_epoch_eligible(self.current_epoch):
-            self._last_val_dataloader_reload_epoch = None
-
-        self._validation_schedule.mark_validation_end()
-
-        self.validate_loop.epoch_metrics = {}
-        module._reset_logged_metrics()
-        self._callback_metrics.clear()
-        self._reset_progress_bar_metrics("validating")
-
-        self._call_callback_hooks(module, "on_sanity_check_end")
-
-        module._running_stage = "training"
+            self.sanity_checking = False
+            self.training = True
+            module._running_stage = "training"
 
     def _restore_checkpoint(
         self,
@@ -2914,6 +2924,30 @@ class Trainer:
         ]
 
     @property
+    def early_stopping_callback(self) -> EarlyStopping | None:
+        callbacks: list[EarlyStopping] = self.early_stopping_callbacks
+        return callbacks[0] if callbacks else None
+
+    @property
+    def early_stopping_callbacks(self) -> list[EarlyStopping]:
+        return [
+            callback
+            for callback in self.callbacks
+            if isinstance(callback, EarlyStopping)
+        ]
+
+    @property
+    def progress_bar_callback(self) -> ProgressBarCallback | None:
+        return next(
+            (
+                callback
+                for callback in self.callbacks
+                if isinstance(callback, ProgressBarCallback)
+            ),
+            None
+        )
+
+    @property
     def ckpt_path(self) -> str | Path | None:
         return self._ckpt_path
 
@@ -3012,6 +3046,25 @@ class Trainer:
         return self.strategy.is_global_zero
 
     @property
+    def model(self) -> torch.nn.Module | None:
+        return self.strategy.model
+
+    @property
+    def distributed_sampler_kwargs(self) -> dict[str, int] | None:
+        return self.strategy.distributed_sampler_kwargs
+
+    def print(
+        self,
+        *values: object,
+        sep: str | None = " ",
+        end: str | None = "\n",
+        file: IO[str] | None = None,
+        flush: bool = False
+    ) -> None:
+        if self.local_rank == 0:
+            print(*values, sep=sep, end=end, file=file, flush=flush)
+
+    @property
     def max_epochs(self) -> int:
         return self.fit_loop.max_epochs
 
@@ -3064,6 +3117,75 @@ class Trainer:
     def interrupted(self) -> bool:
         # Whether the most recent run terminated through an interruption.
         return self.state.status == "interrupted"
+
+    @property
+    def training(self) -> bool:
+        return self.state.running_stage == "training"
+
+    @training.setter
+    def training(self, value: bool) -> None:
+        if type(value) is not bool:
+            raise TypeError("`training` must be a bool.")
+        if value:
+            self.state.set_running_stage("training")
+        elif self.training:
+            self.state.set_running_stage(None)
+
+    @property
+    def validating(self) -> bool:
+        return self.state.running_stage == "validating"
+
+    @validating.setter
+    def validating(self, value: bool) -> None:
+        if type(value) is not bool:
+            raise TypeError("`validating` must be a bool.")
+        if value:
+            self.state.set_running_stage("validating")
+        elif self.validating:
+            self.state.set_running_stage(None)
+
+    @property
+    def testing(self) -> bool:
+        return self.state.running_stage == "testing"
+
+    @testing.setter
+    def testing(self, value: bool) -> None:
+        if type(value) is not bool:
+            raise TypeError("`testing` must be a bool.")
+        if value:
+            self.state.set_running_stage("testing")
+        elif self.testing:
+            self.state.set_running_stage(None)
+
+    @property
+    def predicting(self) -> bool:
+        return self.state.running_stage == "predicting"
+
+    @predicting.setter
+    def predicting(self, value: bool) -> None:
+        if type(value) is not bool:
+            raise TypeError("`predicting` must be a bool.")
+        if value:
+            self.state.set_running_stage("predicting")
+        elif self.predicting:
+            self.state.set_running_stage(None)
+
+    @property
+    def evaluating(self) -> bool:
+        return self.validating or self.testing or self.sanity_checking
+
+    @property
+    def sanity_checking(self) -> bool:
+        return self.state.running_stage == "sanity_checking"
+
+    @sanity_checking.setter
+    def sanity_checking(self, value: bool) -> None:
+        if type(value) is not bool:
+            raise TypeError("`sanity_checking` must be a bool.")
+        if value:
+            self.state.set_running_stage("sanity_checking")
+        elif self.sanity_checking:
+            self.state.set_running_stage(None)
 
     @property
     def should_stop(self) -> bool:

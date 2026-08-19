@@ -186,7 +186,7 @@ class ProgressBarCallback(Callback):
     def on_validation_epoch_start(self, trainer: Trainer, module: Module) -> None:
         # Opens the transient validation bar sized from the cached validation
         # batch total; it clears itself from the terminal when closed.
-        if not self._rendering or trainer._sanity_checking:
+        if not self._rendering or trainer.sanity_checking:
             return
         self._val_bar = True
         self._batch_counts["validating"] = 0
