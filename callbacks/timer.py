@@ -16,32 +16,58 @@
 
 from __future__ import annotations
 
+import re
 import time
+from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, override
+
+from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.types import TrainerStage
+from syntheticmind.utilities.distributed import is_rank_zero
+from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.utilities.types import Batch, StateDict, StepOutput, TrainerStage
 
 if TYPE_CHECKING:
     from syntheticmind.core.trainer import Trainer
 
-__all__: list[str] = ["TimerCallback"]
+__all__: list[str] = ["Timer"]
 
-type _TimerStage = Literal["fit", "train", "validate", "test", "predict"]
+type _TimerStage = Literal[
+    "fit",
+    "train",
+    "sanity_check",
+    "validate",
+    "test",
+    "predict"
+]
 
 
-class TimerCallback(Callback):
+class Timer(Callback):
     # Wall-clock timing over the fit lifecycle: per-epoch training durations,
     # per-pass validation durations, and the final summary splitting total
     # time into its training and validation components.
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        duration: str | timedelta | dict[str, int] | None = None,
+        interval: Literal["step", "epoch"] = "step",
+        verbose: bool = True
+    ) -> None:
         # Zeroes the fit-start and epoch-start timestamps and the accumulated
         # training and validation totals.
         super().__init__()
+        self._duration: float | None = self._parse_duration(duration)
+        if interval not in {"step", "epoch"}:
+            raise MisconfigurationError(
+                f"Unsupported Timer interval {interval!r}. Expected 'step' or 'epoch'."
+            )
+        self._interval: Literal["step", "epoch"] = interval
+        self._verbose: bool = verbose
         self._start_times: dict[_TimerStage, float | None] = {
             "fit": None,
             "train": None,
+            "sanity_check": None,
             "validate": None,
             "test": None,
             "predict": None
@@ -49,6 +75,7 @@ class TimerCallback(Callback):
         self._elapsed_times: dict[_TimerStage, float] = {
             "fit": 0.0,
             "train": 0.0,
+            "sanity_check": 0.0,
             "validate": 0.0,
             "test": 0.0,
             "predict": 0.0
@@ -56,6 +83,7 @@ class TimerCallback(Callback):
         self._last_stage_durations: dict[_TimerStage, float] = {
             "fit": 0.0,
             "train": 0.0,
+            "sanity_check": 0.0,
             "validate": 0.0,
             "test": 0.0,
             "predict": 0.0
@@ -64,6 +92,27 @@ class TimerCallback(Callback):
         self._current_train_epoch_time: float = 0.0
         self._epoch_start_time: float | None = None
         self._last_epoch_time: float = 0.0
+        self._stage_start_times: dict[_TimerStage, float | None] = {
+            "fit": None,
+            "train": None,
+            "sanity_check": None,
+            "validate": None,
+            "test": None,
+            "predict": None
+        }
+        self._end_times: dict[_TimerStage, float | None] = {
+            "fit": None,
+            "train": None,
+            "sanity_check": None,
+            "validate": None,
+            "test": None,
+            "predict": None
+        }
+        self._training_wall_start: float | None = None
+        self._training_wall_end: float | None = None
+        self._training_time_offset: float = 0.0
+        self._restored: bool = False
+        self._time_limit_reached: bool = False
 
     @override
     def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
@@ -74,12 +123,35 @@ class TimerCallback(Callback):
         elif stage == "predict":
             self._reset_stage("predict")
 
-    def time_elapsed(self, stage: _TimerStage = "fit") -> float:
-        elapsed: float = self._elapsed_times[stage]
-        start_time: float | None = self._start_times[stage]
-        if start_time is not None:
-            elapsed += time.perf_counter() - start_time
-        return elapsed
+    def start_time(self, stage: _TimerStage = "train") -> float | None:
+        return self._stage_start_times[stage]
+
+    def end_time(self, stage: _TimerStage = "train") -> float | None:
+        return self._end_times[stage]
+
+    def time_elapsed(self, stage: _TimerStage = "train") -> float:
+        if stage == "train":
+            elapsed: float = self._training_time_offset
+            if self._training_wall_start is not None:
+                training_end_time: float = (
+                    self._training_wall_end
+                    if self._training_wall_end is not None
+                    else time.perf_counter()
+                )
+                elapsed: float = elapsed + training_end_time - self._training_wall_start
+            return elapsed
+        stage_start_time: float | None = self.start_time(stage)
+        if stage_start_time is None:
+            return 0.0
+        stage_end_time: float | None = self.end_time(stage)
+        if stage_end_time is None:
+            return time.perf_counter() - stage_start_time
+        return stage_end_time - stage_start_time
+
+    def time_remaining(self, stage: _TimerStage = "train") -> float | None:
+        if self._duration is None:
+            return None
+        return self._duration - self.time_elapsed(stage)
 
     @override
     def on_fit_start(self, trainer: Trainer, module: Module) -> None:
@@ -88,11 +160,20 @@ class TimerCallback(Callback):
             self._elapsed_times[stage] = 0.0
             self._start_times[stage] = None
             self._last_stage_durations[stage] = 0.0
+            self._stage_start_times[stage] = None
+            self._end_times[stage] = None
+        if not self._restored:
+            self._training_time_offset = 0.0
+        self._restored = False
+        self._training_wall_start: float | None = None
+        self._training_wall_end: float | None = None
+        self._time_limit_reached: bool = False
         self._last_train_epoch_time: float = 0.0
         self._current_train_epoch_time: float = 0.0
-        self._epoch_start_time = None
-        self._last_epoch_time = 0.0
+        self._epoch_start_time: float | None = None
+        self._last_epoch_time: float = 0.0
         self._start_stage("fit")
+        self._check_time_remaining(trainer)
 
     @override
     def on_fit_end(self, trainer: Trainer, module: Module) -> None:
@@ -102,10 +183,25 @@ class TimerCallback(Callback):
         self._stop_stage("fit")
 
     @override
+    def on_train_start(self, trainer: Trainer, module: Module) -> None:
+        current_time: float = time.perf_counter()
+        self._training_wall_start: float | None = current_time
+        self._training_wall_end: float | None = None
+        self._stage_start_times["train"] = current_time
+        self._end_times["train"] = None
+
+    @override
+    def on_train_end(self, trainer: Trainer, module: Module) -> None:
+        self._pause_training()
+        if self._training_wall_start is not None:
+            self._training_wall_end: float | None = time.perf_counter()
+            self._end_times["train"] = self._training_wall_end
+
+    @override
     def on_train_epoch_start(self, trainer: Trainer, module: Module) -> None:
         # Marks the beginning of the training epoch.
         self._current_train_epoch_time: float = 0.0
-        self._epoch_start_time = time.perf_counter()
+        self._epoch_start_time: float | None = time.perf_counter()
         self._resume_training()
 
     @override
@@ -116,6 +212,20 @@ class TimerCallback(Callback):
         self._last_train_epoch_time: float = self._current_train_epoch_time
         self._current_train_epoch_time: float = 0.0
         self._close_epoch()
+        if self._interval == "epoch":
+            self._check_time_remaining(trainer)
+
+    @override
+    def on_train_batch_end(
+        self,
+        trainer: Trainer,
+        module: Module,
+        outputs: StepOutput,
+        batch: Batch,
+        batch_idx: int
+    ) -> None:
+        if self._interval == "step":
+            self._check_time_remaining(trainer)
 
     @override
     def on_validation_start(self, trainer: Trainer, module: Module) -> None:
@@ -159,6 +269,9 @@ class TimerCallback(Callback):
     @override
     def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
         self._pause_training()
+        if self._training_wall_start is not None and self._training_wall_end is None:
+            self._training_wall_end: float | None = time.perf_counter()
+            self._end_times["train"] = self._training_wall_end
         self._close_epoch()
         self._stop_stage("validate")
         self._stop_stage("test")
@@ -181,9 +294,34 @@ class TimerCallback(Callback):
     def last_predict_time(self) -> float:
         return self._last_stage_duration("predict")
 
+    @property
+    def time_limit_reached(self) -> bool:
+        return self._time_limit_reached
+
+    @override
+    def state_dict(self) -> StateDict:
+        return {
+            "time_elapsed": {
+                stage: self.time_elapsed(stage)
+                for stage in self._elapsed_times
+            }
+        }
+
+    @override
+    def load_state_dict(self, state_dict: StateDict) -> None:
+        time_elapsed: object = state_dict.get("time_elapsed", {})
+        if isinstance(time_elapsed, dict):
+            training_elapsed: object = time_elapsed.get("train", 0.0)
+            if isinstance(training_elapsed, (int, float)):
+                self._training_time_offset: float = float(training_elapsed)
+        self._restored: bool = True
+
     def _start_stage(self, stage: _TimerStage) -> None:
         if self._start_times[stage] is None:
-            self._start_times[stage] = time.perf_counter()
+            current_time: float = time.perf_counter()
+            self._start_times[stage] = current_time
+            self._stage_start_times[stage] = current_time
+            self._end_times[stage] = None
 
     def _stop_stage(self, stage: _TimerStage) -> None:
         start_time: float | None = self._start_times[stage]
@@ -192,6 +330,7 @@ class TimerCallback(Callback):
         duration: float = time.perf_counter() - start_time
         self._elapsed_times[stage] += duration
         self._last_stage_durations[stage] = duration
+        self._end_times[stage] = start_time + duration
         self._start_times[stage] = None
 
     def _last_stage_duration(self, stage: _TimerStage) -> float:
@@ -201,7 +340,7 @@ class TimerCallback(Callback):
         elapsed: float = self._current_train_epoch_time
         start_time: float | None = self._start_times["train"]
         if start_time is not None:
-            elapsed += time.perf_counter() - start_time
+            elapsed: float = elapsed + time.perf_counter() - start_time
         return elapsed
 
     def _epoch_time_elapsed(self) -> float:
@@ -213,6 +352,8 @@ class TimerCallback(Callback):
         self._start_times[stage] = None
         self._elapsed_times[stage] = 0.0
         self._last_stage_durations[stage] = 0.0
+        self._stage_start_times[stage] = None
+        self._end_times[stage] = None
 
     def _resume_training(self) -> None:
         self._start_stage("train")
@@ -229,5 +370,55 @@ class TimerCallback(Callback):
     def _close_epoch(self) -> None:
         if self._epoch_start_time is None:
             return
-        self._last_epoch_time = time.perf_counter() - self._epoch_start_time
-        self._epoch_start_time = None
+        self._last_epoch_time: float = time.perf_counter() - self._epoch_start_time
+        self._epoch_start_time: float | None = None
+
+    def _check_time_remaining(self, trainer: Trainer) -> None:
+        if self._duration is None:
+            return
+        should_stop: bool = self.time_elapsed("train") >= self._duration
+        should_stop: bool = trainer.strategy.reduce_boolean_decision(should_stop)
+        trainer_should_stop: bool = trainer.should_stop or should_stop
+        trainer.should_stop = trainer_should_stop
+        if should_stop and not self._time_limit_reached:
+            self._time_limit_reached: bool = True
+            if self._verbose and is_rank_zero():
+                elapsed: timedelta = timedelta(seconds=int(self.time_elapsed("train")))
+                log.info(f"Time limit reached after {elapsed}; requesting training stop.")
+
+    def _parse_duration(
+        self,
+        duration: str | timedelta | dict[str, int] | None
+    ) -> float | None:
+        if duration is None:
+            return None
+        parsed_duration: timedelta
+        if isinstance(duration, str):
+            duration_match: re.Match[str] | None = re.fullmatch(
+                r"(\d+):(\d\d):(\d\d):(\d\d)",
+                duration.strip()
+            )
+            if duration_match is None:
+                raise MisconfigurationError(
+                    f"Invalid Timer duration {duration!r}. Expected 'DD:HH:MM:SS'."
+                )
+            parsed_duration: timedelta = timedelta(
+                days=int(duration_match.group(1)),
+                hours=int(duration_match.group(2)),
+                minutes=int(duration_match.group(3)),
+                seconds=int(duration_match.group(4))
+            )
+        elif isinstance(duration, dict):
+            try:
+                parsed_duration: timedelta = timedelta(**duration)
+            except (TypeError, OverflowError) as exception:
+                raise MisconfigurationError(
+                    f"Invalid Timer duration mapping {duration!r}."
+                ) from exception
+        elif isinstance(duration, timedelta):
+            parsed_duration: timedelta = duration
+        else:
+            raise TypeError(
+                "Timer duration must be a string, datetime.timedelta, dictionary, or None."
+            )
+        return parsed_duration.total_seconds()

@@ -81,4 +81,13 @@
     2. Integer counts, fractional counts, full-loader values, zero disabling, empty loaders, unsized loaders, and impossible sub-batch fractions now retain distinct and verified meanings.
     3. Sanity validation defaults to two batches, clips to the real validation budget, supports all-batch execution through `-1`, and never replays during checkpoint continuation.
     4. Effective training, validation, sanity, testing, and prediction batch counts are available through the established public Trainer inspection properties.
-    5. The next foundational termination capability is the standard `max_time` contract, which must stop safely at batch boundaries without confusing hard elapsed-time termination with cooperative stopping.
+    5. The next foundational termination capability is the standard `max_time` contract, whose elapsed-time signal must remain cooperative rather than being mislabeled as a hard boundary.
+
+| Strategic Note | Standard Wall-Clock Control | Date: 19 August 2026 | Time: 01:15 PM | Name: Ghost |
+
+    1. ✅ `Trainer(max_time=...)` and the public `Timer` callback now provide standard wall-clock termination without importing Lightning branding or internal architecture.
+    2. Duration expiration raises one synchronized cooperative stop request. Minimum epoch and step requirements may delay the exit, while the existing hard epoch and step limits retain precedence.
+    3. The timer persists elapsed training time through checkpoints, prevents depleted resumes from consuming another batch, and counts validation wall time after training has begun.
+    4. Public timing queries retain the latest stage semantics expected by users, while separate internal measurements provide truthful epoch presentation without redefining the public contract.
+    5. The terminal remains restrained: Trainer-installed timers do not emit raw logger chatter, and a completed fit records `max_time reached` in the existing compact summary.
+    6. The next sequential Trainer boundary must be selected from source-backed capability dependencies rather than inserting an isolated convenience in the middle of the runtime.

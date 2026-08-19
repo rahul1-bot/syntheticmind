@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, override
 import torch
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.callbacks.timer import TimerCallback
+from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.distributed import is_rank_zero
@@ -435,6 +435,9 @@ class ProgressBarCallback(Callback):
         else:
             metrics = {}
         parts: list[str] = [f"✓ {stage} complete"]
+        timer: Timer | None = self._timer(trainer)
+        if stage == "fit" and timer is not None and timer.time_limit_reached:
+            parts.append("max_time reached")
         parts.extend(self._renderer.metric_parts(metrics))
         parts.append(self._renderer.format_duration(self._stage_duration(trainer, stage)))
         self._renderer.write_permanent(" · ".join(parts))
@@ -465,7 +468,7 @@ class ProgressBarCallback(Callback):
         return None
 
     def _stage_elapsed(self, trainer: Trainer, running_stage: RunningStage) -> float:
-        timer: TimerCallback | None = self._timer(trainer)
+        timer: Timer | None = self._timer(trainer)
         if running_stage == "training" and timer is not None:
             return timer._train_epoch_time_elapsed()
         started_at: float = self._stage_started_at[running_stage]
@@ -474,13 +477,13 @@ class ProgressBarCallback(Callback):
         return time.perf_counter() - started_at
 
     def _epoch_duration(self, trainer: Trainer) -> float:
-        timer: TimerCallback | None = self._timer(trainer)
+        timer: Timer | None = self._timer(trainer)
         if timer is not None:
             return timer._epoch_time_elapsed()
         return self._stage_elapsed(trainer, "training")
 
     def _stage_duration(self, trainer: Trainer, stage: TrainerStage) -> float:
-        timer: TimerCallback | None = self._timer(trainer)
+        timer: Timer | None = self._timer(trainer)
         if timer is not None:
             duration: float = timer.time_elapsed(stage)
             if duration > 0.0:
@@ -489,9 +492,9 @@ class ProgressBarCallback(Callback):
             return 0.0
         return time.perf_counter() - self._setup_started_at
 
-    def _timer(self, trainer: Trainer) -> TimerCallback | None:
+    def _timer(self, trainer: Trainer) -> Timer | None:
         for callback in trainer.callbacks:
-            if isinstance(callback, TimerCallback):
+            if isinstance(callback, Timer):
                 return callback
         return None
 

@@ -214,6 +214,7 @@ class Trainer:
         min_epochs: int | None = None,
         max_steps: int = -1,
         min_steps: int | None = None,
+        max_time: str | timedelta | dict[str, int] | None = None,
         accelerator: str | Accelerator = "auto",
         strategy: str | Strategy = "auto",
         devices: int = 1,
@@ -441,9 +442,25 @@ class Trainer:
                 "Trainer was configured with enable_progress_bar=False but received "
                 "a ProgressBarCallback in callbacks."
             )
-        if enable_progress_bar:
-            from syntheticmind.callbacks.timer import TimerCallback
+        from syntheticmind.callbacks.timer import Timer
 
+        timer_callbacks: list[Timer] = [
+            callback
+            for callback in self.callbacks
+            if isinstance(callback, Timer)
+        ]
+        if max_time is not None:
+            if timer_callbacks:
+                warnings.warn(
+                    "Ignoring Trainer(max_time=...) because the callback list already contains a Timer.",
+                    stacklevel=2
+                )
+            else:
+                timer: Timer = Timer(duration=max_time, interval="step", verbose=False)
+                self.callbacks.append(timer)
+                timer_callbacks.append(timer)
+
+        if enable_progress_bar:
             progress_index: int | None = next(
                 (
                     index
@@ -452,8 +469,8 @@ class Trainer:
                 ),
                 None
             )
-            if not any(isinstance(callback, TimerCallback) for callback in self.callbacks):
-                timer: TimerCallback = TimerCallback()
+            if not timer_callbacks:
+                timer = Timer(verbose=False)
                 if progress_index is None:
                     self.callbacks.append(timer)
                 else:
