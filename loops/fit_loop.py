@@ -225,20 +225,26 @@ class FitLoop(Loop):
         # These arrive after the epoch loop has already dispatched its epoch
         # metrics, so they are flushed here directly to the logger from rank
         # zero and the module's logging buffer is cleared afterwards.
-        logged: dict[str, LoggedMetric] = module.logged_metrics
+        logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return
         log_metrics: dict[str, float] = {}
         callback_metrics: dict[str, float] = {}
         progress_bar_metrics: dict[str, float] = {}
-        for name, metric in logged.items():
-            val: float = metric.compute(trainer.strategy.root_device)
+        for metric in logged:
+            val: float = metric.compute_epoch(trainer.strategy.root_device)
+            metric_name: str = metric.output_name(on_step=False)
             if metric.on_step or metric.on_epoch:
-                callback_metrics[name] = val
+                callback_metrics[metric.base_name()] = val
+                callback_metrics[metric_name] = val
             if metric.logger:
-                log_metrics[name] = val
+                log_metrics[metric_name] = val
             if metric.progress_bar:
-                progress_bar_metrics[name] = val
+                progress_bar_metrics[metric_name] = val
+            if metric.is_metric:
+                reset: object = getattr(metric.value, "reset")
+                if callable(reset):
+                    reset()
         trainer._callback_metrics.update(callback_metrics)
         trainer._update_logged_metrics(log_metrics)
         trainer._update_progress_bar_metrics("training", progress_bar_metrics)

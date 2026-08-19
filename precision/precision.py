@@ -82,7 +82,14 @@ class Precision:
         **kwargs: object
     ) -> None:
         del optimizer
-        model.backward(tensor, *args, **kwargs)
+        model.trainer._call_module_hook(
+            model,
+            "backward",
+            model.backward,
+            tensor,
+            *args,
+            **kwargs
+        )
 
     def post_backward(self, tensor: torch.Tensor, module: Module) -> torch.Tensor:
         detached_tensor: torch.Tensor = tensor.detach()

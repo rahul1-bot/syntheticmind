@@ -93,9 +93,14 @@ class MetricLoggingContract:
     _training_step_hook_names: ClassVar[tuple[str, ...]] = (
         "training_step",
         "on_before_backward",
+        "backward",
         "on_after_backward",
         "on_before_optimizer_step",
+        "optimizer_step",
+        "configure_gradient_clipping",
+        "clip_gradients",
         "on_before_zero_grad",
+        "optimizer_zero_grad",
         "on_train_batch_start",
         "on_train_batch_end"
     )
@@ -151,7 +156,14 @@ class MetricLoggingContract:
         "on_save_checkpoint",
         "on_load_checkpoint",
         "predict_step",
-        "configure_optimizers"
+        "configure_optimizers",
+        "lr_scheduler_step",
+        "on_sanity_check_start",
+        "on_sanity_check_end",
+        "on_exception",
+        "state_dict",
+        "load_state_dict",
+        "configure_callbacks"
     )
 
     @classmethod

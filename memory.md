@@ -361,3 +361,14 @@
     5. A terminal stream is process-local state and must not be pickled into spawn workers. Serializing only renderer configuration and reconstructing its stream preserves standard progress behavior across process start methods.
     6. Multiprocessing parent reconciliation must include every public inspection mapping. Returning model weights and callback metrics while dropping logged metrics leaves a stage that executed correctly in workers but lies when inspected from the parent.
     7. The unresolved adjacent contract is metric-name forking when one value is routed to both step and epoch scopes. That behavior belongs to the `Module.log` audit rather than being inferred from the Trainer cache alone.
+
+| Memory | Metric Definition and Reduction Semantics | Date: 19 August 2026 | Time: 10:21 PM | Name: Ghost |
+
+    1. A metric name is publication identity, not storage identity. Correct storage also requires the originating hook and applicable dataloader index; otherwise independent inherited hooks overwrite or combine values that the public API treats separately.
+    2. A value published at both scopes has three meaningful names: the base callback-monitor name, the `_step` publication name, and the `_epoch` publication name. Logger and progress routes use the forked names, while callback state keeps the base and the applicable fork.
+    3. Batch size is observation data rather than immutable metric metadata. Including it in duplicate-definition comparison rejects a normal smaller final batch and therefore breaks weighted epoch means.
+    4. A distributed epoch mean must reduce its accumulated numerator and denominator. Reducing each batch to a rank mean first is mathematically wrong when ranks or batches contain unequal sample counts.
+    5. Stateful TorchMetrics values cannot be treated as repeated scalar observations. The metric object owns updates and synchronization, the harness stores one reference per metric identity, computes at the epoch boundary, and then resets the state.
+    6. Optional ecosystem support must not impose eager process-wide side effects. Importing TorchMetrics during core module import initialized enough ancillary runtime state to crash macOS fork workers; a lazy type boundary restored ordinary fork execution without weakening Metric support.
+    7. Routing predicates must be applied while records are reduced, not reconstructed later from a set of public names. Two hooks may publish the same name with different logger or progress settings, and name-only filtering selects the wrong record after collision.
+    8. Python 3.14 currently rejects `torch.compile` execution in the installed PyTorch runtime. The logging methods retain the compiler-disabled boundary and eager behavior is verified, but live graph-compilation execution remains externally unavailable rather than falsely reported as tested.

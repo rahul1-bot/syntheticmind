@@ -1000,7 +1000,7 @@ class Trainer:
         self._is_mid_epoch_validation = False
         self._callback_metrics.clear()
         self._logged_metrics.clear()
-        module._reset_logged_metrics()
+        module._reset_logging_state()
         self._reset_progress_bar_metrics()
         self._total_train_batches: int | None = None
         self._total_val_batches: list[int | None] | None = None
@@ -1351,7 +1351,7 @@ class Trainer:
         self._active_exception = None
         self._callback_metrics.clear()
         self._logged_metrics.clear()
-        module._reset_logged_metrics()
+        module._reset_logging_state()
         self._reset_progress_bar_metrics("validating")
         self._total_val_batches: list[int | None] | None = None
         self._val_combined_loader: CombinedLoader | None = None
@@ -1470,7 +1470,7 @@ class Trainer:
         self._active_exception = None
         self._callback_metrics.clear()
         self._logged_metrics.clear()
-        module._reset_logged_metrics()
+        module._reset_logging_state()
         self._reset_progress_bar_metrics("testing")
         self._total_test_batches: list[int | None] | None = None
         self._test_combined_loader: CombinedLoader | None = None
@@ -1594,7 +1594,7 @@ class Trainer:
         self._active_exception = None
         self._callback_metrics.clear()
         self._logged_metrics.clear()
-        module._reset_logged_metrics()
+        module._reset_logging_state()
         self._reset_progress_bar_metrics("predicting")
         self._total_predict_batches: list[int | None] | None = None
         self._predict_combined_loader: CombinedLoader | None = None
@@ -1989,23 +1989,20 @@ class Trainer:
     def _preview_logged_metrics(
         self,
         module: Module,
-        running_stage: RunningStage,
-        dataloader_idx: int = 0,
-        include_dataloader_idx: bool = False
+        running_stage: RunningStage
     ) -> None:
         callback_metrics: dict[str, float] = {}
         logged_metrics: dict[str, float] = {}
         progress_bar_metrics: dict[str, float] = {}
-        for name, metric in module.logged_metrics.items():
+        for metric in module.logged_metrics:
             if not metric.on_step:
                 continue
-            metric_name: str = (
-                f"{name}/dataloader_idx_{dataloader_idx}"
-                if include_dataloader_idx and metric.add_dataloader_idx
-                else name
-            )
-            value: float = metric.compute(self.strategy.root_device)
+            value: float | None = metric.compute_step(self.strategy.root_device)
+            if value is None:
+                continue
+            metric_name: str = metric.output_name(on_step=True)
             if running_stage == "training":
+                callback_metrics[metric.base_name()] = value
                 callback_metrics[metric_name] = value
             if metric.logger:
                 logged_metrics[metric_name] = value
@@ -2644,7 +2641,7 @@ class Trainer:
                 self._last_val_dataloader_reload_epoch = None
             self._validation_schedule.mark_validation_end()
             self.validate_loop.epoch_metrics = {}
-            module._reset_logged_metrics()
+            module._reset_logging_state()
             self._callback_metrics.clear()
             self._logged_metrics.clear()
             self._reset_progress_bar_metrics("validating")

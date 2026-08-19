@@ -196,8 +196,16 @@
     4. ✅ The default progress renderer now consumes synchronized values and reconstructs its process-local stream after serialization, making enabled progress compatible with spawn execution.
     5. ✅ Focused CPU, MPS, subprocess, spawn, fork, notebook-fork, repeated-stage, multiple-dataloader, and two-rank synchronization probes pass together with compilation, diff validation, and targeted type inspection without invoking a linter.
 
-| Progress Todo | Standard Module Logging Contract | Date: 19 August 2026 | Time: 09:51 PM | Name: Ghost |
+| Progress Complete | Standard Module Logging API and Reduction Contract | Date: 19 August 2026 | Time: 10:21 PM | Name: Ghost |
 
-    1. Audit `Module.log`, `log_dict`, `MetricLoggingConfiguration`, and buffered reduction behavior against the pinned reference and established metric conventions before changing the public surface.
-    2. Resolve scalar and supported metric-value validation, step and epoch name forking, duplicate-definition conflicts, reduction and batch-size semantics, dataloader suffix composition, and hook-specific defaults through one coherent contract.
-    3. Verify inheritance timing, repeated hooks, local accelerators, distributed synchronization, checkpoint interaction, and logger routing before committing and synchronizing the next phase.
+    1. ✅ `Module.log` and `log_dict` expose the established parameter names, order, defaults, value families, hook-specific routing defaults, and prediction or unsupported-hook restrictions.
+    2. ✅ Scalar validation, supported reduction normalization, duplicate metadata enforcement, hook and dataloader storage identities, step and epoch name forking, logger warnings, and registered TorchMetrics ownership are implemented.
+    3. ✅ Batch-size inference and variable explicit weights produce sample-weighted means; distributed mean, sum, minimum, and maximum reductions preserve their mathematical semantics across ranks and optional process groups.
+    4. ✅ Logger, callback, progress, evaluation-result, and checkpoint-monitor routing remain distinct across same-name records, step-only values, epoch-only values, hidden metrics, multiple dataloaders, and rank-zero-only calls.
+    5. ✅ CPU, MPS, subprocess DDP, spawn, fork, notebook-fork, TorchMetrics, checkpoint, inheritance-hook, repeated-stage, compilation, source-comment, diff, and targeted type verification pass within the available Python 3.14 runtime without invoking a linter.
+
+| Progress Todo | Tensor Metric State and Graph Propagation | Date: 19 August 2026 | Time: 10:21 PM | Name: Ghost |
+
+    1. Compare the pinned tensor-valued `Trainer.callback_metrics` and `Trainer.logged_metrics` contracts with SyntheticMind's current scalar inspection mappings and every downstream callback, scheduler, launcher, logger, and presentation consumer.
+    2. Preserve tensor device, dtype, detachment, and `enable_graph` semantics through the public metric state while converting only at logger and terminal boundaries that require Python scalars.
+    3. Verify checkpoint monitoring, early stopping, plateau scheduling, multiprocessing state transfer, CPU, MPS, distributed execution, and graph-lifetime behavior before the next synchronized development checkpoint.

@@ -101,23 +101,28 @@ class DistributedUtils:
     def all_reduce(
         cls,
         tensor: torch.Tensor,
-        op: dist.ReduceOp = dist.ReduceOp.SUM  # type: ignore[assignment]
+        op: dist.ReduceOp.RedOpType = dist.ReduceOp.SUM,
+        group: dist.ProcessGroup | None = None
     ) -> torch.Tensor:
         # Applies the reduction collective in place across all ranks and returns
         # the same tensor for chaining; local execution returns it untouched.
         if not cls.is_distributed():
             return tensor
-        dist.all_reduce(tensor, op=op)  # type: ignore[arg-type]
+        dist.all_reduce(tensor, op=op, group=group)  # type: ignore[arg-type]
         return tensor
 
     @classmethod
-    def all_reduce_mean(cls, tensor: torch.Tensor) -> torch.Tensor:
+    def all_reduce_mean(
+        cls,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup | None = None
+    ) -> torch.Tensor:
         # Computes the cross-rank mean by summing in place and dividing by the
         # world size; local execution returns the tensor untouched.
         if not cls.is_distributed():
             return tensor
-        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
-        reduced_mean: torch.Tensor = tensor / cls.get_world_size()
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM, group=group)
+        reduced_mean: torch.Tensor = tensor / dist.get_world_size(group)
         return reduced_mean
 
 
@@ -153,10 +158,11 @@ def barrier() -> None:
 
 def all_reduce(
     tensor: torch.Tensor,
-    op: dist.ReduceOp = dist.ReduceOp.SUM  # type: ignore[assignment]
+    op: dist.ReduceOp.RedOpType = dist.ReduceOp.SUM,
+    group: dist.ProcessGroup | None = None
 ) -> torch.Tensor:
     # Function alias for DistributedUtils.all_reduce.
-    return DistributedUtils.all_reduce(tensor, op=op)
+    return DistributedUtils.all_reduce(tensor, op=op, group=group)
 
 
 def rank_zero_only(fn: Callable[P, T]) -> Callable[P, T | None]:

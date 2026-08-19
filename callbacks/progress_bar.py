@@ -390,10 +390,13 @@ class ProgressBarCallback(Callback):
 
     def _capture_metrics(self, module: Module) -> dict[str, float]:
         captured: dict[str, float] = {}
-        for name, metric in module.logged_metrics.items():
-            if not metric.progress_bar:
+        for metric in module.logged_metrics:
+            if not metric.progress_bar or not metric.on_step:
                 continue
-            captured[name] = metric.compute(module.device)
+            value: float | None = metric.compute_step(module.device)
+            if value is None:
+                continue
+            captured[metric.output_name(on_step=True)] = value
             if len(captured) == 2:
                 break
         return captured

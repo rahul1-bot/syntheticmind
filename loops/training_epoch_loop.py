@@ -62,7 +62,7 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.metric_accumulator import MetricAccumulator
+from syntheticmind.utilities.metric_accumulator import MetricAccumulator, extract_batch_size
 from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.utilities.types import (
     Batch,
@@ -251,9 +251,7 @@ class TrainingEpochLoop(Loop):
         self._grad_scaler: torch.GradScaler | None = trainer.scaler
 
         total_batches: int | None = combined_loader._length()
-        epoch_accum: dict[str, MetricAccumulator] = {}
-        epoch_logger_names: set[str] = set()
-        epoch_progress_bar_names: set[str] = set()
+        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]] = {}
         loader_state_restored: bool = self._combined_loader_state_restored
         self._combined_loader_state_restored: bool = False
         resume_batch_offset: int = (
@@ -487,8 +485,7 @@ class TrainingEpochLoop(Loop):
                 module,
                 state,
                 epoch_accum,
-                epoch_logger_names,
-                epoch_progress_bar_names,
+                batch,
                 is_accumulating
             )
 
@@ -583,9 +580,7 @@ class TrainingEpochLoop(Loop):
         self._completed_batches: int = 0
         self._dispatch_epoch_metrics(
             epoch_accum,
-            state,
-            epoch_logger_names,
-            epoch_progress_bar_names
+            state
         )
 
     def _make_autocast_context(
@@ -976,9 +971,8 @@ class TrainingEpochLoop(Loop):
         self,
         module: Module,
         state: TrainerState,
-        epoch_accum: dict[str, MetricAccumulator],
-        epoch_logger_names: set[str],
-        epoch_progress_bar_names: set[str],
+        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]],
+        batch: Batch,
         is_accumulating: bool = False
     ) -> None:
         # Drains the module's logged-metric buffer after each batch. Metrics
@@ -988,30 +982,49 @@ class TrainingEpochLoop(Loop):
         # partially accumulated step is not reported. Epoch-scoped metrics feed
         # per-name accumulators under each metric's declared reduction, with
         # logger visibility tracked separately from callback visibility.
-        logged: dict[str, LoggedMetric] = module.logged_metrics
+        logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
+            module._reset_logged_metrics()
             return
 
         step_metrics: dict[str, float] = {}
         callback_step_metrics: dict[str, float] = {}
         progress_bar_step_metrics: dict[str, float] = {}
-        for name, metric in logged.items():
-            value: float = metric.compute(self.trainer.strategy.root_device)
-
+        for metric in logged:
             if metric.on_step:
-                callback_step_metrics[name] = value
-                if metric.logger:
-                    step_metrics[name] = value
-                if metric.progress_bar:
-                    progress_bar_step_metrics[name] = value
+                value: float | None = metric.compute_step(
+                    self.trainer.strategy.root_device
+                )
+                if value is not None:
+                    step_name: str = metric.output_name(on_step=True)
+                    callback_step_metrics[metric.base_name()] = value
+                    callback_step_metrics[step_name] = value
+                    if metric.logger:
+                        step_metrics[step_name] = value
+                    if metric.progress_bar:
+                        progress_bar_step_metrics[step_name] = value
             if metric.on_epoch:
-                if name not in epoch_accum:
-                    epoch_accum[name] = MetricAccumulator(reduction=metric.reduction)
-                epoch_accum[name].update(value, batch_size=metric.batch_size)
-                if metric.logger:
-                    epoch_logger_names.add(name)
-                if metric.progress_bar:
-                    epoch_progress_bar_names.add(name)
+                if metric.storage_key not in epoch_accum:
+                    epoch_accum[metric.storage_key] = (
+                        metric,
+                        MetricAccumulator(
+                            reduction=metric.reduction,
+                            sync_dist=metric.sync_dist,
+                            sync_dist_group=metric.sync_dist_group,
+                            rank_zero_only=metric.rank_zero_only
+                        )
+                    )
+                accumulator: MetricAccumulator = epoch_accum[metric.storage_key][1]
+                if metric.is_metric:
+                    accumulator.update_metric(metric.value)
+                else:
+                    resolved_batch_size: int | None = metric.batch_size
+                    if resolved_batch_size is None and metric.reduction == "mean":
+                        resolved_batch_size = extract_batch_size(batch)
+                    accumulator.update(
+                        metric.local_value(),
+                        batch_size=resolved_batch_size
+                    )
 
         self.trainer._callback_metrics.update(callback_step_metrics)
         self.trainer._update_logged_metrics(step_metrics)
@@ -1030,10 +1043,8 @@ class TrainingEpochLoop(Loop):
 
     def _dispatch_epoch_metrics(
         self,
-        epoch_accum: dict[str, MetricAccumulator],
-        state: TrainerState,
-        epoch_logger_names: set[str],
-        epoch_progress_bar_names: set[str]
+        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]],
+        state: TrainerState
     ) -> None:
         # Reduces every epoch accumulator at the epoch boundary. The reduced
         # values update the trainer's callback metrics on every rank, because
@@ -1042,20 +1053,21 @@ class TrainingEpochLoop(Loop):
         # logging configuration requested logger visibility.
         if not epoch_accum:
             return
-        all_reduced: dict[str, float] = {}
-        for name in epoch_accum:
-            all_reduced[name] = epoch_accum[name].compute()
-        self.trainer._callback_metrics.update(all_reduced)
-        progress_bar_reduced: dict[str, float] = {
-            name: value
-            for name, value in all_reduced.items()
-            if name in epoch_progress_bar_names
-        }
-        logger_reduced: dict[str, float] = {
-            name: value
-            for name, value in all_reduced.items()
-            if name in epoch_logger_names
-        }
+        callback_reduced: dict[str, float] = {}
+        logger_reduced: dict[str, float] = {}
+        progress_bar_reduced: dict[str, float] = {}
+        for metric, accumulator in epoch_accum.values():
+            value: float = accumulator.compute(self.trainer.strategy.root_device)
+            epoch_name: str = metric.output_name(on_step=False)
+            callback_reduced[metric.base_name()] = value
+            callback_reduced[epoch_name] = value
+            if metric.logger:
+                logger_reduced[epoch_name] = value
+            if metric.progress_bar:
+                progress_bar_reduced[epoch_name] = value
+        for _, accumulator in epoch_accum.values():
+            accumulator.reset()
+        self.trainer._callback_metrics.update(callback_reduced)
         self.trainer._update_logged_metrics(logger_reduced)
         self.trainer._update_progress_bar_metrics("training", progress_bar_reduced)
         if not self.trainer.loggers:

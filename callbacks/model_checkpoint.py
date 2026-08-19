@@ -544,13 +544,15 @@ class ModelCheckpoint(Checkpoint):
             name: torch.tensor(value)
             for name, value in trainer.callback_metrics.items()
         }
-        for name, metric in module.logged_metrics.items():
-            value: torch.Tensor | float = metric.value
-            if isinstance(value, torch.Tensor):
-                if value.numel() == 1:
-                    candidates[name] = value.detach().cpu()
-            else:
-                candidates[name] = torch.tensor(value)
+        for metric in module.logged_metrics:
+            if not metric.on_step:
+                continue
+            value: float | None = metric.compute_step(module.device)
+            if value is None:
+                continue
+            metric_name: str = metric.output_name(on_step=metric.on_step)
+            candidates[metric.base_name()] = torch.tensor(value)
+            candidates[metric_name] = torch.tensor(value)
         candidates["epoch"] = torch.tensor(trainer.current_epoch)
         candidates["step"] = torch.tensor(trainer.global_step)
         return candidates

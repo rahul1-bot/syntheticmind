@@ -52,7 +52,7 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.evaluation import evaluation_context
-from syntheticmind.utilities.metric_accumulator import MetricAccumulator
+from syntheticmind.utilities.metric_accumulator import MetricAccumulator, extract_batch_size
 from syntheticmind.utilities.model_helpers import (
     ModuleMode,
     is_overridden,
@@ -85,6 +85,9 @@ class EvaluationLoop(Loop):
         self.inference_mode: bool = inference_mode
         self.verbose: bool = True
         self.epoch_metrics: dict[str, float] = {}
+        self._callback_epoch_metrics: dict[str, float] = {}
+        self._logger_epoch_metrics: dict[str, float] = {}
+        self._progress_bar_epoch_metrics: dict[str, float] = {}
         self.results: list[dict[str, float]] = []
 
     def run(self) -> list[dict[str, float]]:
@@ -103,6 +106,9 @@ class EvaluationLoop(Loop):
         # epoch-end and stage-end hook pairs, and publish the reduced metrics
         # to the trainer's callback metrics.
         self.epoch_metrics: dict[str, float] = {}
+        self._callback_epoch_metrics: dict[str, float] = {}
+        self._logger_epoch_metrics: dict[str, float] = {}
+        self._progress_bar_epoch_metrics: dict[str, float] = {}
         self.results: list[dict[str, float]] = []
 
         trainer: Trainer = self.trainer
@@ -219,11 +225,9 @@ class EvaluationLoop(Loop):
                 module.on_test_epoch_start
             )
         result_count: int = num_dataloaders if sequential else 1
-        epoch_accumulators: list[dict[str, MetricAccumulator]] = [
+        epoch_accumulators: list[dict[str, tuple[LoggedMetric, MetricAccumulator]]] = [
             {} for _ in range(result_count)
         ]
-        logger_metric_names: list[set[str]] = [set() for _ in range(result_count)]
-        progress_bar_metric_names: list[set[str]] = [set() for _ in range(result_count)]
 
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile(f"setup_{self.stage}_dataloader"):
@@ -254,6 +258,9 @@ class EvaluationLoop(Loop):
                 time.perf_counter() - dataloader_fetch_start_time
             )
             batch: Batch = cast(Batch, fetched_batch)
+            module._current_dataloader_idx = (
+                dataloader_idx if include_dataloader_idx else None
+            )
             batch: Batch = trainer.precision_plugin.convert_input(batch)
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
@@ -384,9 +391,7 @@ class EvaluationLoop(Loop):
 
             trainer._preview_logged_metrics(
                 module,
-                running_stage,
-                dataloader_idx,
-                include_dataloader_idx
+                running_stage
             )
             if self.stage == "validate":
                 trainer._call_callback_hooks(
@@ -423,12 +428,9 @@ class EvaluationLoop(Loop):
             self._accumulate_metrics(
                 module,
                 epoch_accumulators[result_idx],
-                logger_metric_names[result_idx],
-                progress_bar_metric_names[result_idx],
                 state,
                 running_stage,
-                dataloader_idx,
-                include_dataloader_idx
+                batch
             )
 
         self.results: list[dict[str, float]] = [
@@ -441,29 +443,22 @@ class EvaluationLoop(Loop):
             for name, value in result.items()
         }
         if not trainer.sanity_checking:
-            progress_bar_epoch_metrics: dict[str, float] = {
-                name: value
-                for name, value in self.epoch_metrics.items()
-                if any(name in names for names in progress_bar_metric_names)
-            }
-            trainer._update_progress_bar_metrics(running_stage, progress_bar_epoch_metrics)
+            trainer._update_progress_bar_metrics(
+                running_stage,
+                self._progress_bar_epoch_metrics
+            )
 
-        logger_epoch_metrics: dict[str, float] = {
-            name: value
-            for name, value in self.epoch_metrics.items()
-            if any(name in names for names in logger_metric_names)
-        }
         if not trainer.sanity_checking:
-            trainer._update_logged_metrics(logger_epoch_metrics)
+            trainer._update_logged_metrics(self._logger_epoch_metrics)
         if (
             trainer.loggers
-            and logger_epoch_metrics
+            and self._logger_epoch_metrics
             and DistributedUtils.is_rank_zero()
         ):
-            trainer._log_metrics(logger_epoch_metrics, step=state.global_step)
+            trainer._log_metrics(self._logger_epoch_metrics, step=state.global_step)
 
         if self.stage == "validate":
-            self.trainer._callback_metrics.update(self.epoch_metrics)
+            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_validation_epoch_end",
@@ -483,7 +478,7 @@ class EvaluationLoop(Loop):
             }
             for result in self.results:
                 result.update(hook_epoch_metrics)
-            self.trainer._callback_metrics.update(self.epoch_metrics)
+            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_validation_epoch_end",
@@ -508,7 +503,7 @@ class EvaluationLoop(Loop):
             else:
                 module_mode.restore(module)
         else:
-            self.trainer._callback_metrics.update(self.epoch_metrics)
+            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_test_epoch_end",
@@ -528,7 +523,7 @@ class EvaluationLoop(Loop):
             }
             for result in self.results:
                 result.update(hook_epoch_metrics)
-            self.trainer._callback_metrics.update(self.epoch_metrics)
+            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_test_end",
@@ -612,13 +607,10 @@ class EvaluationLoop(Loop):
     def _accumulate_metrics(
         self,
         module: Module,
-        epoch_accum: dict[str, MetricAccumulator],
-        logger_metric_names: set[str],
-        progress_bar_metric_names: set[str],
+        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]],
         state: TrainerState,
         running_stage: RunningStage,
-        dataloader_idx: int,
-        include_dataloader_idx: bool
+        batch: Batch
     ) -> None:
         # Drains the module's logged-metric buffer after each batch. Metrics
         # marked for distributed synchronization are mean-reduced across ranks
@@ -626,31 +618,46 @@ class EvaluationLoop(Loop):
         # zero; epoch-scoped metrics feed per-name accumulators under their
         # declared reduction and batch-size weighting, with logger visibility
         # tracked separately from callback visibility.
-        logged: dict[str, LoggedMetric] = module.logged_metrics
+        logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
+            module._reset_logged_metrics()
             return
 
         step_metrics: dict[str, float] = {}
         progress_bar_step_metrics: dict[str, float] = {}
-        for name, metric in logged.items():
-            metric_name: str = (
-                f"{name}/dataloader_idx_{dataloader_idx}"
-                if include_dataloader_idx and metric.add_dataloader_idx
-                else name
-            )
-            value: float = metric.compute(self.trainer.strategy.root_device)
-            if metric.on_step and metric.logger:
-                step_metrics[metric_name] = value
-            if metric.on_step and metric.progress_bar:
-                progress_bar_step_metrics[metric_name] = value
+        for metric in logged:
+            if metric.on_step:
+                value: float | None = metric.compute_step(
+                    self.trainer.strategy.root_device
+                )
+                if value is not None:
+                    step_name: str = metric.output_name(on_step=True)
+                    if metric.logger:
+                        step_metrics[step_name] = value
+                    if metric.progress_bar:
+                        progress_bar_step_metrics[step_name] = value
             if metric.on_epoch:
-                if metric_name not in epoch_accum:
-                    epoch_accum[metric_name] = MetricAccumulator(reduction=metric.reduction)
-                epoch_accum[metric_name].update(value, batch_size=metric.batch_size)
-                if metric.logger:
-                    logger_metric_names.add(metric_name)
-                if metric.progress_bar:
-                    progress_bar_metric_names.add(metric_name)
+                if metric.storage_key not in epoch_accum:
+                    epoch_accum[metric.storage_key] = (
+                        metric,
+                        MetricAccumulator(
+                            reduction=metric.reduction,
+                            sync_dist=metric.sync_dist,
+                            sync_dist_group=metric.sync_dist_group,
+                            rank_zero_only=metric.rank_zero_only
+                        )
+                    )
+                accumulator: MetricAccumulator = epoch_accum[metric.storage_key][1]
+                if metric.is_metric:
+                    accumulator.update_metric(metric.value)
+                else:
+                    resolved_batch_size: int | None = metric.batch_size
+                    if resolved_batch_size is None and metric.reduction == "mean":
+                        resolved_batch_size = extract_batch_size(batch)
+                    accumulator.update(
+                        metric.local_value(),
+                        batch_size=resolved_batch_size
+                    )
 
         if not self.trainer.sanity_checking:
             self.trainer._update_logged_metrics(step_metrics)
@@ -678,19 +685,23 @@ class EvaluationLoop(Loop):
         # values are folded directly into the epoch-metric mapping so the
         # callback epoch-end hooks observe them, and logger-visible values are
         # emitted from rank zero.
-        logged: dict[str, LoggedMetric] = module.logged_metrics
+        logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return
         hook_logger_metrics: dict[str, float] = {}
         hook_progress_bar_metrics: dict[str, float] = {}
-        for name, metric in logged.items():
-            value: float = metric.compute(self.trainer.strategy.root_device)
+        for metric in logged:
+            value: float = metric.compute_epoch(self.trainer.strategy.root_device)
+            epoch_name: str = metric.output_name(on_step=False)
             if metric.on_epoch:
-                self.epoch_metrics[name] = value
+                self._callback_epoch_metrics[metric.base_name()] = value
+                self._callback_epoch_metrics[epoch_name] = value
             if metric.logger:
-                hook_logger_metrics[name] = value
+                if metric.on_epoch:
+                    self.epoch_metrics[epoch_name] = value
+                hook_logger_metrics[epoch_name] = value
             if metric.progress_bar:
-                hook_progress_bar_metrics[name] = value
+                hook_progress_bar_metrics[epoch_name] = value
         if hook_logger_metrics and self.trainer.loggers and DistributedUtils.is_rank_zero():
             self.trainer._log_metrics(hook_logger_metrics, step=state.global_step)
         if not self.trainer.sanity_checking:
@@ -701,13 +712,23 @@ class EvaluationLoop(Loop):
             )
         module._reset_logged_metrics()
 
-    @staticmethod
     def _reduce_epoch_metrics(
-        epoch_accum: dict[str, MetricAccumulator]
+        self,
+        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]]
     ) -> dict[str, float]:
         # Reduces every per-name accumulator to its final epoch value under the
         # reduction mode each metric declared when it was logged.
         reduced: dict[str, float] = {}
-        for name in epoch_accum:
-            reduced[name] = epoch_accum[name].compute()
+        for metric, accumulator in epoch_accum.values():
+            value: float = accumulator.compute(self.trainer.strategy.root_device)
+            epoch_name: str = metric.output_name(on_step=False)
+            self._callback_epoch_metrics[metric.base_name()] = value
+            self._callback_epoch_metrics[epoch_name] = value
+            if metric.logger:
+                reduced[epoch_name] = value
+                self._logger_epoch_metrics[epoch_name] = value
+            if metric.progress_bar:
+                self._progress_bar_epoch_metrics[epoch_name] = value
+        for _, accumulator in epoch_accum.values():
+            accumulator.reset()
         return reduced

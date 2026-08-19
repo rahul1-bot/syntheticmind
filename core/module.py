@@ -33,13 +33,17 @@
 #
 # Author: Rahul Sawhney
 
+from __future__ import annotations
+
 import builtins
+import numbers
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, ClassVar, Literal, cast, overload, override
 
 import torch
+import torch.distributed as dist
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 
@@ -58,10 +62,39 @@ from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
 from syntheticmind.utilities.types import Batch, ModelOutput, Reduction, StepOutput
 
 if TYPE_CHECKING:
+    from torchmetrics import Metric, MetricCollection
+
     from syntheticmind.core.trainer import Trainer
     from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 
 __all__: list[str] = ["Module", "MetricLoggingConfiguration", "LoggedMetric"]
+
+_metric_type: type[nn.Module] | None = None
+_metric_collection_type: type[nn.Module] | None = None
+
+
+def _torchmetrics_types() -> tuple[type[nn.Module], type[nn.Module]]:
+    global _metric_type, _metric_collection_type
+    if _metric_type is None or _metric_collection_type is None:
+        from torchmetrics import Metric, MetricCollection
+
+        _metric_type = Metric
+        _metric_collection_type = MetricCollection
+    return _metric_type, _metric_collection_type
+
+
+def _is_metric(value: object) -> bool:
+    if not isinstance(value, nn.Module):
+        return False
+    metric_type, _ = _torchmetrics_types()
+    return isinstance(value, metric_type)
+
+
+def _is_metric_collection(value: object) -> bool:
+    if not isinstance(value, nn.Module):
+        return False
+    _, metric_collection_type = _torchmetrics_types()
+    return isinstance(value, metric_collection_type)
 
 
 class MetricLoggingConfiguration(BaseModel):
@@ -198,11 +231,15 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         self._strict_loading: bool | None = None
         self._current_epoch: int = 0
         self._global_step: int = 0
-        self._logged_metrics: dict[str, LoggedMetric] = {}
+        self._logged_metrics: list[LoggedMetric] = []
+        self._logged_metric_metadata: dict[str, tuple[object, ...]] = {}
+        self._metric_attributes: dict[int, str] | None = None
+        self._logging_warning_keys: set[str] = set()
         self._running_stage: str | None = None
         self._device: torch.device = torch.device("cpu")
         self._dtype: torch.dtype = torch.float32
         self._current_fx_name: str | None = None
+        self._current_dataloader_idx: int | None = None
         self._param_requires_grad_state: dict[torch.nn.Parameter, bool] = {}
 
     @contextmanager
@@ -406,11 +443,23 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         )
         return None
 
+    @torch.compiler.disable
     def log(
         self,
         name: str,
-        value: torch.Tensor | builtins.float,
-        configuration: MetricLoggingConfiguration | None = None
+        value: numbers.Number | torch.Tensor | Metric,
+        prog_bar: bool = False,
+        logger: bool | None = None,
+        on_step: bool | None = None,
+        on_epoch: bool | None = None,
+        reduce_fx: str | Callable[[object], object] = "mean",
+        enable_graph: bool = False,
+        sync_dist: bool = False,
+        sync_dist_group: dist.ProcessGroup | None = None,
+        add_dataloader_idx: bool = True,
+        batch_size: int | None = None,
+        metric_attribute: str | None = None,
+        rank_zero_only: bool = False
     ) -> None:
         # Records one named metric into the module-level buffer that the loops
         # drain after every batch. The call is validated against the execution
@@ -450,18 +499,52 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #             MetricLoggingConfiguration(progress_bar=True, on_step=True)
         #         )
         #         return {"loss": loss}
-        if self._trainer is None:
-            raise MisconfigurationError(
-                "self.log() can only be called from within a hook or step method "
-                "during trainer.fit(), trainer.validate(), or trainer.test()."
+        if not isinstance(name, str):
+            raise TypeError(f"self.log() metric names must be strings, got {type(name).__name__}.")
+        for parameter_name, parameter_value in (
+            ("prog_bar", prog_bar),
+            ("enable_graph", enable_graph),
+            ("sync_dist", sync_dist),
+            ("add_dataloader_idx", add_dataloader_idx),
+            ("rank_zero_only", rank_zero_only)
+        ):
+            if type(parameter_value) is not bool:
+                raise TypeError(f"self.log({parameter_name}=...) requires a bool.")
+        for parameter_name, parameter_value in (
+            ("logger", logger),
+            ("on_step", on_step),
+            ("on_epoch", on_epoch)
+        ):
+            if parameter_value is not None and type(parameter_value) is not bool:
+                raise TypeError(f"self.log({parameter_name}=...) requires a bool or None.")
+        if metric_attribute is not None and not isinstance(metric_attribute, str):
+            raise TypeError("self.log(metric_attribute=...) requires a string or None.")
+        if isinstance(value, Mapping):
+            raise ValueError(f"self.log({name!r}, ...) does not support nested mappings.")
+        is_metric_value: bool = _is_metric(value)
+        if not isinstance(value, (numbers.Number, torch.Tensor)) and not is_metric_value:
+            raise ValueError(
+                f"self.log({name!r}, ...) does not support values of type {type(value).__name__}."
             )
+        if self._trainer is None:
+            warning_key: str = "detached_module"
+            if warning_key not in self._logging_warning_keys:
+                warnings.warn(
+                    "self.log() was called before the module was attached to a Trainer.",
+                    RuntimeWarning,
+                    stacklevel=2
+                )
+                self._logging_warning_keys.add(warning_key)
+            return
         if self._trainer.barebones:
-            if self._trainer.is_global_zero:
+            warning_key = "barebones"
+            if self._trainer.is_global_zero and warning_key not in self._logging_warning_keys:
                 warnings.warn(
                     "self.log() is disabled because Trainer(barebones=True) is configured.",
                     RuntimeWarning,
                     stacklevel=2
                 )
+                self._logging_warning_keys.add(warning_key)
             return
         if self._running_stage is None:
             raise MisconfigurationError(
@@ -473,13 +556,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
                 "self.log() is not supported in predict_step or predict hooks. "
                 "Use the return value of predict_step() instead."
             )
-        resolved_configuration: MetricLoggingConfiguration = (
-            configuration if configuration is not None else MetricLoggingConfiguration()
-        )
-        if (
-            resolved_configuration.add_dataloader_idx
-            and "/dataloader_idx_" in name
-        ):
+        if add_dataloader_idx and "/dataloader_idx_" in name:
             raise MisconfigurationError(
                 f"self.log() received metric name {name!r} containing "
                 "`/dataloader_idx_` while add_dataloader_idx=True."
@@ -493,39 +570,191 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         resolved_on_epoch: bool
         resolved_on_step, resolved_on_epoch = MetricLoggingContract.resolve(
             hook_name=current_fx_name,
-            on_step=resolved_configuration.on_step,
-            on_epoch=resolved_configuration.on_epoch
+            on_step=on_step,
+            on_epoch=on_epoch
         )
-
-        resolved_value: torch.Tensor | builtins.float = value
-        if isinstance(resolved_value, torch.Tensor):
-            resolved_value: torch.Tensor | builtins.float = resolved_value.detach()
+        if not resolved_on_step and not resolved_on_epoch:
+            raise MisconfigurationError(
+                "self.log(on_step=False, on_epoch=False) does not publish a metric."
+            )
+        reduction: Reduction
+        if isinstance(reduce_fx, str):
+            reduction_name: str = reduce_fx.lower()
+            reduction_name = "mean" if reduction_name == "avg" else reduction_name
+            if reduction_name not in {"mean", "sum", "min", "max"}:
+                raise MisconfigurationError(
+                    "self.log() supports only mean, sum, min, and max reductions. "
+                    "Use a torchmetrics.Metric for custom reductions."
+                )
+            reduction = cast(Reduction, reduction_name)
+        elif callable(reduce_fx):
+            if reduce_fx is torch.mean:
+                reduction = "mean"
+            elif reduce_fx is torch.sum or reduce_fx is builtins.sum:
+                reduction = "sum"
+            elif reduce_fx is torch.min or reduce_fx is builtins.min:
+                reduction = "min"
+            elif reduce_fx is torch.max or reduce_fx is builtins.max:
+                reduction = "max"
+            else:
+                raise MisconfigurationError(
+                    "self.log() supports only mean, sum, min, and max reductions. "
+                    "Use a torchmetrics.Metric for custom reductions."
+                )
+        else:
+            raise MisconfigurationError(
+                "self.log() supports only mean, sum, min, and max reductions. "
+                "Use a torchmetrics.Metric for custom reductions."
+            )
+        if batch_size is not None and (type(batch_size) is not int or batch_size < 1):
+            raise MisconfigurationError("self.log(batch_size=...) requires a positive integer.")
+        resolved_logger: bool = True if logger is None else logger
+        if logger is True and not self._trainer.loggers and self._trainer.is_global_zero:
+            warning_key = f"missing_logger:{name}"
+            if warning_key not in self._logging_warning_keys:
+                warnings.warn(
+                    f"self.log({name!r}, ..., logger=True) was called without a configured logger.",
+                    RuntimeWarning,
+                    stacklevel=2
+                )
+                self._logging_warning_keys.add(warning_key)
+        resolved_value: torch.Tensor | Metric
+        if is_metric_value:
+            if metric_attribute is None:
+                if self._metric_attributes is None:
+                    self._metric_attributes = {
+                        id(metric): attribute
+                        for attribute, metric in self.named_modules()
+                        if _is_metric(metric)
+                    }
+                metric_attribute = self._metric_attributes.get(id(value))
+                if metric_attribute is None:
+                    raise MisconfigurationError(
+                        "A logged torchmetrics.Metric must be assigned to a Module attribute or "
+                        "supplied with metric_attribute."
+                    )
+            else:
+                try:
+                    registered_metric: nn.Module = self.get_submodule(metric_attribute)
+                except AttributeError as exception:
+                    raise MisconfigurationError(
+                        f"metric_attribute={metric_attribute!r} is not a registered Module attribute."
+                    ) from exception
+                if registered_metric is not value:
+                    raise MisconfigurationError(
+                        f"metric_attribute={metric_attribute!r} does not reference the logged Metric."
+                    )
+            resolved_value = cast("Metric", value)
+        else:
+            default_dtype: torch.dtype = torch.get_default_dtype()
+            if default_dtype not in {torch.float32, torch.float64}:
+                default_dtype = torch.float32
+            if isinstance(value, torch.Tensor):
+                if value.numel() != 1:
+                    raise ValueError(
+                        f"self.log({name!r}, ...) requires a single-element Tensor. "
+                        f"Received shape {tuple(value.shape)}."
+                    )
+                resolved_value = value if enable_graph else value.detach().clone()
+                resolved_value = resolved_value.squeeze()
+                if not torch.is_floating_point(resolved_value):
+                    warning_key = f"non_floating_metric:{current_fx_name}:{name}"
+                    if (
+                        self._trainer.is_global_zero
+                        and warning_key not in self._logging_warning_keys
+                    ):
+                        warnings.warn(
+                            f"self.log({name!r}, ...) converted a non-floating Tensor "
+                            f"to {default_dtype} for reduction.",
+                            RuntimeWarning,
+                            stacklevel=2
+                        )
+                        self._logging_warning_keys.add(warning_key)
+                if not torch.is_floating_point(resolved_value) or resolved_value.dtype not in {
+                    torch.float32,
+                    torch.float64
+                }:
+                    resolved_value = resolved_value.to(default_dtype)
+            else:
+                resolved_value = torch.tensor(
+                    value,
+                    device=self.device,
+                    dtype=default_dtype
+                ).squeeze()
 
         metric: LoggedMetric = LoggedMetric(
+            name=name,
+            hook_name=current_fx_name,
             value=resolved_value,
-            progress_bar=resolved_configuration.progress_bar,
-            logger=resolved_configuration.logger,
+            progress_bar=prog_bar,
+            logger=resolved_logger,
             on_step=resolved_on_step,
             on_epoch=resolved_on_epoch,
-            reduction=resolved_configuration.reduction,
-            sync_distributed=resolved_configuration.sync_distributed,
-            add_dataloader_idx=resolved_configuration.add_dataloader_idx,
-            batch_size=resolved_configuration.batch_size
+            reduction=reduction,
+            enable_graph=enable_graph,
+            sync_dist=sync_dist,
+            sync_dist_group=sync_dist_group,
+            add_dataloader_idx=add_dataloader_idx,
+            batch_size=batch_size,
+            metric_attribute=metric_attribute,
+            rank_zero_only=rank_zero_only,
+            dataloader_idx=self._current_dataloader_idx
         )
-        self._logged_metrics[name] = metric
+        previous_metadata: tuple[object, ...] | None = self._logged_metric_metadata.get(
+            metric.storage_key
+        )
+        if previous_metadata is not None and previous_metadata != metric.metadata:
+            raise MisconfigurationError(
+                f"self.log({name!r}, ...) was called twice in {current_fx_name} "
+                "with different arguments."
+            )
+        self._logged_metric_metadata[metric.storage_key] = metric.metadata
+        self._logged_metrics.append(metric)
 
+    @torch.compiler.disable
     def log_dict(
         self,
-        dictionary: dict[str, torch.Tensor | builtins.float],
-        configuration: MetricLoggingConfiguration | None = None
+        dictionary: Mapping[str, numbers.Number | torch.Tensor | Metric] | MetricCollection,
+        prog_bar: bool = False,
+        logger: bool | None = None,
+        on_step: bool | None = None,
+        on_epoch: bool | None = None,
+        reduce_fx: str | Callable[[object], object] = "mean",
+        enable_graph: bool = False,
+        sync_dist: bool = False,
+        sync_dist_group: dist.ProcessGroup | None = None,
+        add_dataloader_idx: bool = True,
+        batch_size: int | None = None,
+        rank_zero_only: bool = False
     ) -> None:
         # Records a group of named metrics by applying log() to every entry
         # under one shared configuration.
-        for name, value in dictionary.items():
-            self.log(
+        if not isinstance(dictionary, Mapping) and not _is_metric_collection(dictionary):
+            raise TypeError(
+                "self.log_dict() requires a mapping or torchmetrics.MetricCollection."
+            )
+        items: object = dictionary.items()
+        if not isinstance(items, Iterator):
+            items = iter(items)
+        log: Callable[..., None] = cast(Callable[..., None], self.log)
+        for name, value in cast(
+            "Iterator[tuple[str, numbers.Number | torch.Tensor | Metric]]",
+            items
+        ):
+            log(
                 name=name,
                 value=value,
-                configuration=configuration
+                prog_bar=prog_bar,
+                logger=logger,
+                on_step=on_step,
+                on_epoch=on_epoch,
+                reduce_fx=reduce_fx,
+                enable_graph=enable_graph,
+                sync_dist=sync_dist,
+                sync_dist_group=sync_dist_group,
+                add_dataloader_idx=add_dataloader_idx,
+                batch_size=batch_size,
+                rank_zero_only=rank_zero_only
             )
 
     @override
@@ -1080,15 +1309,20 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         return get_local_rank()
 
     @property
-    def logged_metrics(self) -> dict[str, LoggedMetric]:
+    def logged_metrics(self) -> list[LoggedMetric]:
         # Copy of the current logging buffer; returned as a new dictionary so
         # loop-side draining and model-side inspection cannot interfere.
-        return dict(self._logged_metrics)
+        return list(self._logged_metrics)
 
     def _reset_logged_metrics(self) -> None:
         # Clears the logging buffer; invoked by the loops after each dispatch
         # window so values are never dispatched twice.
         self._logged_metrics.clear()
+        self._current_dataloader_idx = None
+
+    def _reset_logging_state(self) -> None:
+        self._reset_logged_metrics()
+        self._logged_metric_metadata.clear()
 
 
 class LoggedMetric:
@@ -1099,55 +1333,171 @@ class LoggedMetric:
     # the module's logging buffer between dispatch windows; __slots__ keeps
     # the per-batch allocation cost minimal.
     __slots__: tuple[str, ...] = (
+        "name",
+        "hook_name",
         "value",
         "progress_bar",
         "logger",
         "on_step",
         "on_epoch",
         "reduction",
-        "sync_distributed",
+        "enable_graph",
+        "sync_dist",
+        "sync_dist_group",
         "add_dataloader_idx",
         "batch_size",
-        "_computed_value"
+        "metric_attribute",
+        "rank_zero_only",
+        "dataloader_idx",
+        "storage_key",
+        "metadata",
+        "_computed_step_value"
     )
 
     def __init__(
         self,
-        value: torch.Tensor | float,
+        name: str,
+        hook_name: str,
+        value: torch.Tensor | Metric,
         progress_bar: bool,
         logger: bool,
         on_step: bool,
         on_epoch: bool,
         reduction: Reduction,
-        sync_distributed: bool,
+        enable_graph: bool,
+        sync_dist: bool,
+        sync_dist_group: dist.ProcessGroup | None,
         add_dataloader_idx: bool,
-        batch_size: int | None
+        batch_size: int | None,
+        metric_attribute: str | None,
+        rank_zero_only: bool,
+        dataloader_idx: int | None
     ) -> None:
         # Stores the already-detached value and the fully resolved routing
         # flags; resolution against per-hook defaults happens in Module.log
         # before construction.
-        self.value: torch.Tensor | float = value
+        self.name: str = name
+        self.hook_name: str = hook_name
+        self.value: torch.Tensor | Metric = value
         self.progress_bar: bool = progress_bar
         self.logger: bool = logger
         self.on_step: bool = on_step
         self.on_epoch: bool = on_epoch
         self.reduction: Reduction = reduction
-        self.sync_distributed: bool = sync_distributed
+        self.enable_graph: bool = enable_graph
+        self.sync_dist: bool = sync_dist
+        self.sync_dist_group: dist.ProcessGroup | None = sync_dist_group
         self.add_dataloader_idx: bool = add_dataloader_idx
         self.batch_size: int | None = batch_size
-        self._computed_value: float | None = None
+        self.metric_attribute: str | None = metric_attribute
+        self.rank_zero_only: bool = rank_zero_only
+        self.dataloader_idx: int | None = dataloader_idx
+        dataloader_key: str = (
+            f".{dataloader_idx}"
+            if add_dataloader_idx and dataloader_idx is not None
+            else ""
+        )
+        self.storage_key: str = f"{hook_name}.{name}{dataloader_key}"
+        self.metadata: tuple[object, ...] = (
+            progress_bar,
+            logger,
+            on_step,
+            on_epoch,
+            reduction,
+            enable_graph,
+            sync_dist,
+            sync_dist_group,
+            add_dataloader_idx,
+            metric_attribute,
+            rank_zero_only
+        )
+        self._computed_step_value: float | None = None
+
+    @property
+    def is_metric(self) -> bool:
+        return _is_metric(self.value)
+
+    def output_name(self, on_step: bool) -> str:
+        name: str = self.name
+        if self.on_step and self.on_epoch:
+            name = f"{name}_{'step' if on_step else 'epoch'}"
+        if self.add_dataloader_idx and self.dataloader_idx is not None:
+            name = f"{name}/dataloader_idx_{self.dataloader_idx}"
+        return name
+
+    def base_name(self) -> str:
+        name: str = self.name
+        if self.add_dataloader_idx and self.dataloader_idx is not None:
+            name = f"{name}/dataloader_idx_{self.dataloader_idx}"
+        return name
+
+    def local_value(self) -> float:
+        if self.is_metric:
+            raise RuntimeError("A torchmetrics.Metric has no per-call scalar epoch value.")
+        tensor_value: torch.Tensor = cast(torch.Tensor, self.value)
+        return float(tensor_value.detach().item())
+
+    def compute_step(self, device: torch.device) -> float | None:
+        if self._computed_step_value is not None:
+            return self._computed_step_value
+        value: object = self.value
+        if self.is_metric:
+            value = getattr(value, "_forward_cache")
+            if value is None:
+                return None
+        if isinstance(value, numbers.Number):
+            tensor: torch.Tensor = torch.tensor(value, device=device)
+        elif isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                raise ValueError(
+                    f"The logged value for {self.name!r} must contain one element."
+                )
+            tensor = value.clone()
+        else:
+            raise ValueError(
+                f"The logged value for {self.name!r} could not be converted to a scalar."
+            )
+        if self.sync_dist and not self.rank_zero_only and DistributedUtils.is_distributed():
+            if self.reduction == "mean":
+                tensor = DistributedUtils.all_reduce_mean(
+                    tensor,
+                    group=self.sync_dist_group
+                )
+            else:
+                operation: dist.ReduceOp.RedOpType = {
+                    "sum": dist.ReduceOp.SUM,
+                    "min": dist.ReduceOp.MIN,
+                    "max": dist.ReduceOp.MAX
+                }[self.reduction]
+                tensor = DistributedUtils.all_reduce(
+                    tensor,
+                    op=operation,
+                    group=self.sync_dist_group
+                )
+        self._computed_step_value = float(tensor.detach().item())
+        return self._computed_step_value
 
     def compute(self, device: torch.device) -> float:
-        if self._computed_value is not None:
-            return self._computed_value
-        value: torch.Tensor | float = self.value
-        if self.sync_distributed and DistributedUtils.is_distributed():
-            if isinstance(value, torch.Tensor):
-                value = value.clone()
-            else:
-                value = torch.tensor(value, device=device)
-            value = DistributedUtils.all_reduce_mean(value)
-        if isinstance(value, torch.Tensor):
-            value = value.item()
-        self._computed_value = float(value)
-        return self._computed_value
+        value: float | None = self.compute_step(device)
+        if value is not None:
+            return value
+        metric: Metric = cast("Metric", self.value)
+        computed: object = metric.compute()
+        if not isinstance(computed, torch.Tensor) or computed.numel() != 1:
+            raise ValueError(
+                f"The compute() result for logged Metric {self.name!r} must be a single-element Tensor."
+            )
+        return float(computed.detach().item())
+
+    def compute_epoch(self, device: torch.device) -> float:
+        if not self.is_metric:
+            value: float | None = self.compute_step(device)
+            assert value is not None
+            return value
+        metric: Metric = cast("Metric", self.value)
+        computed: object = metric.compute()
+        if not isinstance(computed, torch.Tensor) or computed.numel() != 1:
+            raise ValueError(
+                f"The compute() result for logged Metric {self.name!r} must be a single-element Tensor."
+            )
+        return float(computed.detach().item())

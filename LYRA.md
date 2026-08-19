@@ -284,3 +284,12 @@
     3. Distributed synchronization has one owner per buffered metric, and the same computed value reaches hooks, accumulation, parent reconciliation, and the terminal rather than being reduced twice or rendered from rank-local state.
     4. Spawn execution now retains the default progress UI because terminal streams are reconstructed inside workers rather than serialized from the parent process.
     5. CPU, MPS, subprocess, spawn, fork, and notebook-fork evidence establishes the implemented boundary. The next sequential audit moves into `Module.log` value, naming, reduction, and duplicate-definition contracts.
+
+| Strategic Note | Standard Metric Extension Contract | Date: 19 August 2026 | Time: 10:21 PM | Name: Ghost |
+
+    1. ✅ Model subclasses now use the established `self.log` and `self.log_dict` keyword vocabulary directly; SyntheticMind no longer requires a private configuration object at the call boundary.
+    2. Step and epoch publication, callback monitoring identity, dataloader suffixes, hook ownership, scalar validation, variable batch weighting, and duplicate-definition rejection now form one coherent inherited contract.
+    3. Distributed reductions preserve their mathematical meanings across ranks and optional process groups. Rank-zero-only publication suppresses collectives, while TorchMetrics continues to own its stateful synchronization behavior.
+    4. TorchMetrics integration is lazy by design. This preserves ordinary fork-based execution and prevents optional metric support from initializing a large dependency graph when a model logs only tensors or numbers.
+    5. Focused local, accelerator, launcher, distributed, checkpoint, and TorchMetrics probes establish the implemented behavior without invoking Ruff or another linter.
+    6. The next adjacent audit concerns tensor-valued public metric state and full `enable_graph` propagation beyond the buffer; logger backends must continue receiving ordinary scalars at their boundary.
