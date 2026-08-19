@@ -67,6 +67,7 @@ from syntheticmind.accelerators.topology import DeviceTopology, resolve_device_t
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
+from syntheticmind.callbacks.model_summary import ModelSummary
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
@@ -254,6 +255,7 @@ class Trainer:
         log_every_n_steps: int | None = None,
         enable_checkpointing: bool | None = None,
         enable_progress_bar: bool | None = None,
+        enable_model_summary: bool | None = None,
         accumulate_grad_batches: int = 1,
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None,
@@ -409,6 +411,11 @@ class Trainer:
                 "`enable_checkpointing` must be a bool or None, got "
                 f"{enable_checkpointing!r}."
             )
+        if enable_model_summary is not None and type(enable_model_summary) is not bool:
+            raise TypeError(
+                "`enable_model_summary` must be a bool or None, got "
+                f"{enable_model_summary!r}."
+            )
         if (
             log_every_n_steps is not None
             and (
@@ -439,6 +446,9 @@ class Trainer:
         )
         resolved_enable_checkpointing: bool = (
             True if enable_checkpointing is None else enable_checkpointing
+        )
+        resolved_enable_model_summary: bool = (
+            True if enable_model_summary is None else enable_model_summary
         )
         self._default_root_dir: Path = (
             Path.cwd()
@@ -516,6 +526,7 @@ class Trainer:
         self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
         self.log_every_n_steps: int = resolved_log_every_n_steps
         self.enable_progress_bar: bool = resolved_enable_progress_bar
+        self.enable_model_summary: bool = resolved_enable_model_summary
         self.num_sanity_val_steps: int | float = resolved_num_sanity_val_steps
         self.fast_dev_run: int | bool = resolved_fast_dev_run
         self.overfit_batches: int | float = resolved_overfit_batches
@@ -658,6 +669,12 @@ class Trainer:
                     self.callbacks.insert(progress_index, timer)
             if not progress_callbacks:
                 self.callbacks.append(ProgressBarCallback())
+
+        if resolved_enable_model_summary and not any(
+            isinstance(callback, ModelSummary)
+            for callback in self.callbacks
+        ):
+            self.callbacks.append(ModelSummary())
 
         non_checkpoint_callbacks: list[Callback] = [
             callback

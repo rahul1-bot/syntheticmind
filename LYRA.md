@@ -151,3 +151,12 @@
     4. Exact stochastic continuation is verified across shuffled data and dropout, including interruption inside an epoch. Correctness depends on preserving both dataloader reconstruction state and the random state at the unfinished computation boundary.
     5. Filesystem mutation remains rank-zero owned while checkpoint callback decisions and state remain synchronized across forked, spawned, and externally launched Gloo workers. CPU and MPS paths are executable; CUDA remains explicitly hardware-unverified.
     6. The next dependency-ordered phase is standard model-summary composition through `enable_model_summary`, followed only after its public callback and parameter-count behavior are understood end to end.
+
+| Strategic Note | Model Summary Ownership | Date: 19 August 2026 | Time: 04:26 PM | Name: Ghost |
+
+    1. ✅ Trainer-owned model summary composition now preserves standard enablement, explicit disabling, custom callback precedence, depth selection, callback inheritance, and fit-start timing.
+    2. Summary data is computed from the configured, restored, device-placed, precision-connected model and includes nested structure, shapes when an example input exists, parameter ownership, train and evaluation modes, estimated storage, and FLOPs.
+    3. The summary forward leaves no training mutation behind: temporary hooks, submodule modes, and all supported process and device random states return to their prior values even when the model raises.
+    4. Distributed workers all execute the summary contract, but only global rank zero owns presentation. This behavior is verified under external Gloo, fork, and spawn rather than inferred from a rank check.
+    5. The formal plain renderer remains the Trainer default under the approved restrained console policy; the standard Rich renderer is an explicit opt-in instead of an optional dependency silently taking terminal ownership.
+    6. The next dependency-ordered boundary is the `profiler` parameter and its complete stage, action, artifact, logger, teardown, exception, and distributed ownership semantics.

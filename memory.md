@@ -198,3 +198,13 @@
     5. Public inheritance audits must compare methods as well as constructor signatures. The missing `on_validation_end` override would have bypassed expected subclass behavior even though checkpoint artifacts appeared to save successfully through adjacent hooks.
     6. On this MPS runtime, recursive tensor transfer with `non_blocking=True` produced zeroed or corrupted batches and non-finite training loss. Asynchronous host-to-device transfer is therefore restricted to CUDA until another backend has executable evidence for safe semantics.
     7. Distributed saves must build state on all participating ranks before rank-zero persistence when checkpoint hooks or callback decisions contain collectives. Making only the final filesystem write rank-zero owned avoids deadlock while preserving one authoritative artifact.
+
+| Memory | Model Summary as an Observational Forward Pass | Date: 19 August 2026 | Time: 04:26 PM | Name: Ghost |
+
+    1. A model summary with an example input is a real forward execution. Without explicit restoration it can consume dropout or custom random streams, alter heterogeneous submodule modes, leave forward hooks attached after failure, and change the training run before its first batch.
+    2. Model configuration and precision conversion must precede summarization. Counting or forwarding at Trainer construction would miss layers created by `configure_model`, report the wrong parameter dtype and size, and execute on the wrong device.
+    3. Rank-zero presentation and rank-zero computation are different decisions. Every distributed rank must execute the same summary-side model path when extension behavior may depend on rank or process state, while only one rank should write human-facing output.
+    4. Callback override compatibility includes invocation form. Passing `total_flops` by keyword preserves subclasses that receive newer summary fields through `**summarize_kwargs`; passing it positionally would break an otherwise compatible established override.
+    5. Hierarchical module rows may recursively include child parameters, while direct root parameters belong in a separate leftover row. The total model count remains authoritative and must not be reconstructed by summing overlapping hierarchy rows.
+    6. Optional presentation dependencies must not silently seize the default terminal. The plain renderer provides stable redirected output, while Rich formatting remains an explicit user-selected capability with a clear dependency boundary.
+    7. Uninitialized parameters require a cached warning because table construction queries totals, trainable counts, row counts, size, and formatting repeatedly. Emitting once preserves the defect signal without turning one lazy layer into a warning avalanche.
