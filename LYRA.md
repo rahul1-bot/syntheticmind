@@ -61,9 +61,16 @@
     3. Positional tuples, documented keyword dictionaries, local paths, remote filesystems, nested modules, CPU, MPS, and failure restoration have executable evidence.
     4. Direct source and guideline review, Python compilation, signatures, inheritance, exception probes, artifact reload, and regressions establish the phase without static-analysis tools.
 
-| Strategic Note | Immediate Direction | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+| Strategic Note | Model ONNX Export Contract | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
 
-    1. ONNX export is the next independent model capability and requires an installed-runtime and optional-dependency audit before implementation.
-    2. Legacy and dynamo ONNX paths must retain their actual PyTorch meanings rather than being collapsed behind a cosmetic parameter surface.
-    3. TensorRT remains independent, and `device_mesh` remains deferred until a model-parallel Strategy can create and own a real mesh.
+    1. ✅ SyntheticMind now exposes standard ONNX export through the installed modern dynamo engine and the explicit legacy engine without renaming either concept.
+    2. Input ownership, keyword semantics, dynamic shapes, dynamic axes, evaluation behavior, exact nested mode restoration, return types, dependency diagnostics, and artifact destinations retain distinct executable meanings.
+    3. `ONNXProgram`, local files, byte buffers, remote files, and external-data siblings persist through one SyntheticMind-owned boundary while PyTorch owns graph conversion.
+    4. ONNX checking and ONNX Runtime inference on CPU and MPS-originated models establish usable artifacts rather than serialization-only claims.
+
+| Strategic Note | Immediate Direction | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
+
+    1. TensorRT requires a source and environment audit before implementation because the current machine is Apple silicon without CUDA.
+    2. Dependency-guard behavior may be implemented and verified locally, but successful engine compilation cannot be claimed without a supported CUDA and TensorRT runtime.
+    3. `device_mesh` remains deferred until a model-parallel Strategy can create and own a real mesh rather than exposing an empty compatibility property.
     4. Preserve the private scope, excluded work, terminology discipline, direct guideline review, executable evidence, and `dev` synchronization requirements.

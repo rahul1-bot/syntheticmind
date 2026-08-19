@@ -132,3 +132,11 @@
     3. A dictionary registered as `example_input_array` represents named forward arguments, while a positional dictionary remains available by wrapping the mapping in a one-element tuple.
     4. Representative and check inputs must follow the same model-or-datamodule batch-transfer ownership used during execution so accelerator exports do not trace host tensors against device-resident parameters.
     5. Export serialization belongs to the shared filesystem boundary, while TorchScript compilation and tracing remain PyTorch-owned operations with their original keyword controls and diagnostics.
+
+| Memory | ONNX Export Boundaries | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
+
+    1. PyTorch 2.9 defaults ONNX export to the dynamo engine, which returns an `ONNXProgram`; the legacy TorchScript engine returns `None` and cannot export without a destination.
+    2. ONNX positional samples are tuples, dictionaries represent named forward inputs, and a trailing dictionary within a positional tuple carries mixed keyword inputs under PyTorch's compatibility contract.
+    3. Exporters can mutate model training flags, especially on legacy failures. Exact named-submodule capture and unconditional restoration are therefore required around conversion and serialization.
+    4. Modern ONNX external-data output may create sibling artifacts even for a single requested path; remote persistence must transfer the complete generated sibling set rather than only the primary protobuf.
+    5. A parseable ONNX file is insufficient evidence. Model checking, ONNX Runtime execution, numerical comparison, dynamic-shape execution, accelerator-origin export, and failure restoration establish usable capability.

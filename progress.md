@@ -51,9 +51,17 @@
     3. ✅ Exact nested training modes and the scripting guard restore on success and failure, while exported artifacts remain in evaluation mode.
     4. ✅ CPU, MPS, attached, detached, nested, positional, keyword, local, remote, malformed, compilation, signature, inheritance, source, diff, checkpoint, callback, and runtime regressions pass without static-analysis tools.
 
-| Progress Todo | Standard ONNX Export | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+| Progress Complete | Standard ONNX Export | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
 
-    1. Audit the pinned `to_onnx` signature, installed PyTorch exporter signatures, optional dependencies, input precedence, legacy and dynamo behavior, return meanings, and path support.
-    2. Implement the standard inherited surface through a focused SyntheticMind-owned export component without coupling TensorRT or model-parallel state.
-    3. Verify CPU and applicable MPS execution, positional and keyword inputs, local and supported remote artifacts, mode restoration, exporter failures, signatures, inheritance, compilation, and regressions.
+    1. ✅ The standard `to_onnx` signature supports explicit or registered samples, PyTorch exporter options, local paths, byte buffers, remote filesystems, and optional in-memory modern programs.
+    2. ✅ Modern dynamo and legacy TorchScript export retain separate return, dependency, dynamic-input, fallback, destination, and artifact behavior.
+    3. ✅ Positional, named, and mixed inputs follow transfer-hook ownership; exact nested modes restore across success and failure; default inference exports use evaluation behavior.
+    4. ✅ ONNX checking and ONNX Runtime numerical inference pass for modern, legacy, dynamic-shape, dynamic-axis, CPU, MPS, local, buffer, remote, and external-data paths.
+    5. ✅ Python compilation, signatures, inheritance, import orders, direct source and guideline review, failure probes, diff validation, TorchScript, and checkpoint regressions pass without static-analysis tools.
+
+| Progress Todo | TensorRT Capability Audit | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
+
+    1. Audit the pinned public method and current Torch-TensorRT input, engine, precision, return, persistence, dependency, operating-system, and CUDA contracts.
+    2. Inspect primary source through the pinned checkout, installed metadata, official source, or an ignored external clone without inventing an unverified compatibility surface.
+    3. Implement and verify locally reachable dependency and validation behavior, then record any CUDA-only execution boundary explicitly rather than fabricating successful compilation.
     4. Commit on `dev`, push `origin/dev`, verify exact synchronization, and continue sequentially.

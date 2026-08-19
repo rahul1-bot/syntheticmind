@@ -40,6 +40,7 @@ import numbers
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, ClassVar, Literal, Self, cast, overload, override
 
@@ -303,6 +304,18 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
 
         exporter: ModelTorchScriptExporter = ModelTorchScriptExporter(self)
         return exporter.export(file_path, method, example_inputs, kwargs)
+
+    @torch.no_grad()
+    def to_onnx(
+        self,
+        file_path: str | Path | BytesIO | None = None,
+        input_sample: object | None = None,
+        **kwargs: object
+    ) -> torch.onnx.ONNXProgram | None:
+        from syntheticmind.core.model_export import ModelONNXExporter
+
+        exporter: ModelONNXExporter = ModelONNXExporter(self)
+        return exporter.export(file_path, input_sample, kwargs)
 
     @contextmanager
     def _hook_context(self, hook_name: str) -> Iterator[None]:

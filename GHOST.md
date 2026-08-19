@@ -97,9 +97,19 @@
     4. Exported artifacts save through the existing local and remote filesystem boundary and reload through `torch.jit.load`; nested SyntheticMind modules exclude runtime-only Trainer, logger, metric, device, and hyperparameter properties from scripting.
     5. CPU, MPS, attached and detached models, nested scripting, positional and keyword tracing, hook precedence, local and remote reload, exception restoration, compilation, signatures, inheritance, source, and diff checks pass without a linter or static type checker.
 
-| Active Next Step | Standard ONNX Export | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+| Architecture Decision | Standard ONNX Export | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
 
-    1. Audit the pinned `to_onnx` signature against the installed PyTorch ONNX exporter, installed optional dependencies, input semantics, return contract, mode restoration, and path behavior.
-    2. Keep legacy and dynamo exporter behavior explicit because their dependency, return, and file-production contracts differ materially.
-    3. Keep TensorRT independent and `device_mesh` deferred until their actual accelerator and model-parallel owners are implemented.
-    4. Preserve all scope, terminology, guideline, evidence, and branch-synchronization policies.
+    1. ✅ `Module.to_onnx(file_path=None, input_sample=None, **kwargs)` now preserves the standard inherited public signature and returns the installed PyTorch exporter's `ONNXProgram` or `None` without vendor branding.
+    2. The modern dynamo path follows the installed PyTorch default, supports in-memory programs and exporter verification, while the legacy path requires a destination and retains its `None` return contract.
+    3. Explicit input samples precede `example_input_array`; positional tuples, named dictionaries, mixed positional and keyword calls, and explicit exporter keyword inputs pass through the established model-or-datamodule transfer ownership.
+    4. Exact nested model modes restore after modern, legacy, hook, serialization, and forward failures; inference export defaults to evaluation while explicit PyTorch training-mode controls retain their meanings.
+    5. Local paths, `Path`, `BytesIO`, remote filesystems, and external-data sidecars use one artifact boundary, with parent creation and remote sibling preservation handled independently of ONNX graph conversion.
+    6. ONNX model checking and real ONNX Runtime inference pass for modern, legacy, dynamic-shape, dynamic-axis, positional, keyword, CPU, and MPS exports; compilation, signatures, inheritance, imports, source, diff, TorchScript, and checkpoint regressions also pass without static-analysis tools.
+
+| Active Next Step | TensorRT Capability Audit | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
+
+    1. Audit the pinned `to_tensorrt` surface, installed optional packages, supported operating systems, CUDA requirements, input specifications, return objects, and serialization behavior before adding any API.
+    2. Use current Torch-TensorRT primary source or an ignored external checkout if the local runtime cannot expose the contract directly.
+    3. Do not claim executable TensorRT capability on the Apple-silicon MPS host when the required CUDA runtime is absent; separate implementable dependency guards from hardware-verified compilation.
+    4. Keep `device_mesh` deferred until an actual model-parallel Strategy owns and initializes that state.
+    5. Preserve all scope, terminology, guideline, evidence, and branch-synchronization policies.
