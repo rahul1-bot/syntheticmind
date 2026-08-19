@@ -246,3 +246,11 @@
     3. A repeated-stage subprocess deadlock exposed the danger of an unmatched signal collective after rank zero returned from a launcher. Outer launcher inspection is now local, while synchronized signal decisions remain only at boundaries reached by every rank.
     4. CPU, MPS, exact shuffled checkpoint continuation, external two-rank Gloo, fork, spawn, and subprocess evidence establish the implemented execution boundary without using a linter.
     5. Direct Trainer entry-point dataloader arguments and stateful-loader cursor restoration remain explicit next capabilities; neither will be represented by a cosmetic alias detached from runtime ownership.
+
+| Strategic Note | Direct Data Ownership | Date: 19 August 2026 | Time: 08:58 PM | Name: Ghost |
+
+    1. ✅ Every public Trainer stage now accepts the established direct dataloader parameters while retaining real datamodule and model-owned dataloader paths under one explicit ownership rule.
+    2. Public signatures, model reuse, positional datamodule compatibility, setup timing, data-transfer hooks, checkpoint behavior, and distributed launch transport preserve industry-standard inheritance expectations without copying Lightning-owned identity.
+    3. A real datamodule remains distinguishable from direct data. SyntheticMind does not conceal missing lifecycle state behind a fabricated compatibility adapter.
+    4. The batch-transfer order defect was accelerator-critical rather than cosmetic: user hooks and model steps now receive the converted, device-resident batch on CPU and MPS paths.
+    5. The next sequential capability is checkpointed stateful-loader continuation. Cursor restoration and deterministic replay require one proven owner for every completed batch before the capability can be claimed.

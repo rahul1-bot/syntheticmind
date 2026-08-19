@@ -46,7 +46,7 @@ class _MultiprocessingWorker:
         trainer: Trainer,
         stage: TrainerStage,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage_kwargs: dict[str, object],
         environment: dict[str, str],
         output_path: Path,
@@ -95,7 +95,7 @@ class _MultiprocessingLauncher:
         stage: TrainerStage,
         trainer: Trainer,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage_kwargs: dict[str, object]
     ) -> StageResult:
         self._validate_launch(trainer, module, datamodule, stage_kwargs)
@@ -147,7 +147,7 @@ class _MultiprocessingLauncher:
         self,
         trainer: Trainer,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage_kwargs: dict[str, object]
     ) -> None:
         if getattr(mp.current_process(), "_inheriting", False):
@@ -176,7 +176,7 @@ class _MultiprocessingLauncher:
         trainer: Trainer,
         stage: TrainerStage,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage_kwargs: dict[str, object],
         environment: dict[str, str],
         output_path: Path,

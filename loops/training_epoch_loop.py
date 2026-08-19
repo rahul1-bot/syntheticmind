@@ -301,24 +301,6 @@ class TrainingEpochLoop(Loop):
                 )
                 self._resume_checkpoint_rng_state = None
 
-            trainer._call_callback_hooks(
-                module,
-                "on_train_batch_start",
-                batch,
-                batch_idx,
-                callback_group=callbacks
-            )
-            hook_response: int | None = trainer._call_module_hook(
-                module,
-                "on_train_batch_start",
-                module.on_train_batch_start,
-                batch,
-                batch_idx
-            )
-            if hook_response == -1:
-                self.is_last_batch = True
-                break
-
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
                 batch: Batch = trainer._call_datamodule_hook(
@@ -370,6 +352,24 @@ class TrainingEpochLoop(Loop):
                     batch,
                     dataloader_idx=0
                 )
+
+            trainer._call_callback_hooks(
+                module,
+                "on_train_batch_start",
+                batch,
+                batch_idx,
+                callback_group=callbacks
+            )
+            hook_response: int | None = trainer._call_module_hook(
+                module,
+                "on_train_batch_start",
+                module.on_train_batch_start,
+                batch,
+                batch_idx
+            )
+            if hook_response == -1:
+                self.is_last_batch = True
+                break
 
             # Automatic path: the loss is divided by the accumulation factor
             # so the accumulated gradient matches the equivalent large batch,

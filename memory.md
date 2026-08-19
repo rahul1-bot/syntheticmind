@@ -313,3 +313,14 @@
     6. Persistent PyTorch dataloader workers must be released by dropping the multiprocessing iterator reference and resetting the loader iterator rather than explicitly invoking the private shutdown method; the pinned implementation treats the latter as a regression path.
     7. The inherited `test_step` fallback must forward `dataloader_idx` when the overridden `validation_step` accepts it, while retaining compatibility with legacy two-argument validation overrides. Discarding the index produces valid-looking but incorrectly attributed results.
     8. Stateful loader cursor restoration and deterministic prefix replay are competing resume mechanisms. Integrating both without an explicit ownership rule can skip the completed prefix twice, so Trainer-level state loading remains open until exact continuation is proven.
+
+| Memory | Direct Data Sources and Transfer Ordering | Date: 19 August 2026 | Time: 08:58 PM | Name: Ghost |
+
+    1. Direct dataloaders, a datamodule, and model dataloader hooks are alternative data owners rather than interchangeable objects. One explicit precedence and conflict rule prevents setup, checkpoint, and inheritance behavior from depending on accidental truthiness.
+    2. Positional datamodule compatibility must be resolved before validating the direct-loader argument because the standard entry points historically accept a `DataModule` in that position.
+    3. Model-owned loaders may depend on state created by `configure_model` or `setup`; requesting them before those hooks silently narrows the established lifecycle contract.
+    4. `prepare_data` on the model remains meaningful without a datamodule. Treating all data preparation as datamodule-owned bypasses a public model extension point for direct and model-owned sources.
+    5. Fabricating a datamodule around direct loaders corrupts observable identity and may trigger lifecycle, hyperparameter, state-dictionary, and teardown behavior that the caller never requested.
+    6. Distributed entry-point invocation must pass the optional datamodule by keyword after direct loader parameters enter the public signature; positional forwarding otherwise reclassifies a datamodule as data.
+    7. Batch-start hooks and step argument tuples must be formed after precision conversion and device transfer. Constructing either beforehand retains references to the CPU batch even if a later local variable is replaced with its device-resident form.
+    8. Cursor-aware checkpoint continuation must distinguish stateful loader restoration from stateless deterministic prefix replay at the same structural granularity as nested loader leaves.

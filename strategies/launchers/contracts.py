@@ -81,7 +81,7 @@ class _WorkerOutput(BaseModel):
     progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]]
     last_progress_bar_stage: RunningStage | None
     callback_states: list[StateDict]
-    datamodule_state: StateDict
+    datamodule_state: StateDict | None
     precision_plugin_state: StateDict
     validation_metrics: dict[str, float]
     test_metrics: dict[str, float]

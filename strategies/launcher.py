@@ -52,7 +52,7 @@ class _ProcessLauncher:
         stage: TrainerStage,
         trainer: Trainer,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage_kwargs: dict[str, object]
     ) -> StageResult:
         with trainer._signal_connector.launch_context():

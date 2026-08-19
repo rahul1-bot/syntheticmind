@@ -254,58 +254,6 @@ class EvaluationLoop(Loop):
             )
             batch: Batch = cast(Batch, fetched_batch)
             batch: Batch = trainer.precision_plugin.convert_input(batch)
-            hook_dataloader_idx: int | None = (
-                dataloader_idx if include_dataloader_idx else None
-            )
-            batch_hook_arguments: tuple[object, ...] = (
-                (batch, batch_idx)
-                if hook_dataloader_idx is None
-                else (batch, batch_idx, hook_dataloader_idx)
-            )
-            step_hook: object = (
-                module.validation_step
-                if self.stage == "validate"
-                else module.test_step
-            )
-            step_arguments: tuple[object, ...] = batch_hook_arguments
-            if not is_parameter_in_hook_signature(
-                step_hook,
-                "batch_idx",
-                minimum_arguments=2
-            ):
-                step_arguments = (
-                    (batch,)
-                    if hook_dataloader_idx is None
-                    else (batch, hook_dataloader_idx)
-                )
-
-            if self.stage == "validate":
-                trainer._call_callback_hooks(
-                    module,
-                    "on_validation_batch_start",
-                    *batch_hook_arguments,
-                    callback_group=callbacks
-                )
-                trainer._call_module_hook(
-                    module,
-                    "on_validation_batch_start",
-                    cast(Callable[..., object], module.on_validation_batch_start),
-                    *batch_hook_arguments
-                )
-            else:
-                trainer._call_callback_hooks(
-                    module,
-                    "on_test_batch_start",
-                    *batch_hook_arguments,
-                    callback_group=callbacks
-                )
-                trainer._call_module_hook(
-                    module,
-                    "on_test_batch_start",
-                    cast(Callable[..., object], module.on_test_batch_start),
-                    *batch_hook_arguments
-                )
-
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
                 batch: Batch = trainer._call_datamodule_hook(
@@ -356,6 +304,58 @@ class EvaluationLoop(Loop):
                     module.on_after_batch_transfer,
                     batch,
                     dataloader_idx=dataloader_idx
+                )
+
+            hook_dataloader_idx: int | None = (
+                dataloader_idx if include_dataloader_idx else None
+            )
+            batch_hook_arguments: tuple[object, ...] = (
+                (batch, batch_idx)
+                if hook_dataloader_idx is None
+                else (batch, batch_idx, hook_dataloader_idx)
+            )
+            step_hook: object = (
+                module.validation_step
+                if self.stage == "validate"
+                else module.test_step
+            )
+            step_arguments: tuple[object, ...] = batch_hook_arguments
+            if not is_parameter_in_hook_signature(
+                step_hook,
+                "batch_idx",
+                minimum_arguments=2
+            ):
+                step_arguments = (
+                    (batch,)
+                    if hook_dataloader_idx is None
+                    else (batch, hook_dataloader_idx)
+                )
+
+            if self.stage == "validate":
+                trainer._call_callback_hooks(
+                    module,
+                    "on_validation_batch_start",
+                    *batch_hook_arguments,
+                    callback_group=callbacks
+                )
+                trainer._call_module_hook(
+                    module,
+                    "on_validation_batch_start",
+                    cast(Callable[..., object], module.on_validation_batch_start),
+                    *batch_hook_arguments
+                )
+            else:
+                trainer._call_callback_hooks(
+                    module,
+                    "on_test_batch_start",
+                    *batch_hook_arguments,
+                    callback_group=callbacks
+                )
+                trainer._call_module_hook(
+                    module,
+                    "on_test_batch_start",
+                    cast(Callable[..., object], module.on_test_batch_start),
+                    *batch_hook_arguments
                 )
 
             step_context: AbstractContextManager[None] = (

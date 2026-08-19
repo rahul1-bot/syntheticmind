@@ -151,3 +151,18 @@
     4. ✅ Distributed execution processes every loader leaf, preserves unrepeated prediction partitions, returns predictions under the supported process models, and no longer deadlocks repeated subprocess stages through an unmatched outer signal collective.
     5. ✅ Focused verification covers direct mode semantics, integer, fractional, infinite, empty, and unsized limits, nested datasets, datamodule subclass identity, metric routing, hook signatures, reloads, overfit subsets, persistent workers, state delegation, exact shuffled dropout continuation, CPU, MPS, external two-rank Gloo, fork, spawn, subprocess launch, Python compilation, diff validation, and zero targeted type errors outside the unchanged `Module` baseline without invoking a linter.
     6. Stateful-loader cursor integration remains open because it requires an exact-resume ownership design alongside prefix replay. Continue with direct dataloader arguments on `fit`, `validate`, `test`, and `predict` before claiming the complete standard data-attachment surface.
+
+| Progress Complete | Standard Trainer Data Attachment | Date: 19 August 2026 | Time: 08:58 PM | Name: Ghost |
+
+    1. ✅ `fit`, `validate`, `test`, and `predict` support their established direct dataloader parameters, exact parameter order and defaults, positional datamodule compatibility, optional model reuse, and explicit source conflicts.
+    2. ✅ Direct data, real datamodules, and model dataloader hooks execute through one source-selection boundary after the required model and data setup lifecycle, with truthful optional datamodule ownership.
+    3. ✅ Training, evaluation, and prediction construct hook and step inputs only after precision conversion and device transfer, correcting the former MPS execution defect.
+    4. ✅ Checkpoint, exception, hyperparameter, teardown, nested-loader, CPU, MPS, fork, spawn, and subprocess paths preserve the selected data source and pass focused runtime verification.
+    5. ✅ Python compilation, diff validation, exact signature inspection, and targeted Pyright verification pass without invoking Ruff or another linter.
+
+| Progress Todo | Stateful Dataloader Checkpoint Continuation | Date: 19 August 2026 | Time: 08:58 PM | Name: Ghost |
+
+    1. Audit the pinned loader-state capture and restoration path together with SyntheticMind checkpoint progress, `CombinedLoader`, data fetching, and deterministic prefix replay.
+    2. Define replay ownership for stateless, stateful, nested, and mixed loader collections so no completed sample is skipped twice or replayed through optimization.
+    3. Implement the smallest standard-compatible checkpoint state boundary, then verify uninterrupted equivalence across shuffled data, model-side randomness, reload cadence, failure saves, CPU, MPS, and supported distributed launch modes.
+    4. Keep `verbose` result presentation and omitted-model checkpoint selection recorded as separate parameter-semantic audit items rather than falsely claiming their behavior through accepted arguments alone.

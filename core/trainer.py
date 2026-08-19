@@ -71,7 +71,7 @@ from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.callbacks.model_summary import ModelSummary
 from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.core.datamodule import DataModule
-from syntheticmind.core.hooks import ModelHooks
+from syntheticmind.core.hooks import DataHooks, ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import (
     LRSchedulerConfig,
@@ -880,6 +880,10 @@ class Trainer:
         self._val_combined_loader: CombinedLoader | None = None
         self._test_combined_loader: CombinedLoader | None = None
         self._predict_combined_loader: CombinedLoader | None = None
+        self._train_dataloader_source: object | None = None
+        self._val_dataloader_source: object | None = None
+        self._test_dataloader_source: object | None = None
+        self._predict_dataloader_source: object | None = None
         self._total_train_batches: int | None = None
         self._total_val_batches: list[int | None] | None = None
         self._total_test_batches: list[int | None] | None = None
@@ -904,8 +908,10 @@ class Trainer:
 
     def fit(
         self,
-        module: Module,
-        datamodule: DataModule,
+        model: Module,
+        train_dataloaders: object | None = None,
+        val_dataloaders: object | None = None,
+        datamodule: DataModule | None = None,
         ckpt_path: str | Path | None = None,
         weights_only: bool | None = None
     ) -> None:
@@ -933,6 +939,22 @@ class Trainer:
         #         overrides the constructor-level resume path for this
         #         call. ``None`` falls back to that path or a fresh start.
         #         Default: ``None``.
+        if not isinstance(model, Module):
+            raise TypeError(
+                f"`model` must be a Module, got {type(model).__qualname__}."
+            )
+        module: Module = model
+        if isinstance(train_dataloaders, DataModule):
+            datamodule = train_dataloaders
+            train_dataloaders = None
+        if (
+            datamodule is not None
+            and (train_dataloaders is not None or val_dataloaders is not None)
+        ):
+            raise MisconfigurationError(
+                "You cannot pass `train_dataloaders` or `val_dataloaders` "
+                "to `Trainer.fit(datamodule=...)`."
+            )
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
         launcher = self.strategy.launcher
@@ -943,6 +965,8 @@ class Trainer:
                 module,
                 datamodule,
                 {
+                    "train_dataloaders": train_dataloaders,
+                    "val_dataloaders": val_dataloaders,
                     "ckpt_path": ckpt_path,
                     "weights_only": weights_only
                 }
@@ -971,10 +995,17 @@ class Trainer:
         # The trainer back-reference is what powers module.log, the optimizer
         # and scheduler accessors, and gradient clipping inside the step
         # methods.
-        self.module: Module | None = module
-        self.datamodule: DataModule | None = datamodule
-        module._trainer = self
-        datamodule.trainer = self
+        self._attach_data(module, datamodule)
+        self._train_dataloader_source = self._select_dataloader_source(
+            module,
+            datamodule,
+            train_dataloaders
+        )
+        self._val_dataloader_source = self._select_dataloader_source(
+            module,
+            datamodule,
+            val_dataloaders
+        )
         module._current_epoch = 0
         module._global_step = 0
         module_mode: ModuleMode = ModuleMode()
@@ -997,20 +1028,7 @@ class Trainer:
             self._announce_barebones_stage("fit")
             self._setup_profiler("fit", module)
 
-            if is_rank_zero():
-                self._call_datamodule_hook(
-                    datamodule,
-                    "prepare_data",
-                    datamodule.prepare_data
-                )
-            self._call_strategy_hook("barrier", self.strategy.barrier)
-
-            self._call_datamodule_hook(
-                datamodule,
-                "setup",
-                datamodule.setup,
-                "fit"
-            )
+            self._prepare_data_and_setup(module, datamodule, "fit")
 
             preloaded_checkpoint: CheckpointDict | None = None
             if resume_path is not None:
@@ -1034,10 +1052,11 @@ class Trainer:
                 )
                 module._current_epoch = resume_epoch
                 module._global_step = resume_global_step
-                CheckpointState.load_datamodule_state(
-                    preloaded_checkpoint,
-                    datamodule
-                )
+                if datamodule is not None:
+                    CheckpointState.load_datamodule_state(
+                        preloaded_checkpoint,
+                        datamodule
+                    )
 
             # Retrieve the fit-stage dataloaders. The harness supports exactly
             # one loader per stage, so collection returns are rejected here
@@ -1186,9 +1205,6 @@ class Trainer:
 
             self._validate_callback_state_keys()
 
-            self._call_callback_hooks(module, "setup", "fit")
-            self._call_module_hook(module, "setup", module.setup, "fit")
-
             # Start hooks fire callbacks-first, then the module. The optional
             # sanity pass runs inside the fit stage but before training
             # starts, surfacing validation-path defects before the first
@@ -1253,9 +1269,11 @@ class Trainer:
 
     def validate(
         self,
-        module: Module,
-        datamodule: DataModule,
+        model: Module | None = None,
+        dataloaders: object | None = None,
         ckpt_path: str | Path | None = None,
+        verbose: bool = True,
+        datamodule: DataModule | None = None,
         weights_only: bool | None = None
     ) -> list[dict[str, float]]:
         # Executes a standalone validation stage and returns its reduced epoch
@@ -1272,6 +1290,16 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the validation pass, keyed by
         #     metric name.
+        module: Module = self._resolve_model(model, "validate")
+        if isinstance(dataloaders, DataModule):
+            datamodule = dataloaders
+            dataloaders = None
+        if dataloaders is not None and datamodule is not None:
+            raise MisconfigurationError(
+                "You cannot pass both `Trainer.validate(dataloaders=..., datamodule=...)`."
+            )
+        if type(verbose) is not bool:
+            raise TypeError("`verbose` must be a bool.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
         launcher = self.strategy.launcher
@@ -1284,7 +1312,9 @@ class Trainer:
                     module,
                     datamodule,
                     {
+                        "dataloaders": dataloaders,
                         "ckpt_path": ckpt_path,
+                        "verbose": verbose,
                         "weights_only": weights_only
                     }
                 )
@@ -1295,10 +1325,12 @@ class Trainer:
         self._reset_progress_bar_metrics("validating")
         self._total_val_batches: list[int | None] | None = None
         self._val_combined_loader: CombinedLoader | None = None
-        self.module: Module | None = module
-        self.datamodule: DataModule | None = datamodule
-        module._trainer = self
-        datamodule.trainer = self
+        self._attach_data(module, datamodule)
+        self._val_dataloader_source = self._select_dataloader_source(
+            module,
+            datamodule,
+            dataloaders
+        )
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1313,20 +1345,7 @@ class Trainer:
             self._announce_barebones_stage("validate")
             self._setup_profiler("validate", module)
 
-            if is_rank_zero():
-                self._call_datamodule_hook(
-                    datamodule,
-                    "prepare_data",
-                    datamodule.prepare_data
-                )
-            self._call_strategy_hook("barrier", self.strategy.barrier)
-
-            self._call_datamodule_hook(
-                datamodule,
-                "setup",
-                datamodule.setup,
-                "validate"
-            )
+            self._prepare_data_and_setup(module, datamodule, "validate")
             self._request_dataloaders("val")
 
             device: torch.device = self._resolve_device()
@@ -1340,8 +1359,6 @@ class Trainer:
                     weights_only=weights_only
                 )
 
-            self._call_callback_hooks(module, "setup", "validate")
-            self._call_module_hook(module, "setup", module.setup, "validate")
             self._autolog_hyperparameters(module, datamodule)
 
             metrics: list[dict[str, float]] = self.validate_loop.run()
@@ -1363,9 +1380,11 @@ class Trainer:
 
     def test(
         self,
-        module: Module,
-        datamodule: DataModule,
+        model: Module | None = None,
+        dataloaders: object | None = None,
         ckpt_path: str | Path | None = None,
+        verbose: bool = True,
+        datamodule: DataModule | None = None,
         weights_only: bool | None = None
     ) -> list[dict[str, float]]:
         # Executes a standalone test stage and returns its reduced epoch
@@ -1381,6 +1400,16 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the test pass, keyed by metric
         #     name.
+        module: Module = self._resolve_model(model, "test")
+        if isinstance(dataloaders, DataModule):
+            datamodule = dataloaders
+            dataloaders = None
+        if dataloaders is not None and datamodule is not None:
+            raise MisconfigurationError(
+                "You cannot pass both `Trainer.test(dataloaders=..., datamodule=...)`."
+            )
+        if type(verbose) is not bool:
+            raise TypeError("`verbose` must be a bool.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
         launcher = self.strategy.launcher
@@ -1393,7 +1422,9 @@ class Trainer:
                     module,
                     datamodule,
                     {
+                        "dataloaders": dataloaders,
                         "ckpt_path": ckpt_path,
+                        "verbose": verbose,
                         "weights_only": weights_only
                     }
                 )
@@ -1404,10 +1435,12 @@ class Trainer:
         self._reset_progress_bar_metrics("testing")
         self._total_test_batches: list[int | None] | None = None
         self._test_combined_loader: CombinedLoader | None = None
-        self.module: Module | None = module
-        self.datamodule: DataModule | None = datamodule
-        module._trainer = self
-        datamodule.trainer = self
+        self._attach_data(module, datamodule)
+        self._test_dataloader_source = self._select_dataloader_source(
+            module,
+            datamodule,
+            dataloaders
+        )
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1422,20 +1455,7 @@ class Trainer:
             self._announce_barebones_stage("test")
             self._setup_profiler("test", module)
 
-            if is_rank_zero():
-                self._call_datamodule_hook(
-                    datamodule,
-                    "prepare_data",
-                    datamodule.prepare_data
-                )
-            self._call_strategy_hook("barrier", self.strategy.barrier)
-
-            self._call_datamodule_hook(
-                datamodule,
-                "setup",
-                datamodule.setup,
-                "test"
-            )
+            self._prepare_data_and_setup(module, datamodule, "test")
             self._request_dataloaders("test")
 
             device: torch.device = self._resolve_device()
@@ -1449,8 +1469,6 @@ class Trainer:
                     weights_only=weights_only
                 )
 
-            self._call_callback_hooks(module, "setup", "test")
-            self._call_module_hook(module, "setup", module.setup, "test")
             self._autolog_hyperparameters(module, datamodule)
 
             metrics: list[dict[str, float]] = self.test_loop.run()
@@ -1472,8 +1490,9 @@ class Trainer:
 
     def predict(
         self,
-        module: Module,
-        datamodule: DataModule,
+        model: Module | None = None,
+        dataloaders: object | None = None,
+        datamodule: DataModule | None = None,
         return_predictions: bool | None = None,
         ckpt_path: str | Path | None = None,
         weights_only: bool | None = None
@@ -1497,6 +1516,14 @@ class Trainer:
         # Returns:
         #     The prediction-step outputs in batch order, or an empty list
         #     when retention is disabled.
+        module: Module = self._resolve_model(model, "predict")
+        if isinstance(dataloaders, DataModule):
+            datamodule = dataloaders
+            dataloaders = None
+        if dataloaders is not None and datamodule is not None:
+            raise MisconfigurationError(
+                "You cannot pass both `Trainer.predict(dataloaders=..., datamodule=...)`."
+            )
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
         if return_predictions is not None and type(return_predictions) is not bool:
@@ -1511,6 +1538,7 @@ class Trainer:
                     module,
                     datamodule,
                     {
+                        "dataloaders": dataloaders,
                         "return_predictions": return_predictions,
                         "ckpt_path": ckpt_path,
                         "weights_only": weights_only
@@ -1523,10 +1551,12 @@ class Trainer:
         self._reset_progress_bar_metrics("predicting")
         self._total_predict_batches: list[int | None] | None = None
         self._predict_combined_loader: CombinedLoader | None = None
-        self.module: Module | None = module
-        self.datamodule: DataModule | None = datamodule
-        module._trainer = self
-        datamodule.trainer = self
+        self._attach_data(module, datamodule)
+        self._predict_dataloader_source = self._select_dataloader_source(
+            module,
+            datamodule,
+            dataloaders
+        )
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1541,20 +1571,7 @@ class Trainer:
             self._announce_barebones_stage("predict")
             self._setup_profiler("predict", module)
 
-            if is_rank_zero():
-                self._call_datamodule_hook(
-                    datamodule,
-                    "prepare_data",
-                    datamodule.prepare_data
-                )
-            self._call_strategy_hook("barrier", self.strategy.barrier)
-
-            self._call_datamodule_hook(
-                datamodule,
-                "setup",
-                datamodule.setup,
-                "predict"
-            )
+            self._prepare_data_and_setup(module, datamodule, "predict")
             self._request_dataloaders("predict")
 
             device: torch.device = self._resolve_device()
@@ -1568,8 +1585,6 @@ class Trainer:
                     weights_only=weights_only
                 )
 
-            self._call_callback_hooks(module, "setup", "predict")
-            self._call_module_hook(module, "setup", module.setup, "predict")
             self._autolog_hyperparameters(module, datamodule)
 
             self.predict_loop.return_predictions = (
@@ -1602,6 +1617,81 @@ class Trainer:
         with self.strategy.tensor_init_context(empty_init=empty_init):
             yield
 
+    def _resolve_model(
+        self,
+        model: Module | None,
+        stage: Literal["validate", "test", "predict"]
+    ) -> Module:
+        if model is not None:
+            if not isinstance(model, Module):
+                raise TypeError(
+                    f"`model` must be a Module or None, got "
+                    f"{type(model).__qualname__}."
+                )
+            return model
+        if self.module is None:
+            raise TypeError(
+                f"`Trainer.{stage}()` requires a `Module` when it has not "
+                "been passed in a previous run."
+            )
+        return self.module
+
+    def _attach_data(
+        self,
+        module: Module,
+        datamodule: DataModule | None
+    ) -> None:
+        self.module = module
+        self.datamodule = datamodule
+        module._trainer = self
+        if datamodule is not None:
+            datamodule.trainer = self
+
+    def _select_dataloader_source(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        dataloaders: object | None
+    ) -> object:
+        if dataloaders is not None:
+            return dataloaders
+        if datamodule is not None:
+            return datamodule
+        return module
+
+    def _prepare_data_and_setup(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        stage: TrainerStage
+    ) -> None:
+        if is_rank_zero() and datamodule is not None:
+            self._call_datamodule_hook(
+                datamodule,
+                "prepare_data",
+                datamodule.prepare_data
+            )
+        if is_rank_zero() and is_overridden(
+            "prepare_data",
+            module,
+            DataHooks
+        ):
+            self._call_module_hook(
+                module,
+                "prepare_data",
+                module.prepare_data
+            )
+        self._call_strategy_hook("barrier", self.strategy.barrier)
+        if datamodule is not None:
+            self._call_datamodule_hook(
+                datamodule,
+                "setup",
+                datamodule.setup,
+                stage
+            )
+        self._call_callback_hooks(module, "setup", stage)
+        self._call_module_hook(module, "setup", module.setup, stage)
+
     def _safe_len(
         self,
         dataloader: object
@@ -1620,19 +1710,41 @@ class Trainer:
         self,
         stage: Literal["train", "val", "test", "predict"]
     ) -> CombinedLoader:
-        datamodule: DataModule | None = self.datamodule
-        assert datamodule is not None
         hook_name: str = f"{stage}_dataloader"
-        dataloader_hook: Callable[[], object] = cast(
-            Callable[[], object],
-            getattr(datamodule, hook_name)
+        source: object | None = (
+            self._train_dataloader_source
+            if stage == "train"
+            else self._val_dataloader_source
+            if stage == "val"
+            else self._test_dataloader_source
+            if stage == "test"
+            else self._predict_dataloader_source
         )
+        if source is None:
+            raise RuntimeError(f"No {stage} dataloader source is attached.")
         with self.profiler.profile(f"setup_{stage}_dataloader"):
-            dataloader_result: object = self._call_datamodule_hook(
-                datamodule,
-                hook_name,
-                dataloader_hook
-            )
+            if isinstance(source, DataModule):
+                datamodule_hook: Callable[[], object] = cast(
+                    Callable[[], object],
+                    getattr(source, hook_name)
+                )
+                dataloader_result: object = self._call_datamodule_hook(
+                    source,
+                    hook_name,
+                    datamodule_hook
+                )
+            elif isinstance(source, Module):
+                module_hook: Callable[[], object] = cast(
+                    Callable[[], object],
+                    getattr(source, hook_name)
+                )
+                dataloader_result = self._call_module_hook(
+                    source,
+                    hook_name,
+                    module_hook
+                )
+            else:
+                dataloader_result = source
         combined_loader: CombinedLoader = (
             dataloader_result
             if isinstance(dataloader_result, CombinedLoader)
@@ -1652,8 +1764,18 @@ class Trainer:
                 try:
                     iter(cast(Iterable[object], dataloader))
                 except TypeError as exception:
+                    argument_name: str = (
+                        f"{stage}_dataloaders"
+                        if self.state.stage == "fit"
+                        else "dataloaders"
+                    )
+                    source_name: str = (
+                        f"{type(source).__qualname__}.{hook_name}()"
+                        if isinstance(source, Module | DataModule)
+                        else f"Trainer.{self.state.stage}({argument_name}=...)"
+                    )
                     raise MisconfigurationError(
-                        f"{hook_name}() returned a non-iterable leaf of type "
+                        f"{source_name} produced a non-iterable leaf of type "
                         f"{type(dataloader).__qualname__}."
                     ) from exception
             if isinstance(dataloader, torch.utils.data.DataLoader):
@@ -1756,13 +1878,25 @@ class Trainer:
         assert self.fit_loop.epoch_loop is not None
         max_batches: int | None = self._total_train_batches
         module: Module | None = self.module
-        datamodule: DataModule | None = self.datamodule
+        source: object | None = self._val_dataloader_source
+        source_is_defined: bool = source is not None
+        if isinstance(source, DataModule):
+            source_is_defined = is_overridden(
+                "val_dataloader",
+                source,
+                DataModule
+            )
+        elif isinstance(source, Module):
+            source_is_defined = is_overridden(
+                "val_dataloader",
+                source,
+                DataHooks
+            )
         validation_enabled: bool = (
             self.limit_val_batches != 0
             and module is not None
-            and datamodule is not None
             and is_overridden("validation_step", module, Module)
-            and is_overridden("val_dataloader", datamodule, DataModule)
+            and source_is_defined
         )
         if validation_enabled and self._total_val_batches is not None:
             validation_enabled = any(
@@ -2568,7 +2702,7 @@ class Trainer:
     def _handle_exception(
         self,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         exception: BaseException
     ) -> Never:
         # Central exception path for every entry point: marks the trainer
@@ -2583,7 +2717,7 @@ class Trainer:
     def _notify_exception(
         self,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         exception: BaseException
     ) -> None:
         self.state.interrupt()
@@ -2602,15 +2736,20 @@ class Trainer:
                     f"callback[{index}].on_exception",
                     hook_exception
                 )
-        try:
-            self._call_datamodule_hook(
-                datamodule,
-                "on_exception",
-                datamodule.on_exception,
-                exception
-            )
-        except BaseException as hook_exception:
-            self._add_exception_note(exception, "datamodule.on_exception", hook_exception)
+        if datamodule is not None:
+            try:
+                self._call_datamodule_hook(
+                    datamodule,
+                    "on_exception",
+                    datamodule.on_exception,
+                    exception
+                )
+            except BaseException as hook_exception:
+                self._add_exception_note(
+                    exception,
+                    "datamodule.on_exception",
+                    hook_exception
+                )
         try:
             self._call_strategy_hook(
                 "on_exception",
@@ -2623,7 +2762,7 @@ class Trainer:
     def _teardown_stage(
         self,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage: TrainerStage
     ) -> BaseException | None:
         from syntheticmind.callbacks.progress_bar import ProgressBarCallback
@@ -2682,16 +2821,17 @@ class Trainer:
                     combined_loader.reset,
                     failures
                 )
-        self._attempt_teardown(
-            "datamodule.teardown",
-            lambda: self._call_datamodule_hook(
-                datamodule,
-                "teardown",
-                datamodule.teardown,
-                stage
-            ),
-            failures
-        )
+        if datamodule is not None:
+            self._attempt_teardown(
+                "datamodule.teardown",
+                lambda: self._call_datamodule_hook(
+                    datamodule,
+                    "teardown",
+                    datamodule.teardown,
+                    stage
+                ),
+                failures
+            )
         for index, callback in enumerate(self.callbacks):
             if isinstance(callback, ProgressBarCallback):
                 progress_callbacks.append((index, callback))
@@ -2882,7 +3022,7 @@ class Trainer:
     def _autolog_hyperparameters(
         self,
         module: Module,
-        datamodule: DataModule
+        datamodule: DataModule | None
     ) -> None:
         if (
             not self.enable_autolog_hparams
@@ -2895,7 +3035,7 @@ class Trainer:
         )
         datamodule_hyperparameters: HyperparameterDict | None = (
             dict(datamodule.hparams_initial)
-            if datamodule._log_hyperparams
+            if datamodule is not None and datamodule._log_hyperparams
             else None
         )
         merged_hyperparameters: HyperparameterDict | None = None

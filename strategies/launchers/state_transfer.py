@@ -26,13 +26,16 @@ class _StageInvoker:
         stage: TrainerStage,
         trainer: Trainer,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage_kwargs: dict[str, object]
     ) -> StageResult:
         stage_method: object = getattr(trainer, stage)
         if not callable(stage_method):
             raise TypeError(f"Trainer stage {stage!r} is not callable.")
-        return cast(StageResult, stage_method(module, datamodule, **stage_kwargs))
+        return cast(
+            StageResult,
+            stage_method(module, datamodule=datamodule, **stage_kwargs)
+        )
 
 
 class _WorkerStateTransfer:
@@ -41,7 +44,7 @@ class _WorkerStateTransfer:
         cls,
         trainer: Trainer,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         result: StageResult
     ) -> _WorkerOutput:
         return _WorkerOutput(
@@ -56,7 +59,9 @@ class _WorkerStateTransfer:
             },
             last_progress_bar_stage=trainer._last_progress_bar_stage,
             callback_states=[callback.state_dict() for callback in trainer.callbacks],
-            datamodule_state=datamodule.state_dict(),
+            datamodule_state=(
+                datamodule.state_dict() if datamodule is not None else None
+            ),
             precision_plugin_state=trainer.precision_plugin.state_dict(),
             validation_metrics=dict(trainer.validate_loop.epoch_metrics),
             test_metrics=dict(trainer.test_loop.epoch_metrics),
@@ -75,7 +80,7 @@ class _WorkerStateTransfer:
         worker_output: _WorkerOutput,
         trainer: Trainer,
         module: Module,
-        datamodule: DataModule,
+        datamodule: DataModule | None,
         stage: TrainerStage
     ) -> None:
         module.load_state_dict(worker_output.module_state_dict, strict=False)
@@ -83,7 +88,8 @@ class _WorkerStateTransfer:
         trainer.strategy.model = module
         trainer.datamodule = datamodule
         module._trainer = trainer
-        datamodule.trainer = trainer
+        if datamodule is not None:
+            datamodule.trainer = trainer
         trainer.state.load_state_dict(worker_output.trainer_state_dict)
         if worker_output.trainer_state_dict.get("status") == "interrupted":
             trainer.state.interrupt()
@@ -108,7 +114,8 @@ class _WorkerStateTransfer:
             strict=True
         ):
             callback.load_state_dict(callback_state)
-        datamodule.load_state_dict(worker_output.datamodule_state)
+        if datamodule is not None and worker_output.datamodule_state is not None:
+            datamodule.load_state_dict(worker_output.datamodule_state)
         trainer.precision_plugin.load_state_dict(worker_output.precision_plugin_state)
         trainer.validate_loop.epoch_metrics = dict(worker_output.validation_metrics)
         trainer.test_loop.epoch_metrics = dict(worker_output.test_metrics)
