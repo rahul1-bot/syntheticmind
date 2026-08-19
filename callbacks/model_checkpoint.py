@@ -37,27 +37,43 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import tempfile
 import time
+import warnings
+from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, override
+from typing import TYPE_CHECKING, Literal, cast, override
 
 import torch
 from loguru import logger as log
 
-from syntheticmind.callbacks.callback import Callback
+from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.types import CheckpointDict, StateDict, StateValue, TrainerStage
+from syntheticmind.utilities.types import (
+    Batch,
+    CheckpointDict,
+    StateDict,
+    StateValue,
+    StepOutput,
+    TrainerStage,
+)
 
 if TYPE_CHECKING:
     from syntheticmind.core.trainer import Trainer
-    from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 
 __all__: list[str] = ["ModelCheckpoint"]
 
 
-class ModelCheckpoint(Callback):
+class ModelCheckpoint(Checkpoint):
+    CHECKPOINT_JOIN_CHAR: str = "-"
+    CHECKPOINT_EQUALS_CHAR: str = "="
+    CHECKPOINT_NAME_LAST: str = "last"
+    FILE_EXTENSION: str = ".ckpt"
+    STARTING_VERSION: int = 1
+
     # Checkpointing callback driven by validation passes during fit. On each
     # eligible validation end it refreshes last.ckpt, evaluates the monitored
     # metric against the best score, saves and retains monitored checkpoints
@@ -65,15 +81,21 @@ class ModelCheckpoint(Callback):
     # experiment logger.
     def __init__(
         self,
-        dirpath: str | Path = "checkpoints",
-        monitor: str = "val_loss",
-        mode: Literal["min", "max"] = "min",
+        dirpath: str | Path | None = None,
+        filename: str | None = None,
+        monitor: str | None = None,
+        verbose: bool = False,
+        save_last: bool | Literal["link"] | None = None,
         save_top_k: int = 1,
-        filename: str = "checkpoint-epoch{epoch:02d}-step{step:05d}",
-        save_last: bool = True,
-        every_n_epochs: int = 1,
+        save_on_exception: bool = False,
+        save_weights_only: bool = False,
+        mode: Literal["min", "max"] = "min",
+        auto_insert_metric_name: bool = True,
         every_n_train_steps: int | None = None,
-        save_on_exception: bool = False
+        train_time_interval: timedelta | None = None,
+        every_n_epochs: int | None = None,
+        save_on_train_epoch_end: bool | None = None,
+        enable_version_counter: bool = True
     ) -> None:
         # Validates the cadence options and binds the checkpoint directory,
         # monitored metric and direction, retention count, filename template,
@@ -110,115 +132,268 @@ class ModelCheckpoint(Callback):
         #     MisconfigurationError: If every_n_epochs is negative or
         #         every_n_train_steps is provided below one.
         super().__init__()
-        if every_n_epochs < 0:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
-            raise MisconfigurationError("every_n_epochs must be >= 0")
-        if every_n_train_steps is not None and every_n_train_steps < 1:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
-            raise MisconfigurationError("every_n_train_steps must be >= 1 when provided")
-        self.dirpath: Path = Path(dirpath)
-        self.monitor: str = monitor
-        self.mode: Literal["min", "max"] = mode
-        self.save_top_k: int = save_top_k
-        self.filename: str = filename
-        self.save_last: bool = save_last
-        self.every_n_epochs: int = every_n_epochs
-        self.every_n_train_steps: int | None = every_n_train_steps
-        self.save_on_exception: bool = save_on_exception
+        from syntheticmind.utilities.exceptions import MisconfigurationError
 
-        self.best_score: float = float("inf") if mode == "min" else float("-inf")
-        self.best_path: Path | None = None
-        self._top_k_scores: list[tuple[float, Path]] = []
-        self._save_count: int = 0
+        if dirpath is not None and not isinstance(dirpath, str | Path):
+            raise TypeError("`dirpath` must be a string, Path, or None.")
+        if filename is not None and not isinstance(filename, str):
+            raise TypeError("`filename` must be a string or None.")
+        if monitor is not None and not isinstance(monitor, str):
+            raise TypeError("`monitor` must be a string or None.")
+        if type(verbose) is not bool:
+            raise TypeError("`verbose` must be a bool.")
+        if not (
+            save_last is None
+            or type(save_last) is bool
+            or save_last == "link"
+        ):
+            raise MisconfigurationError("`save_last` must be a bool, 'link', or None.")
+        if type(save_top_k) is not int or save_top_k < -1:
+            raise MisconfigurationError("`save_top_k` must be an integer greater than or equal to -1.")
+        if type(save_on_exception) is not bool:
+            raise TypeError("`save_on_exception` must be a bool.")
+        if type(save_weights_only) is not bool:
+            raise TypeError("`save_weights_only` must be a bool.")
+        if mode not in ("min", "max"):
+            raise MisconfigurationError("`mode` must be 'min' or 'max'.")
+        if type(auto_insert_metric_name) is not bool:
+            raise TypeError("`auto_insert_metric_name` must be a bool.")
+        if every_n_train_steps is not None and (
+            type(every_n_train_steps) is not int or every_n_train_steps < 0
+        ):
+            raise MisconfigurationError("`every_n_train_steps` must be a non-negative integer or None.")
+        if train_time_interval is not None and not isinstance(train_time_interval, timedelta):
+            raise TypeError("`train_time_interval` must be a timedelta or None.")
+        if train_time_interval is not None and train_time_interval.total_seconds() < 0:
+            raise MisconfigurationError("`train_time_interval` must be non-negative.")
+        if every_n_epochs is not None and (
+            type(every_n_epochs) is not int or every_n_epochs < 0
+        ):
+            raise MisconfigurationError("`every_n_epochs` must be a non-negative integer or None.")
+        if save_on_train_epoch_end is not None and type(save_on_train_epoch_end) is not bool:
+            raise TypeError("`save_on_train_epoch_end` must be a bool or None.")
+        if type(enable_version_counter) is not bool:
+            raise TypeError("`enable_version_counter` must be a bool.")
+        trigger_count: int = sum(
+            (
+                every_n_train_steps is not None and every_n_train_steps > 0,
+                every_n_epochs is not None and every_n_epochs > 0,
+                train_time_interval is not None
+            )
+        )
+        if trigger_count > 1:
+            raise MisconfigurationError(
+                "`every_n_train_steps`, `every_n_epochs`, and `train_time_interval` "
+                "must be mutually exclusive."
+            )
+        if monitor is None and save_top_k not in (-1, 0, 1):
+            raise MisconfigurationError(
+                "`save_top_k` must be -1, 0, or 1 when `monitor` is None."
+            )
+        if every_n_train_steps is None and every_n_epochs is None and train_time_interval is None:
+            resolved_every_n_train_steps: int = 0
+            resolved_every_n_epochs: int = 1
+        else:
+            resolved_every_n_train_steps = every_n_train_steps or 0
+            resolved_every_n_epochs = every_n_epochs or 0
+
+        self.dirpath: str | None = (
+            os.path.realpath(os.path.expanduser(os.fspath(dirpath)))
+            if dirpath is not None
+            else None
+        )
+        self.filename: str | None = filename
+        self.monitor: str | None = monitor
+        self.verbose: bool = verbose
+        self.save_last: bool | Literal["link"] | None = save_last
+        self.save_top_k: int = save_top_k
+        self.save_on_exception: bool = save_on_exception
+        self.save_weights_only: bool = save_weights_only
+        self.mode: Literal["min", "max"] = mode
+        self.auto_insert_metric_name: bool = auto_insert_metric_name
+        self._every_n_train_steps: int = resolved_every_n_train_steps
+        self._train_time_interval: timedelta | None = train_time_interval
+        self._every_n_epochs: int = resolved_every_n_epochs
+        self._save_on_train_epoch_end: bool | None = save_on_train_epoch_end
+        self._enable_version_counter: bool = enable_version_counter
+        self._last_global_step_saved: int = 0
+        self._last_time_checked: float | None = None
+        self.current_score: torch.Tensor | None = None
+        self.best_k_models: dict[str, torch.Tensor] = {}
+        self.kth_best_model_path: str = ""
+        self.kth_value: torch.Tensor = torch.tensor(
+            torch.inf if mode == "min" else -torch.inf
+        )
+        self.best_model_score: torch.Tensor | None = None
+        self.best_model_path: str = ""
+        self.last_model_path: str = ""
+        self._last_checkpoint_saved: str = ""
+        self._defer_save_until_validation: bool = False
 
     @override
     def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
         # Creates the checkpoint directory on rank zero before the stage
         # begins, so later saves never race on directory creation.
-        if not trainer.fast_dev_run and is_rank_zero():
-            self.dirpath.mkdir(parents=True, exist_ok=True)
+        self._resolve_dirpath(trainer)
+        assert self.dirpath is not None
+        if stage == "fit" and not trainer.fast_dev_run and is_rank_zero():
+            Path(self.dirpath).mkdir(parents=True, exist_ok=True)
+
+    def _resolve_dirpath(self, trainer: Trainer) -> Path:
+        if self.dirpath is None:
+            root: Path = (
+                Path(trainer.log_dir)
+                if trainer.loggers and not trainer.fast_dev_run
+                else Path(trainer.default_root_dir)
+            )
+            self.dirpath = str(root / "checkpoints")
+        return Path(self.dirpath)
 
     @override
-    def on_validation_epoch_end(self, trainer: Trainer, module: Module) -> None:
+    def on_train_start(self, trainer: Trainer, module: Module) -> None:
+        self._last_time_checked = time.monotonic()
+
+    @override
+    def on_train_batch_end(
+        self,
+        trainer: Trainer,
+        module: Module,
+        outputs: StepOutput,
+        batch: Batch,
+        batch_idx: int
+    ) -> None:
+        del outputs, batch, batch_idx
+        if self._should_skip_saving_checkpoint(trainer):
+            return
+        step_due: bool = (
+            self._every_n_train_steps > 0
+            and trainer.global_step % self._every_n_train_steps == 0
+        )
+        time_due: bool = False
+        now: float = time.monotonic()
+        if (
+            trainer.is_global_zero
+            and self._train_time_interval is not None
+            and self._last_time_checked is not None
+        ):
+            time_due = (
+                now - self._last_time_checked
+                >= self._train_time_interval.total_seconds()
+            )
+        time_due = trainer.strategy.broadcast(time_due)
+        if not step_due and not time_due:
+            return
+        monitor_candidates: dict[str, torch.Tensor] = self._synchronize_monitor_candidates(
+            trainer,
+            module
+        )
+        if self.monitor is not None and self.monitor not in monitor_candidates:
+            self._defer_save_until_validation = True
+            return
+        self._save_topk_checkpoint(trainer, module, monitor_candidates)
+        self._save_last_checkpoint(trainer, module, monitor_candidates)
+        self._last_time_checked = now
+
+    @override
+    def on_validation_end(self, trainer: Trainer, module: Module) -> None:
         # Checkpoint decision point, executed on rank zero after each real
         # validation pass inside fit. The rolling last.ckpt is refreshed
         # first when enabled; the monitored path then requires the monitor
         # key to be present, saves on improvement (or unconditionally with
         # save_top_k=-1), and updates the retention set.
-        if trainer.fast_dev_run or trainer.state.stage != "fit":
+        if self._should_skip_saving_checkpoint(trainer):
             return
-        if trainer._sanity_checking:
+        if self._should_save_on_train_epoch_end(trainer) and not self._defer_save_until_validation:
             return
-        if not is_rank_zero():
-            return
-        if not self._should_save_on_validation_end(trainer, module):
-            return
-
-        metrics: dict[str, float] = trainer.callback_metrics
-        if self.save_last:
-            last_path: Path = self.dirpath / "last.ckpt"
-            self._save_checkpoint(trainer, module, last_path)
-
-        if self.save_top_k == 0:
-            return
-
-        current_score: float | None = metrics.get(self.monitor)
-        if current_score is None:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
-            available: list[str] = list(metrics.keys())
-            raise MisconfigurationError(
-                f"ModelCheckpoint monitor '{self.monitor}' not found in validation metrics. "
-                f"Available: {available}"
+        if (
+            not self._defer_save_until_validation
+            and (
+                self._every_n_epochs < 1
+                or (trainer.current_epoch + 1) % self._every_n_epochs != 0
             )
+        ):
+            return
+        monitor_candidates: dict[str, torch.Tensor] = self._synchronize_monitor_candidates(
+            trainer,
+            module
+        )
+        self._save_topk_checkpoint(trainer, module, monitor_candidates)
+        self._save_last_checkpoint(trainer, module, monitor_candidates)
+        self._defer_save_until_validation = False
 
-        improved: bool = self._is_improvement(current_score)
-        if improved or self.save_top_k == -1:
-            current_epoch: int = module.current_epoch
-            filepath: Path = self._format_filepath(current_epoch, trainer.state.global_step, metrics)
+    @override
+    def on_train_epoch_end(self, trainer: Trainer, module: Module) -> None:
+        if self._should_skip_saving_checkpoint(trainer):
+            return
+        if not self._should_save_on_train_epoch_end(trainer):
+            return
+        if (
+            self._every_n_epochs < 1
+            or (trainer.current_epoch + 1) % self._every_n_epochs != 0
+        ):
+            return
+        monitor_candidates: dict[str, torch.Tensor] = self._synchronize_monitor_candidates(
+            trainer,
+            module
+        )
+        self._save_topk_checkpoint(trainer, module, monitor_candidates)
+        self._save_last_checkpoint(trainer, module, monitor_candidates)
 
-            self._save_checkpoint(trainer, module, filepath)
-
-            if improved:
-                self.best_score: float = current_score
-                self.best_path: Path | None = filepath
-            self._update_top_k(current_score, filepath)
+    @override
+    def on_train_end(self, trainer: Trainer, module: Module) -> None:
+        if self.save_last and not self._last_checkpoint_saved:
+            monitor_candidates: dict[str, torch.Tensor] = self._synchronize_monitor_candidates(
+                trainer,
+                module
+            )
+            self._save_last_checkpoint(trainer, module, monitor_candidates)
 
     def _should_save_on_validation_end(self, trainer: Trainer, module: Module) -> bool:
         # Applies the configured cadence: a step interval, when set, gates on
         # the global step and takes precedence; otherwise the epoch interval
         # gates on the completed epoch count, and zero disables saving.
-        if self.every_n_train_steps is not None:
-            step: int = trainer.state.global_step
-            return step > 0 and step % self.every_n_train_steps == 0
-        if self.every_n_epochs <= 0:
+        del module
+        if self._defer_save_until_validation:
+            return True
+        if self._should_save_on_train_epoch_end(trainer):
             return False
-        current_epoch: int = module.current_epoch
-        return (current_epoch + 1) % self.every_n_epochs == 0
+        return (
+            self._every_n_epochs > 0
+            and (trainer.current_epoch + 1) % self._every_n_epochs == 0
+        )
 
-    def _is_improvement(self, current: float) -> bool:
+    def _is_improvement(self, current: torch.Tensor) -> bool:
         # Applies the strict improvement test in the monitored direction.
+        if self.best_model_score is None:
+            return True
         if self.mode == "min":
-            return current < self.best_score
-        return current > self.best_score
+            return bool(current < self.best_model_score)
+        return bool(current > self.best_model_score)
 
-    def _format_filepath(self, epoch: int, step: int, metrics: dict[str, float]) -> Path:
+    def _format_filepath(
+        self,
+        epoch: int,
+        step: int,
+        metrics: dict[str, float]
+    ) -> Path:
         # Resolves the filename template against epoch, step, and the metric
         # values, appends the checkpoint suffix when absent, and disambiguates
         # collisions with retained checkpoints through a version suffix so an
         # earlier retained file is never overwritten.
-        name: str = self.filename.format(epoch=epoch, step=step, **metrics)
-        if not name.endswith(".ckpt"):
-            name: str = name + ".ckpt"
-        candidate: Path = self.dirpath / name
-        existing_paths: set[Path] = {p for _, p in self._top_k_scores}
-        if candidate in existing_paths:
-            stem: str = name.removesuffix(".ckpt")
-            self._save_count += 1
-            name: str = f"{stem}-v{self._save_count}.ckpt"
-            candidate: Path = self.dirpath / name
-        return candidate
+        candidates: dict[str, torch.Tensor] = {
+            name: torch.tensor(value) for name, value in metrics.items()
+        }
+        candidates["epoch"] = torch.tensor(epoch)
+        candidates["step"] = torch.tensor(step)
+        return Path(self._get_metric_interpolated_filepath_name(candidates))
 
-    def _save_checkpoint(self, trainer: Trainer, module: Module, filepath: Path) -> None:
+    def _save_checkpoint(
+        self,
+        trainer: Trainer,
+        module: Module,
+        filepath: Path,
+        synchronize: bool = True
+    ) -> None:
         # Assembles and writes one full-resume checkpoint. Mid-epoch state is
         # read from the training epoch loop: when the batch loop is active,
         # the completed-batch count and the epoch-start random state enter the
@@ -227,93 +402,61 @@ class ModelCheckpoint(Callback):
         # save hooks run on the assembled payload, the write is atomic through
         # a same-directory temporary file, and save duration and size are
         # logged as runtime metrics.
-        from syntheticmind.state.checkpoint_state import CheckpointState
-
+        if trainer.module is not module:
+            raise RuntimeError("ModelCheckpoint received a module not attached to its Trainer.")
+        self._last_global_step_saved = trainer.global_step
+        self._last_checkpoint_saved = str(filepath)
         checkpoint_start_time: float = time.perf_counter()
-        optimizer: torch.optim.Optimizer | None = trainer.optimizer
-        assert optimizer is not None
-
-        epoch_loop: TrainingEpochLoop | None = trainer.fit_loop.epoch_loop
-        completed_batches: int = 0
-        epoch_rng_state: CheckpointDict | None = None
-        has_entered_batch_loop: bool = False
-        if epoch_loop is not None:
-            completed_batches: int = epoch_loop._completed_batches
-            has_entered_batch_loop: bool = epoch_loop._has_entered_batch_loop
-            if completed_batches > 0 or has_entered_batch_loop:
-                epoch_rng_state: CheckpointDict | None = epoch_loop._epoch_start_rng_state
-
-        has_batch_progress: bool = completed_batches > 0 or has_entered_batch_loop
-        is_validation_checkpoint: bool = trainer.state.running_stage == "validating"
-        is_mid_epoch: bool = has_batch_progress and (
-            trainer._is_mid_epoch_validation or not is_validation_checkpoint
+        checkpoint: CheckpointDict = trainer._build_checkpoint(
+            self.save_weights_only
         )
-        epoch_to_save: int = (
-            trainer.state.current_epoch if is_mid_epoch
-            else trainer.state.current_epoch + 1
-        )
-        total_batch_idx: int = (
-            epoch_loop._total_batches_processed - 1
-            if epoch_loop is not None
-            else -1
-        )
-        checkpoint: CheckpointDict = CheckpointState.build(
-            model=module,
-            optimizers=trainer.optimizers,
-            scheduler=trainer.scheduler,
-            schedulers=trainer.schedulers,
-            epoch=epoch_to_save,
-            global_step=trainer.state.global_step,
-            callbacks=trainer.callbacks,
-            datamodule=trainer.datamodule,
-            completed_batches=completed_batches if is_mid_epoch else 0,
-            total_batch_idx=total_batch_idx,
-            epoch_rng_state=epoch_rng_state if is_mid_epoch else None,
-            strategy_name=type(trainer.strategy).__name__,
-            world_size=getattr(trainer.strategy, "world_size", 1),
-            precision_plugin=trainer.precision_plugin
-        )
+        if trainer.is_global_zero:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
 
-        trainer.precision_plugin.on_save_checkpoint(checkpoint)
-
-        with module._hook_context("on_save_checkpoint"):
-            for cb in trainer.callbacks:
-                cb.on_save_checkpoint(trainer, module, checkpoint)
-            module.on_save_checkpoint(checkpoint)
-
-        # mkstemp pre-creates the temporary file; the descriptor is closed
-        # immediately because torch.save reopens the path itself.
-        file_descriptor: int
-        tmp_path_str: str
-        file_descriptor, tmp_path_str = tempfile.mkstemp(dir=str(self.dirpath), suffix=".tmp")
-        os.close(file_descriptor)
-        tmp_path: Path = Path(tmp_path_str)
-        try:
-            torch.save(checkpoint, tmp_path)
-            tmp_path.replace(filepath)
-            checkpoint_duration_ms: float = (time.perf_counter() - checkpoint_start_time) * 1000.0
-            checkpoint_size_mb: float = filepath.stat().st_size / 1048576.0
-            if trainer.loggers:
-                trainer._log_metrics(
-                    {
-                        "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
-                        "runtime/checkpoint_size_mb": checkpoint_size_mb
-                    },
-                    step=trainer.state.global_step
-                )
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
+            # mkstemp pre-creates the temporary file; the descriptor is closed
+            # immediately because torch.save reopens the path itself.
+            file_descriptor: int
+            tmp_path_str: str
+            file_descriptor, tmp_path_str = tempfile.mkstemp(
+                dir=str(filepath.parent),
+                suffix=".tmp"
+            )
+            os.close(file_descriptor)
+            tmp_path: Path = Path(tmp_path_str)
+            try:
+                torch.save(checkpoint, tmp_path)
+                tmp_path.replace(filepath)
+                checkpoint_duration_ms: float = (time.perf_counter() - checkpoint_start_time) * 1000.0
+                checkpoint_size_mb: float = filepath.stat().st_size / 1048576.0
+                if trainer.loggers:
+                    trainer._log_metrics(
+                        {
+                            "runtime/checkpoint_save_time_ms": checkpoint_duration_ms,
+                            "runtime/checkpoint_size_mb": checkpoint_size_mb
+                        },
+                        step=trainer.state.global_step
+                    )
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+        if synchronize:
+            trainer.strategy.barrier()
 
     def _save_partial_checkpoint(self, module: Module, filepath: Path) -> None:
         # Writes a weights-only payload marked partial in its metadata, used
         # by the exception path when the run failed before the optimizer
         # existed. The write follows the same atomic temporary-file protocol
         # as full checkpoints.
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        model_state_dict: CheckpointDict = cast(
+            CheckpointDict,
+            module.state_dict()
+        )
         checkpoint: CheckpointDict = {
-            "model_state_dict": module.state_dict(),
+            "state_dict": model_state_dict,
+            "model_state_dict": model_state_dict,
             "metadata": {
-                "torch_version": torch.__version__,
+                "torch_version": str(torch.__version__),
                 "partial": True
             }
         }
@@ -324,7 +467,10 @@ class ModelCheckpoint(Callback):
         # immediately because torch.save reopens the path itself.
         file_descriptor: int
         tmp_path_str: str
-        file_descriptor, tmp_path_str = tempfile.mkstemp(dir=str(self.dirpath), suffix=".tmp")
+        file_descriptor, tmp_path_str = tempfile.mkstemp(
+            dir=str(filepath.parent),
+            suffix=".tmp"
+        )
         os.close(file_descriptor)
         tmp_path: Path = Path(tmp_path_str)
         try:
@@ -334,23 +480,404 @@ class ModelCheckpoint(Callback):
             if tmp_path.exists():
                 tmp_path.unlink()
 
-    def _update_top_k(self, score: float, filepath: Path) -> None:
+    def _update_top_k(self, score: torch.Tensor, filepath: Path) -> None:
         # Inserts the new checkpoint into the retention set, sorts by score in
         # the monitored direction, and evicts entries beyond the retention
         # count, deleting their files unless a file is the recorded best path.
         # Unbounded retention (save_top_k=-1) appends without eviction.
-        self._top_k_scores.append((score, filepath))
-        if self.save_top_k > 0:
-            if self.mode == "min":
-                self._top_k_scores.sort(key=lambda x: x[0])
-            else:
-                self._top_k_scores.sort(key=lambda x: x[0], reverse=True)
+        self.best_k_models[str(filepath)] = score
+        if not self.best_k_models:
+            return
+        best_operation = min if self.mode == "min" else max
+        worst_operation = max if self.mode == "min" else min
+        self.best_model_path = best_operation(
+            self.best_k_models,
+            key=self.best_k_models.__getitem__
+        )
+        self.best_model_score = self.best_k_models[self.best_model_path]
+        self.kth_best_model_path = worst_operation(
+            self.best_k_models,
+            key=self.best_k_models.__getitem__
+        )
+        self.kth_value = self.best_k_models[self.kth_best_model_path]
 
-            while len(self._top_k_scores) > self.save_top_k:
-                old_path: Path
-                _, old_path = self._top_k_scores.pop()
-                if old_path.exists() and old_path != self.best_path:
-                    old_path.unlink()
+    def _should_skip_saving_checkpoint(self, trainer: Trainer) -> bool:
+        return (
+            bool(trainer.fast_dev_run)
+            or trainer.state.stage != "fit"
+            or trainer._sanity_checking
+            or self._last_global_step_saved == trainer.global_step
+        )
+
+    def _should_save_on_train_epoch_end(self, trainer: Trainer) -> bool:
+        if self._save_on_train_epoch_end is not None:
+            return self._save_on_train_epoch_end
+        if trainer.check_val_every_n_epoch != 1:
+            return False
+        if not trainer.enable_validation or trainer.num_val_batches == 0:
+            return True
+        return trainer.val_check_interval == 1.0
+
+    def _monitor_candidates(
+        self,
+        trainer: Trainer,
+        module: Module
+    ) -> dict[str, torch.Tensor]:
+        candidates: dict[str, torch.Tensor] = {
+            name: torch.tensor(value)
+            for name, value in trainer.callback_metrics.items()
+        }
+        for name, metric in module.logged_metrics.items():
+            value: torch.Tensor | float = metric.value
+            if isinstance(value, torch.Tensor):
+                if value.numel() == 1:
+                    candidates[name] = value.detach().cpu()
+            else:
+                candidates[name] = torch.tensor(value)
+        candidates["epoch"] = torch.tensor(trainer.current_epoch)
+        candidates["step"] = torch.tensor(trainer.global_step)
+        return candidates
+
+    def _synchronize_monitor_candidates(
+        self,
+        trainer: Trainer,
+        module: Module
+    ) -> dict[str, torch.Tensor]:
+        candidates: dict[str, torch.Tensor] = (
+            self._monitor_candidates(trainer, module)
+            if trainer.is_global_zero
+            else {}
+        )
+        return trainer.strategy.broadcast(candidates)
+
+    def _format_checkpoint_name(
+        self,
+        filename: str | None,
+        metrics: dict[str, torch.Tensor],
+        prefix: str | None = None,
+        auto_insert_metric_name: bool = True
+    ) -> str:
+        resolved_filename: str = filename or "{epoch}-{step}"
+        groups: list[str] = sorted(
+            re.findall(r"(\{.*?)[:\}]", resolved_filename),
+            key=len,
+            reverse=True
+        )
+        for group in groups:
+            name: str = group[1:]
+            if auto_insert_metric_name:
+                resolved_filename = resolved_filename.replace(
+                    group,
+                    name + self.CHECKPOINT_EQUALS_CHAR + "{" + name
+                )
+            resolved_filename = resolved_filename.replace(group, f"{{0[{name}]")
+            if name not in metrics:
+                metrics[name] = torch.tensor(0)
+        resolved_filename = resolved_filename.format(metrics)
+        if prefix is not None:
+            resolved_filename = self.CHECKPOINT_JOIN_CHAR.join(
+                (prefix, resolved_filename)
+            )
+        return resolved_filename
+
+    def format_checkpoint_name(
+        self,
+        metrics: dict[str, torch.Tensor],
+        filename: str | None = None,
+        ver: int | None = None,
+        prefix: str | None = None
+    ) -> str:
+        resolved_filename: str = self._format_checkpoint_name(
+            filename or self.filename,
+            dict(metrics),
+            prefix=prefix,
+            auto_insert_metric_name=self.auto_insert_metric_name
+        )
+        if ver is not None:
+            resolved_filename = self.CHECKPOINT_JOIN_CHAR.join(
+                (resolved_filename, f"v{ver}")
+            )
+        name: str = f"{resolved_filename}{self.FILE_EXTENSION}"
+        return str(Path(self.dirpath) / name) if self.dirpath is not None else name
+
+    def _get_metric_interpolated_filepath_name(
+        self,
+        monitor_candidates: dict[str, torch.Tensor],
+        trainer: Trainer | None = None,
+        del_filepath: str | None = None
+    ) -> str:
+        filepath: str = self.format_checkpoint_name(monitor_candidates)
+        if self._enable_version_counter:
+            version: int = self.STARTING_VERSION
+            while (
+                self.file_exists(filepath, trainer)
+                if trainer is not None
+                else Path(filepath).exists()
+            ) and filepath != del_filepath:
+                filepath = self.format_checkpoint_name(
+                    monitor_candidates,
+                    ver=version
+                )
+                version += 1
+        return filepath
+
+    def check_monitor_top_k(
+        self,
+        trainer: Trainer,
+        current: torch.Tensor | None = None
+    ) -> bool:
+        if current is None or self.save_top_k == 0:
+            return False
+        if self.save_top_k == -1:
+            return True
+        if len(self.best_k_models) < self.save_top_k:
+            return True
+        if not self.kth_best_model_path:
+            return True
+        kth_value: torch.Tensor = self.best_k_models[self.kth_best_model_path]
+        should_update: bool = (
+            bool(current < kth_value)
+            if self.mode == "min"
+            else bool(current > kth_value)
+        )
+        return trainer.strategy.reduce_boolean_decision(should_update)
+
+    def _save_topk_checkpoint(
+        self,
+        trainer: Trainer,
+        module: Module,
+        monitor_candidates: dict[str, torch.Tensor]
+    ) -> None:
+        if self.save_top_k == 0:
+            return
+        if self.monitor is None:
+            self._save_none_monitor_checkpoint(
+                trainer,
+                module,
+                monitor_candidates
+            )
+            return
+        current: torch.Tensor | None = monitor_candidates.get(self.monitor)
+        if current is None:
+            from syntheticmind.utilities.exceptions import MisconfigurationError
+
+            raise MisconfigurationError(
+                f"`ModelCheckpoint(monitor={self.monitor!r})` could not find the "
+                f"monitored key in metrics: {list(monitor_candidates)}."
+            )
+        if current.numel() != 1:
+            from syntheticmind.utilities.exceptions import MisconfigurationError
+
+            raise MisconfigurationError(
+                f"`ModelCheckpoint(monitor={self.monitor!r})` requires a scalar metric."
+            )
+        if self.check_monitor_top_k(trainer, current):
+            self._update_best_and_save(
+                current,
+                trainer,
+                module,
+                monitor_candidates
+            )
+        elif self.verbose and trainer.is_global_zero:
+            log.info(
+                "Checkpoint skipped | epoch={} | step={} | {}={} | outside top {}",
+                int(monitor_candidates["epoch"].item()),
+                int(monitor_candidates["step"].item()),
+                self.monitor,
+                float(current.item()),
+                self.save_top_k
+            )
+
+    def _save_none_monitor_checkpoint(
+        self,
+        trainer: Trainer,
+        module: Module,
+        monitor_candidates: dict[str, torch.Tensor]
+    ) -> None:
+        filepath: str = self._get_metric_interpolated_filepath_name(
+            monitor_candidates,
+            trainer,
+            self.best_model_path or None
+        )
+        previous: str = self.best_model_path
+        self.best_model_path = filepath
+        self._save_checkpoint(trainer, module, Path(filepath))
+        if self.verbose and trainer.is_global_zero:
+            log.info(
+                "Checkpoint saved | epoch={} | step={} | {}",
+                int(monitor_candidates["epoch"].item()),
+                int(monitor_candidates["step"].item()),
+                filepath
+            )
+        if (
+            self.save_top_k == 1
+            and previous
+            and self._should_remove_checkpoint(trainer, previous, filepath)
+            and trainer.is_global_zero
+        ):
+            self._remove_checkpoint(previous)
+
+    def _update_best_and_save(
+        self,
+        current: torch.Tensor,
+        trainer: Trainer,
+        module: Module,
+        monitor_candidates: dict[str, torch.Tensor]
+    ) -> None:
+        resolved_current: torch.Tensor = current.detach().cpu()
+        if bool(torch.isnan(resolved_current)):
+            replacement: float = torch.inf if self.mode == "min" else -torch.inf
+            resolved_current = torch.tensor(
+                replacement,
+                device=resolved_current.device
+            )
+        delete_filepath: str | None = None
+        if (
+            self.save_top_k > 0
+            and len(self.best_k_models) >= self.save_top_k
+            and self.kth_best_model_path
+        ):
+            delete_filepath = self.kth_best_model_path
+            self.best_k_models.pop(delete_filepath, None)
+        filepath: str = self._get_metric_interpolated_filepath_name(
+            monitor_candidates,
+            trainer,
+            delete_filepath
+        )
+        self.current_score = resolved_current
+        self._update_top_k(resolved_current, Path(filepath))
+        self._save_checkpoint(trainer, module, Path(filepath))
+        if self.verbose and trainer.is_global_zero:
+            log.info(
+                "Checkpoint saved | epoch={} | step={} | {}={} | {}",
+                int(monitor_candidates["epoch"].item()),
+                int(monitor_candidates["step"].item()),
+                self.monitor,
+                float(resolved_current.item()),
+                filepath
+            )
+        if (
+            delete_filepath
+            and self._should_remove_checkpoint(
+                trainer,
+                delete_filepath,
+                filepath
+            )
+            and trainer.is_global_zero
+        ):
+            self._remove_checkpoint(delete_filepath)
+
+    def _save_last_checkpoint(
+        self,
+        trainer: Trainer,
+        module: Module,
+        monitor_candidates: dict[str, torch.Tensor],
+        synchronize: bool = True
+    ) -> None:
+        if not self.save_last:
+            return
+        filepath: str = self.format_checkpoint_name(
+            monitor_candidates,
+            self.CHECKPOINT_NAME_LAST
+        )
+        if self._enable_version_counter:
+            version: int = self.STARTING_VERSION
+            while (
+                self.file_exists(filepath, trainer)
+                if synchronize
+                else Path(filepath).exists()
+            ) and filepath != self.last_model_path:
+                filepath = self.format_checkpoint_name(
+                    monitor_candidates,
+                    self.CHECKPOINT_NAME_LAST,
+                    ver=version
+                )
+                version += 1
+        previous: str = self.last_model_path
+        self.last_model_path = filepath
+        if (
+            self.save_last == "link"
+            and self._last_checkpoint_saved
+            and self.save_top_k != 0
+        ):
+            if trainer.is_global_zero:
+                self._link_checkpoint(
+                    Path(self._last_checkpoint_saved),
+                    Path(filepath)
+                )
+            if synchronize:
+                trainer.strategy.barrier()
+        else:
+            self._save_checkpoint(
+                trainer,
+                module,
+                Path(filepath),
+                synchronize=synchronize
+            )
+        if (
+            previous
+            and self._should_remove_checkpoint(trainer, previous, filepath)
+            and trainer.is_global_zero
+        ):
+            self._remove_checkpoint(previous)
+
+    @staticmethod
+    def _link_checkpoint(filepath: Path, linkpath: Path) -> None:
+        if filepath.resolve() == linkpath.resolve():
+            return
+        linkpath.parent.mkdir(parents=True, exist_ok=True)
+        if linkpath.is_symlink() or linkpath.is_file():
+            linkpath.unlink()
+        try:
+            linkpath.symlink_to(os.path.relpath(filepath, linkpath.parent))
+        except OSError:
+            shutil.copy2(filepath, linkpath)
+
+    def _should_remove_checkpoint(
+        self,
+        trainer: Trainer,
+        previous: str,
+        current: str
+    ) -> bool:
+        if previous == current:
+            return False
+        previous_path: Path = Path(previous).absolute()
+        resume_value: object = getattr(
+            trainer,
+            "ckpt_path",
+            trainer.resume_from_checkpoint
+        )
+        if resume_value is not None and previous_path == Path(str(resume_value)).absolute():
+            return False
+        if self.dirpath is None:
+            return False
+        return Path(self.dirpath).absolute() in previous_path.parents
+
+    @staticmethod
+    def _remove_checkpoint(filepath: str) -> None:
+        path: Path = Path(filepath)
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+
+    @property
+    def every_n_epochs(self) -> int | None:
+        return self._every_n_epochs
+
+    def file_exists(self, filepath: str | Path, trainer: Trainer) -> bool:
+        exists: bool = Path(filepath).exists() if trainer.is_global_zero else False
+        return trainer.strategy.reduce_boolean_decision(exists)
+
+    def to_yaml(self, filepath: str | Path | None = None) -> None:
+        import yaml
+
+        if filepath is None:
+            if self.dirpath is None:
+                raise RuntimeError("ModelCheckpoint directory is unresolved before setup.")
+            filepath = Path(self.dirpath) / "best_k_models.yaml"
+        values: dict[str, float] = {
+            path: float(score.item()) for path, score in self.best_k_models.items()
+        }
+        Path(filepath).write_text(yaml.safe_dump(values))
 
     @override
     def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
@@ -365,13 +892,29 @@ class ModelCheckpoint(Callback):
             return
         if trainer.state.stage != "fit":
             return
-        exception_path: Path = self.dirpath / "exception.ckpt"
+        del exception
+        dirpath: Path = self._resolve_dirpath(trainer)
+        monitor_candidates: dict[str, torch.Tensor] = self._monitor_candidates(
+            trainer,
+            module
+        )
+        exception_path: Path = Path(
+            self._get_metric_interpolated_filepath_name(monitor_candidates)
+        )
         try:
-            self.dirpath.mkdir(parents=True, exist_ok=True)
-            if trainer.optimizer is not None:
-                self._save_checkpoint(trainer, module, exception_path)
-            else:
-                self._save_partial_checkpoint(module, exception_path)
+            dirpath.mkdir(parents=True, exist_ok=True)
+            self._save_checkpoint(
+                trainer,
+                module,
+                exception_path,
+                synchronize=False
+            )
+            self._save_last_checkpoint(
+                trainer,
+                module,
+                monitor_candidates,
+                synchronize=False
+            )
         except Exception:
             log.warning("Failed to save exception checkpoint")
 
@@ -383,8 +926,13 @@ class ModelCheckpoint(Callback):
         return self._generate_state_key(
             monitor=self.monitor,
             mode=self.mode,
-            every_n_epochs=self.every_n_epochs,
-            every_n_train_steps=self.every_n_train_steps
+            every_n_epochs=self._every_n_epochs,
+            every_n_train_steps=self._every_n_train_steps,
+            train_time_interval=(
+                str(self._train_time_interval)
+                if self._train_time_interval is not None
+                else None
+            )
         )
 
     @override
@@ -393,11 +941,15 @@ class ModelCheckpoint(Callback):
         # top-k set with stringified paths, the collision counter, and the
         # step cadence for inspection.
         state_dict: StateDict = {
-            "best_score": self.best_score,
-            "best_path": str(self.best_path) if self.best_path else None,
-            "top_k_scores": [(score, str(path)) for score, path in self._top_k_scores],
-            "save_count": self._save_count,
-            "every_n_train_steps": self.every_n_train_steps
+            "monitor": self.monitor,
+            "best_model_score": self.best_model_score,
+            "best_model_path": self.best_model_path,
+            "current_score": self.current_score,
+            "dirpath": str(self.dirpath) if self.dirpath is not None else None,
+            "best_k_models": cast(StateValue, self.best_k_models),
+            "kth_best_model_path": self.kth_best_model_path,
+            "kth_value": self.kth_value,
+            "last_model_path": self.last_model_path
         }
         return state_dict
 
@@ -407,40 +959,56 @@ class ModelCheckpoint(Callback):
         # protection: when any restored top-k path resolves outside the
         # current checkpoint directory, the retention state is cleared so
         # eviction can never delete files that belong to another directory.
-        best_score_value: StateValue = state_dict.get("best_score", self.best_score)
-        if isinstance(best_score_value, int | float) and not isinstance(best_score_value, bool):
-            self.best_score = float(best_score_value)
-        path_value: StateValue = state_dict.get("best_path")
-        self.best_path = Path(path_value) if isinstance(path_value, str) else None
-        top_k_raw: StateValue = state_dict.get("top_k_scores")
-        restored_top_k_scores: list[tuple[float, Path]] = []
-        if isinstance(top_k_raw, list):
-            for item in top_k_raw:
-                if not isinstance(item, list | tuple) or len(item) != 2:
-                    continue
-                score_value, retained_path_value = item
-                if isinstance(score_value, bool) or not isinstance(score_value, int | float):
-                    continue
-                if not isinstance(retained_path_value, str):
-                    continue
-                restored_top_k_scores.append((float(score_value), Path(retained_path_value)))
-        self._top_k_scores = restored_top_k_scores
-        save_count_value: StateValue = state_dict.get("save_count", 0)
-        if isinstance(save_count_value, int) and not isinstance(save_count_value, bool):
-            self._save_count = save_count_value
-
-        if self._top_k_scores:
-            resolved_dirpath: Path = self.dirpath.resolve()
-            has_foreign_paths: bool = any(
-                p.resolve().parent != resolved_dirpath for _, p in self._top_k_scores
+        best_model_path_value: StateValue = state_dict.get("best_model_path", "")
+        if isinstance(best_model_path_value, str):
+            self.best_model_path = best_model_path_value
+        dirpath_value: StateValue = state_dict.get("dirpath")
+        current_dirpath: str | None = (
+            str(self.dirpath) if self.dirpath is not None else None
+        )
+        restored_dirpath: str | None = (
+            dirpath_value if isinstance(dirpath_value, str) else None
+        )
+        if self.dirpath is None and restored_dirpath is not None:
+            self.dirpath = restored_dirpath
+            current_dirpath = restored_dirpath
+        if current_dirpath != restored_dirpath:
+            warnings.warn(
+                f"The checkpoint directory changed from {restored_dirpath!r} to "
+                f"{current_dirpath!r}; only `best_model_path` was restored.",
+                stacklevel=2
             )
-            if has_foreign_paths:
-                log.warning(
-                    f"ModelCheckpoint dirpath changed (now {self.dirpath}). "
-                    f"Clearing top-k state to prevent cross-directory deletion."
-                )
-                self._top_k_scores.clear()
-                self.best_path = None
+            return
+        best_model_score_value: StateValue = state_dict.get("best_model_score")
+        self.best_model_score = (
+            best_model_score_value
+            if isinstance(best_model_score_value, torch.Tensor)
+            else None
+        )
+        current_score_value: StateValue = state_dict.get("current_score")
+        self.current_score = (
+            current_score_value
+            if isinstance(current_score_value, torch.Tensor)
+            else None
+        )
+        best_k_models_value: StateValue = state_dict.get("best_k_models", {})
+        self.best_k_models = {}
+        if isinstance(best_k_models_value, dict):
+            for path, score in best_k_models_value.items():
+                if isinstance(path, str) and isinstance(score, torch.Tensor):
+                    self.best_k_models[path] = score
+        kth_best_model_path_value: StateValue = state_dict.get(
+            "kth_best_model_path",
+            ""
+        )
+        if isinstance(kth_best_model_path_value, str):
+            self.kth_best_model_path = kth_best_model_path_value
+        kth_value_value: StateValue = state_dict.get("kth_value")
+        if isinstance(kth_value_value, torch.Tensor):
+            self.kth_value = kth_value_value
+        last_model_path_value: StateValue = state_dict.get("last_model_path", "")
+        if isinstance(last_model_path_value, str):
+            self.last_model_path = last_model_path_value
 
     @override
     def __repr__(self) -> str:
@@ -450,6 +1018,6 @@ class ModelCheckpoint(Callback):
             f"monitor={self.monitor!r}, "
             f"mode={self.mode!r}, "
             f"save_top_k={self.save_top_k}, "
-            f"every_n_train_steps={self.every_n_train_steps}, "
+            f"every_n_train_steps={self._every_n_train_steps}, "
             f"dirpath={str(self.dirpath)!r})"
         )

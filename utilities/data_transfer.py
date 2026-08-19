@@ -18,6 +18,9 @@
 #
 # Author: Rahul Sawhney
 
+from collections.abc import Callable
+from typing import cast
+
 import torch
 
 from syntheticmind.utilities.types import Batch, DeviceTransferable
@@ -38,21 +41,30 @@ def _recursive_move(data: Batch, device: torch.device) -> Batch:
     # into new lists, and DeviceTransferable objects move themselves with a
     # TypeError retry for .to signatures without the non_blocking keyword.
     # Everything else falls through unchanged.
+    non_blocking: bool = device.type == "cuda"
     if isinstance(data, torch.Tensor):
-        return data.to(device, non_blocking=True)
+        return data.to(device, non_blocking=non_blocking)
     if isinstance(data, dict):
         return {k: _recursive_move(v, device) for k, v in data.items()}
     if isinstance(data, tuple):
-        items: tuple[Batch, ...] = tuple(_recursive_move(item, device) for item in data)
+        tuple_items: tuple[Batch, ...] = tuple(
+            _recursive_move(item, device) for item in data
+        )
         if hasattr(data, "_fields"):
-            return type(data)._make(items)
-        return items
+            maker: Callable[[tuple[Batch, ...]], Batch] = cast(
+                Callable[[tuple[Batch, ...]], Batch],
+                getattr(type(data), "_make")
+            )
+            return maker(tuple_items)
+        return tuple_items
     if isinstance(data, list):
-        items: list[Batch] = [_recursive_move(item, device) for item in data]
-        return items
+        list_items: list[Batch] = [
+            _recursive_move(item, device) for item in data
+        ]
+        return list_items
     if isinstance(data, DeviceTransferable):
         try:
-            return data.to(device, non_blocking=True)
+            return data.to(device, non_blocking=non_blocking)
         except TypeError:
             return data.to(device)
     return data

@@ -36,8 +36,8 @@ import torch
 from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
 
 from syntheticmind.callbacks.callback import Callback
+from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
-from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
@@ -77,10 +77,10 @@ class FitLoop(Loop):
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
         monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if isinstance(callback, (EarlyStopping, ModelCheckpoint))
+            callback for callback in callbacks if isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         non_monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, ModelCheckpoint))
+            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         assert self.epoch_loop is not None
         total_train_batches: int | None = trainer._total_train_batches

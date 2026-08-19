@@ -61,20 +61,38 @@ class CheckpointState:
         epoch_rng_state: CheckpointDict | None = None,
         strategy_name: str = "SingleDeviceStrategy",
         world_size: int = 1,
-        precision_plugin: Precision | None = None
+        precision_plugin: Precision | None = None,
+        weights_only: bool = False
     ) -> CheckpointDict:
         # Assembles the payload from live objects. Progress counters and model
         # weights always travel; optimizer state travels in list form plus the
         # legacy first-entry key; RNG streams are captured at call time so a
         # restored run continues the same random sequences.
+        model_state_dict: CheckpointValue = cast(
+            CheckpointValue,
+            model.state_dict()
+        )
         checkpoint: CheckpointDict = {
             "epoch": epoch,
             "global_step": global_step,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizers[0].state_dict(),
-            "optimizer_state_dicts": [optimizer.state_dict() for optimizer in optimizers],
-            "rng_state": cls._collect_rng_states()
+            "state_dict": model_state_dict,
+            "model_state_dict": model_state_dict,
         }
+
+        if not weights_only:
+            checkpoint["rng_state"] = cls._collect_rng_states()
+            optimizer_states: CheckpointValue = cast(
+                CheckpointValue,
+                [optimizer.state_dict() for optimizer in optimizers]
+            )
+            checkpoint["optimizer_states"] = optimizer_states
+            if optimizers:
+                checkpoint["optimizer_state_dict"] = cast(
+                    CheckpointValue,
+                    optimizers[0].state_dict()
+                )
+                checkpoint["optimizer_states"] = optimizer_states
+                checkpoint["optimizer_state_dicts"] = optimizer_states
 
         if completed_batches > 0:
             checkpoint["completed_batches"] = completed_batches
@@ -85,30 +103,54 @@ class CheckpointState:
         if epoch_rng_state is not None:
             checkpoint["epoch_rng_state"] = epoch_rng_state
 
-        scheduler_list: list[_SchedulerInstance] = []
-        if schedulers is not None:
-            scheduler_list: list[_SchedulerInstance] = schedulers
-        elif scheduler is not None:
-            scheduler_list: list[_SchedulerInstance] = [scheduler]
-        if scheduler_list:
-            checkpoint["scheduler_state_dicts"] = [
-                current_scheduler.state_dict() for current_scheduler in scheduler_list
-            ]
-            checkpoint["scheduler_state_dict"] = scheduler_list[0].state_dict()
+        if not weights_only:
+            scheduler_list: list[_SchedulerInstance] = []
+            if schedulers is not None:
+                scheduler_list = schedulers
+            elif scheduler is not None:
+                scheduler_list = [scheduler]
+            scheduler_states: CheckpointValue = cast(
+                CheckpointValue,
+                [
+                    current_scheduler.state_dict()
+                    for current_scheduler in scheduler_list
+                ]
+            )
+            checkpoint["lr_schedulers"] = scheduler_states
+            if scheduler_list:
+                checkpoint["scheduler_state_dicts"] = scheduler_states
+                checkpoint["scheduler_state_dict"] = cast(
+                    CheckpointValue,
+                    scheduler_list[0].state_dict()
+                )
 
-        callback_states: dict[str, StateDict] = {}
-        for callback in callbacks:
-            state: StateDict = callback.state_dict()
-            if state:
-                callback_states[callback.state_key] = state
-        checkpoint["callback_states"] = callback_states
+            callback_states: dict[str, StateDict] = {}
+            for callback in callbacks:
+                state: StateDict = callback.state_dict()
+                if state:
+                    callback_states[callback.state_key] = state
+            checkpoint["callback_states"] = cast(
+                CheckpointValue,
+                callback_states
+            )
+            checkpoint["callbacks"] = cast(
+                CheckpointValue,
+                callback_states
+            )
 
         if datamodule is not None:
             datamodule_state: StateDict = datamodule.state_dict()
             if datamodule_state:
-                checkpoint["datamodule_state_dict"] = datamodule_state
+                checkpoint["datamodule_state_dict"] = cast(
+                    CheckpointValue,
+                    datamodule_state
+                )
+                checkpoint[type(datamodule).__qualname__] = cast(
+                    CheckpointValue,
+                    datamodule_state
+                )
 
-        if precision_plugin is not None:
+        if precision_plugin is not None and not weights_only:
             precision_state: StateDict = precision_plugin.state_dict()
             if precision_state:
                 checkpoint[type(precision_plugin).__qualname__] = cast(
@@ -117,7 +159,7 @@ class CheckpointState:
                 )
 
         checkpoint["metadata"] = {
-            "torch_version": torch.__version__,
+            "torch_version": str(torch.__version__),
             "strategy": strategy_name,
             "world_size": world_size
         }
@@ -140,21 +182,33 @@ class CheckpointState:
         # coordinates (epoch, global step, completed batches, epoch RNG state).
         # The list-form optimizer and scheduler keys are preferred; the legacy
         # singular keys are the fallback for older checkpoints.
-        model.load_state_dict(checkpoint["model_state_dict"])  # type: ignore[arg-type]
-        optimizer_state_dicts_raw: CheckpointValue | None = checkpoint.get("optimizer_state_dicts")
+        model_state_dict_raw: CheckpointValue | None = checkpoint.get(
+            "state_dict",
+            checkpoint.get("model_state_dict")
+        )
+        if not isinstance(model_state_dict_raw, dict):
+            raise KeyError("Checkpoint is missing a model `state_dict`.")
+        model.load_state_dict(model_state_dict_raw)  # type: ignore[arg-type]
+        optimizer_state_dicts_raw: CheckpointValue | None = checkpoint.get(
+            "optimizer_states",
+            checkpoint.get("optimizer_state_dicts")
+        )
         if isinstance(optimizer_state_dicts_raw, list):
             for optimizer, optimizer_state_dict in zip(optimizers, optimizer_state_dicts_raw, strict=False):
                 optimizer.load_state_dict(optimizer_state_dict)  # type: ignore[arg-type]
         elif "optimizer_state_dict" in checkpoint and optimizers:
             optimizers[0].load_state_dict(checkpoint["optimizer_state_dict"])  # type: ignore[arg-type]
-        else:
+        elif optimizers:
             from loguru import logger as restore_log
             restore_log.warning(
                 "Checkpoint missing optimizer_state_dict (partial/exception checkpoint); "
                 "optimizer will start fresh."
             )
 
-        scheduler_state_dicts_raw: CheckpointValue | None = checkpoint.get("scheduler_state_dicts")
+        scheduler_state_dicts_raw: CheckpointValue | None = checkpoint.get(
+            "lr_schedulers",
+            checkpoint.get("scheduler_state_dicts")
+        )
         scheduler_list: list[_SchedulerInstance] = []
         if schedulers is not None:
             scheduler_list: list[_SchedulerInstance] = schedulers
@@ -174,18 +228,26 @@ class CheckpointState:
         if isinstance(rng_state, dict):
             cls._restore_rng_states(rng_state)
 
-        callback_states_raw: CheckpointValue | None = checkpoint.get("callback_states")
+        callback_states_raw: CheckpointValue | None = checkpoint.get(
+            "callbacks",
+            checkpoint.get("callback_states")
+        )
         callback_states: dict[str, StateDict] = (
-            callback_states_raw if isinstance(callback_states_raw, dict) else {}
+            cast(dict[str, StateDict], callback_states_raw)
+            if isinstance(callback_states_raw, dict)
+            else {}
         )
         for callback in callbacks:
             key: str = callback.state_key
             if key in callback_states:
                 callback.load_state_dict(callback_states[key])
 
-        datamodule_state_raw: CheckpointValue | None = checkpoint.get("datamodule_state_dict")
+        datamodule_state_raw: CheckpointValue | None = checkpoint.get(
+            type(datamodule).__qualname__ if datamodule is not None else "",
+            checkpoint.get("datamodule_state_dict")
+        )
         if datamodule is not None and isinstance(datamodule_state_raw, dict):
-            datamodule.load_state_dict(datamodule_state_raw)
+            datamodule.load_state_dict(cast(StateDict, datamodule_state_raw))
 
         if precision_plugin is not None:
             precision_state_raw: CheckpointValue | None = checkpoint.get(
@@ -198,15 +260,32 @@ class CheckpointState:
         global_step_value: CheckpointValue | None = checkpoint.get("global_step", 0)
         completed_batches_value: CheckpointValue | None = checkpoint.get("completed_batches", 0)
         total_batch_idx_value: CheckpointValue | None = checkpoint.get("total_batch_idx", -1)
-        epoch: int = int(epoch_value if epoch_value is not None else 0)
-        global_step: int = int(global_step_value if global_step_value is not None else 0)
-        completed_batches: int = int(completed_batches_value if completed_batches_value is not None else 0)
-        total_batch_idx: int = int(total_batch_idx_value if total_batch_idx_value is not None else -1)
+        epoch: int = cls._integer_value(epoch_value, 0)
+        global_step: int = cls._integer_value(global_step_value, 0)
+        completed_batches: int = cls._integer_value(completed_batches_value, 0)
+        total_batch_idx: int = cls._integer_value(total_batch_idx_value, -1)
         epoch_rng_state_raw: CheckpointValue | None = checkpoint.get("epoch_rng_state")
         epoch_rng_state: CheckpointDict | None = (
-            epoch_rng_state_raw if isinstance(epoch_rng_state_raw, dict) else None
+            cast(CheckpointDict, epoch_rng_state_raw)
+            if isinstance(epoch_rng_state_raw, dict)
+            else None
         )
         return epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state
+
+    @staticmethod
+    def _integer_value(value: CheckpointValue | None, default: int) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float | str):
+            try:
+                return int(value)
+            except (OverflowError, ValueError):
+                return default
+        if isinstance(value, torch.Tensor) and value.numel() == 1:
+            return int(value.item())
+        return default
 
     @classmethod
     def _collect_rng_states(cls) -> CheckpointDict:
@@ -218,7 +297,10 @@ class CheckpointState:
             "torch": torch.random.get_rng_state()
         }
         if torch.cuda.is_available():
-            states["cuda"] = torch.cuda.get_rng_state_all()
+            states["cuda"] = cast(
+                CheckpointValue,
+                torch.cuda.get_rng_state_all()
+            )
         return states
 
     @classmethod

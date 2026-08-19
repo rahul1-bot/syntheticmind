@@ -41,6 +41,8 @@
 
 import inspect
 import math
+import os
+import tempfile
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Sized
 from datetime import timedelta
@@ -63,6 +65,8 @@ from syntheticmind.accelerators.cuda import CUDAAccelerator
 from syntheticmind.accelerators.mps import MPSAccelerator
 from syntheticmind.accelerators.topology import DeviceTopology, resolve_device_topology
 from syntheticmind.callbacks.callback import Callback
+from syntheticmind.callbacks.checkpoint import Checkpoint
+from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
@@ -248,6 +252,7 @@ class Trainer:
         check_val_every_n_epoch: int | None = 1,
         num_sanity_val_steps: int | None = None,
         log_every_n_steps: int | None = None,
+        enable_checkpointing: bool | None = None,
         enable_progress_bar: bool | None = None,
         accumulate_grad_batches: int = 1,
         gradient_clip_val: int | float | None = None,
@@ -399,6 +404,11 @@ class Trainer:
                 "`enable_progress_bar` must be a bool or None, got "
                 f"{enable_progress_bar!r}."
             )
+        if enable_checkpointing is not None and type(enable_checkpointing) is not bool:
+            raise TypeError(
+                "`enable_checkpointing` must be a bool or None, got "
+                f"{enable_checkpointing!r}."
+            )
         if (
             log_every_n_steps is not None
             and (
@@ -426,6 +436,9 @@ class Trainer:
         )
         resolved_enable_progress_bar: bool = (
             True if enable_progress_bar is None else enable_progress_bar
+        )
+        resolved_enable_checkpointing: bool = (
+            True if enable_checkpointing is None else enable_checkpointing
         )
         self._default_root_dir: Path = (
             Path.cwd()
@@ -524,6 +537,7 @@ class Trainer:
         self.resume_from_checkpoint: Path | None = (
             Path(resume_from_checkpoint) if resume_from_checkpoint is not None else None
         )
+        self._ckpt_path: str | Path | None = None
 
         if accumulate_grad_batches < 1:
             raise MisconfigurationError("accumulate_grad_batches must be >= 1")
@@ -580,6 +594,18 @@ class Trainer:
         self.strategy._attach_precision_plugin(self._precision_plugin)
 
         self.callbacks: list[Callback] = resolved_callbacks
+        configured_checkpoint_callbacks: list[Checkpoint] = [
+            callback
+            for callback in self.callbacks
+            if isinstance(callback, Checkpoint)
+        ]
+        if configured_checkpoint_callbacks and not resolved_enable_checkpointing:
+            raise MisconfigurationError(
+                "Trainer was configured with `enable_checkpointing=False` but found "
+                "a Checkpoint callback in `callbacks`."
+            )
+        if not configured_checkpoint_callbacks and resolved_enable_checkpointing:
+            self.callbacks.append(ModelCheckpoint())
         from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 
         progress_callbacks: list[ProgressBarCallback] = [
@@ -632,6 +658,18 @@ class Trainer:
                     self.callbacks.insert(progress_index, timer)
             if not progress_callbacks:
                 self.callbacks.append(ProgressBarCallback())
+
+        non_checkpoint_callbacks: list[Callback] = [
+            callback
+            for callback in self.callbacks
+            if not isinstance(callback, Checkpoint)
+        ]
+        checkpoint_callbacks: list[Callback] = [
+            callback
+            for callback in self.callbacks
+            if isinstance(callback, Checkpoint)
+        ]
+        self.callbacks = non_checkpoint_callbacks + checkpoint_callbacks
 
         self._loggers: list[Logger] = resolved_loggers
         self.state: TrainerState = TrainerState()
@@ -711,7 +749,8 @@ class Trainer:
         self,
         module: Module,
         datamodule: DataModule,
-        ckpt_path: str | Path | None = None
+        ckpt_path: str | Path | None = None,
+        weights_only: bool | None = None
     ) -> None:
         # Executes a complete training run. The sequence is: reset run-local
         # state, bind the module and datamodule, prepare and set up the data,
@@ -737,6 +776,8 @@ class Trainer:
         #         overrides the constructor-level resume path for this
         #         call. ``None`` falls back to that path or a fresh start.
         #         Default: ``None``.
+        if weights_only is not None and type(weights_only) is not bool:
+            raise TypeError("`weights_only` must be a bool or None.")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             launcher.launch(
@@ -744,7 +785,10 @@ class Trainer:
                 self,
                 module,
                 datamodule,
-                {"ckpt_path": ckpt_path}
+                {
+                    "ckpt_path": ckpt_path,
+                    "weights_only": weights_only
+                }
             )
             return
         # Clear every run-local surface before anything executes, so a second
@@ -777,8 +821,8 @@ class Trainer:
 
         # An explicit per-call checkpoint path overrides the constructor-level
         # resume path; with both absent the run starts fresh.
-        resume_path: Path | None = (
-            Path(ckpt_path) if ckpt_path is not None else self.resume_from_checkpoint
+        resume_path: Path | None = self._select_checkpoint_path(
+            ckpt_path if ckpt_path is not None else self.resume_from_checkpoint
         )
 
         try:
@@ -939,6 +983,10 @@ class Trainer:
                 self.lr_scheduler_configs[0] if self.lr_scheduler_configs else None
             )
 
+            # Duplicate stateful-callback keys are rejected before callback
+            # setup so two instances cannot silently overwrite each other's
+            # checkpoint state later.
+
             # Schedulers pair positionally with optimizers, one definition per
             # optimizer. SchedulerConfig records are compiled against the
             # resolved total-step horizon; pre-built scheduler instances pass
@@ -948,13 +996,15 @@ class Trainer:
             # exist, because their serialized state must land on live objects,
             # and before any hook fires, so every hook observes the resumed
             # run.
+            self._resolve_checkpoint_callback_directories()
             if resume_path is not None:
-                self._restore_checkpoint(resume_path, module)
+                self._restore_checkpoint(
+                    resume_path,
+                    module,
+                    weights_only=weights_only
+                )
             _optimizers_to_device(self.optimizers, device)
 
-            # Duplicate stateful-callback keys are rejected before callback
-            # setup so two instances cannot silently overwrite each other's
-            # checkpoint state later.
             self._validate_callback_state_keys()
 
             with module._hook_context("setup"):
@@ -1035,7 +1085,9 @@ class Trainer:
     def validate(
         self,
         module: Module,
-        datamodule: DataModule
+        datamodule: DataModule,
+        ckpt_path: str | Path | None = None,
+        weights_only: bool | None = None
     ) -> dict[str, float]:
         # Executes a standalone validation stage and returns its reduced epoch
         # metrics. The module's training-mode flag is captured before the run
@@ -1051,11 +1103,22 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the validation pass, keyed by
         #     metric name.
+        if weights_only is not None and type(weights_only) is not bool:
+            raise TypeError("`weights_only` must be a bool or None.")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
                 dict[str, float],
-                launcher.launch("validate", self, module, datamodule, {})
+                launcher.launch(
+                    "validate",
+                    self,
+                    module,
+                    datamodule,
+                    {
+                        "ckpt_path": ckpt_path,
+                        "weights_only": weights_only
+                    }
+                )
             )
         self.state.set_stage("validate")
         self._active_exception = None
@@ -1070,6 +1133,9 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         metrics: dict[str, float] = {}
+        selected_checkpoint_path: Path | None = self._select_checkpoint_path(
+            ckpt_path
+        )
         try:
             self.strategy.setup_environment()
 
@@ -1102,6 +1168,13 @@ class Trainer:
             device: torch.device = self._resolve_device()
             module = self._setup_model(module, device)
             module, _, _ = self._connect_precision_plugin(module, [], [])
+            if selected_checkpoint_path is not None:
+                self._resolve_checkpoint_callback_directories()
+                self._restore_checkpoint(
+                    selected_checkpoint_path,
+                    module,
+                    weights_only=weights_only
+                )
 
             with module._hook_context("setup"):
                 for callback in self.callbacks:
@@ -1128,7 +1201,9 @@ class Trainer:
     def test(
         self,
         module: Module,
-        datamodule: DataModule
+        datamodule: DataModule,
+        ckpt_path: str | Path | None = None,
+        weights_only: bool | None = None
     ) -> dict[str, float]:
         # Executes a standalone test stage and returns its reduced epoch
         # metrics, following the same setup, execution, and teardown skeleton
@@ -1143,11 +1218,22 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the test pass, keyed by metric
         #     name.
+        if weights_only is not None and type(weights_only) is not bool:
+            raise TypeError("`weights_only` must be a bool or None.")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
                 dict[str, float],
-                launcher.launch("test", self, module, datamodule, {})
+                launcher.launch(
+                    "test",
+                    self,
+                    module,
+                    datamodule,
+                    {
+                        "ckpt_path": ckpt_path,
+                        "weights_only": weights_only
+                    }
+                )
             )
         self.state.set_stage("test")
         self._active_exception = None
@@ -1162,6 +1248,9 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         metrics: dict[str, float] = {}
+        selected_checkpoint_path: Path | None = self._select_checkpoint_path(
+            ckpt_path
+        )
         try:
             self.strategy.setup_environment()
 
@@ -1194,6 +1283,13 @@ class Trainer:
             device: torch.device = self._resolve_device()
             module = self._setup_model(module, device)
             module, _, _ = self._connect_precision_plugin(module, [], [])
+            if selected_checkpoint_path is not None:
+                self._resolve_checkpoint_callback_directories()
+                self._restore_checkpoint(
+                    selected_checkpoint_path,
+                    module,
+                    weights_only=weights_only
+                )
 
             with module._hook_context("setup"):
                 for callback in self.callbacks:
@@ -1221,7 +1317,9 @@ class Trainer:
         self,
         module: Module,
         datamodule: DataModule,
-        return_predictions: bool = True
+        return_predictions: bool = True,
+        ckpt_path: str | Path | None = None,
+        weights_only: bool | None = None
     ) -> list[ModelOutput]:
         # Executes a standalone prediction stage and returns the collected
         # step outputs. Distributed execution uses the unrepeated sampler so
@@ -1242,6 +1340,8 @@ class Trainer:
         # Returns:
         #     The prediction-step outputs in batch order, or an empty list
         #     when retention is disabled.
+        if weights_only is not None and type(weights_only) is not bool:
+            raise TypeError("`weights_only` must be a bool or None.")
         launcher = self.strategy.launcher
         if launcher is not None and launcher.should_launch:
             return cast(
@@ -1251,7 +1351,11 @@ class Trainer:
                     self,
                     module,
                     datamodule,
-                    {"return_predictions": return_predictions}
+                    {
+                        "return_predictions": return_predictions,
+                        "ckpt_path": ckpt_path,
+                        "weights_only": weights_only
+                    }
                 )
             )
         self.state.set_stage("predict")
@@ -1267,6 +1371,9 @@ class Trainer:
         module_mode.capture(module)
         stage_completed: bool = False
         predictions: list[ModelOutput] = []
+        selected_checkpoint_path: Path | None = self._select_checkpoint_path(
+            ckpt_path
+        )
         try:
             self.strategy.setup_environment()
 
@@ -1299,6 +1406,13 @@ class Trainer:
             device: torch.device = self._resolve_device()
             module = self._setup_model(module, device)
             module, _, _ = self._connect_precision_plugin(module, [], [])
+            if selected_checkpoint_path is not None:
+                self._resolve_checkpoint_callback_directories()
+                self._restore_checkpoint(
+                    selected_checkpoint_path,
+                    module,
+                    weights_only=weights_only
+                )
 
             with module._hook_context("setup"):
                 for callback in self.callbacks:
@@ -1754,16 +1868,24 @@ class Trainer:
 
         module._running_stage = "training"
 
-    def _restore_checkpoint(self, path: Path, module: Module) -> None:
+    def _restore_checkpoint(
+        self,
+        path: Path,
+        module: Module,
+        weights_only: bool | None = None
+    ) -> None:
         # Restores a full checkpoint onto the live objects: model, optimizer,
         # and scheduler state through CheckpointState, the progress counters
         # into the trainer state and module mirrors, and the mid-epoch resume
         # markers (completed batches and epoch-start random state) into the
         # training epoch loop. The module and callback load hooks fire last so
         # they observe the fully restored payload.
-        checkpoint: CheckpointDict = load_checkpoint(path, map_location=self.strategy.root_device)
+        checkpoint: CheckpointDict = load_checkpoint(
+            path,
+            map_location=self.strategy.root_device,
+            weights_only=weights_only
+        )
         self.precision_plugin.on_load_checkpoint(checkpoint)
-        assert self.optimizer is not None
         epoch: int
         global_step: int
         completed_batches: int
@@ -1772,9 +1894,9 @@ class Trainer:
         epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state = CheckpointState.restore(
             checkpoint=checkpoint,
             model=module,
-            optimizers=self.optimizers,
-            scheduler=self.scheduler,
-            schedulers=self.schedulers,
+            optimizers=(self.optimizers if self.state.stage == "fit" else []),
+            scheduler=(self.scheduler if self.state.stage == "fit" else None),
+            schedulers=(self.schedulers if self.state.stage == "fit" else []),
             callbacks=self.callbacks,
             datamodule=self.datamodule,
             precision_plugin=self.precision_plugin
@@ -1789,11 +1911,183 @@ class Trainer:
                 self.fit_loop.epoch_loop._total_batches_processed = total_batch_idx + 1
             if epoch_rng_state is not None:
                 self.fit_loop.epoch_loop._resume_rng_state = epoch_rng_state
+            checkpoint_rng_state: object | None = checkpoint.get("rng_state")
+            if completed_batches > 0 and isinstance(checkpoint_rng_state, dict):
+                self.fit_loop.epoch_loop._resume_checkpoint_rng_state = cast(
+                    CheckpointDict,
+                    checkpoint_rng_state
+                )
         with module._hook_context("on_load_checkpoint"):
             if hasattr(module, "on_load_checkpoint"):
                 module.on_load_checkpoint(checkpoint)
             for callback in self.callbacks:
                 callback.on_load_checkpoint(self, module, checkpoint)
+
+    def _select_checkpoint_path(
+        self,
+        ckpt_path: str | Path | None
+    ) -> Path | None:
+        if ckpt_path is None:
+            self.ckpt_path = None
+            return None
+        if isinstance(ckpt_path, str) and ckpt_path == "best":
+            for callback in self.checkpoint_callbacks:
+                if (
+                    isinstance(callback, ModelCheckpoint)
+                    and callback.best_model_path
+                ):
+                    path: Path = Path(callback.best_model_path)
+                    self.ckpt_path = path
+                    return path
+            raise MisconfigurationError(
+                "`ckpt_path='best'` requires a ModelCheckpoint with a saved "
+                "`best_model_path`."
+            )
+        if isinstance(ckpt_path, str) and ckpt_path == "last":
+            candidates: list[Path] = []
+            for callback in self.checkpoint_callbacks:
+                if not isinstance(callback, ModelCheckpoint):
+                    continue
+                if callback.last_model_path:
+                    last_model_path: Path = Path(callback.last_model_path)
+                    if last_model_path.is_file():
+                        candidates.append(last_model_path)
+                directory: Path = callback._resolve_dirpath(self)
+                if directory.is_dir():
+                    candidates.extend(directory.glob("last*.ckpt"))
+            unique_candidates: set[Path] = set(candidates)
+            if not unique_candidates:
+                raise MisconfigurationError(
+                    "`ckpt_path='last'` could not find a last checkpoint. "
+                    "Configure `ModelCheckpoint(save_last=True)` first."
+                )
+            path = max(
+                unique_candidates,
+                key=lambda candidate: candidate.stat().st_mtime_ns
+            )
+            self.ckpt_path = path
+            return path
+        if isinstance(ckpt_path, str) and ckpt_path in {"hpc", "registry"}:
+            raise MisconfigurationError(
+                f"`ckpt_path={ckpt_path!r}` is unavailable without its corresponding integration."
+            )
+        path = Path(ckpt_path).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+        self.ckpt_path = path
+        return path
+
+    def _resolve_checkpoint_callback_directories(self) -> None:
+        for callback in self.checkpoint_callbacks:
+            if isinstance(callback, ModelCheckpoint):
+                dirpath: str | None = (
+                    str(callback._resolve_dirpath(self))
+                    if self.is_global_zero
+                    else None
+                )
+                synchronized_dirpath: str | None = self.strategy.broadcast(dirpath)
+                if synchronized_dirpath is None:
+                    raise RuntimeError(
+                        "ModelCheckpoint directory synchronization returned no path."
+                    )
+                callback.dirpath = synchronized_dirpath
+
+    def _build_checkpoint(self, weights_only: bool = False) -> CheckpointDict:
+        module: Module | None = self.module
+        if module is None:
+            raise AttributeError(
+                "Saving a checkpoint requires a model attached through a Trainer stage."
+            )
+        epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
+        completed_batches: int = 0
+        total_batch_idx: int = -1
+        epoch_rng_state: CheckpointDict | None = None
+        has_entered_batch_loop: bool = False
+        if self.state.stage == "fit" and epoch_loop is not None:
+            completed_batches = epoch_loop._completed_batches
+            total_batch_idx = epoch_loop._total_batches_processed - 1
+            has_entered_batch_loop = epoch_loop._has_entered_batch_loop
+            if completed_batches > 0 or has_entered_batch_loop:
+                epoch_rng_state = epoch_loop._epoch_start_rng_state
+        has_batch_progress: bool = completed_batches > 0 or has_entered_batch_loop
+        is_validation_checkpoint: bool = self.state.running_stage == "validating"
+        is_mid_epoch: bool = has_batch_progress and (
+            self._is_mid_epoch_validation or not is_validation_checkpoint
+        )
+        epoch: int = self.state.current_epoch
+        if (
+            self.state.stage == "fit"
+            and not is_mid_epoch
+            and module._current_fx_name in {
+                "on_train_epoch_end",
+                "on_validation_epoch_end",
+                "on_validation_end"
+            }
+        ):
+            epoch += 1
+        checkpoint: CheckpointDict = CheckpointState.build(
+            model=module,
+            optimizers=self.optimizers,
+            scheduler=self.scheduler,
+            schedulers=self.schedulers,
+            epoch=epoch,
+            global_step=self.state.global_step,
+            callbacks=self.callbacks,
+            datamodule=self.datamodule,
+            completed_batches=completed_batches if is_mid_epoch else 0,
+            total_batch_idx=total_batch_idx,
+            epoch_rng_state=epoch_rng_state if is_mid_epoch else None,
+            strategy_name=type(self.strategy).__name__,
+            world_size=self.world_size,
+            precision_plugin=self.precision_plugin,
+            weights_only=weights_only
+        )
+        if not weights_only:
+            self.precision_plugin.on_save_checkpoint(checkpoint)
+        with module._hook_context("on_save_checkpoint"):
+            if not weights_only:
+                for callback in self.callbacks:
+                    callback.on_save_checkpoint(self, module, checkpoint)
+            module.on_save_checkpoint(checkpoint)
+        return checkpoint
+
+    def save_checkpoint(
+        self,
+        filepath: str | Path,
+        weights_only: bool | None = None,
+        storage_options: object | None = None
+    ) -> None:
+        if not isinstance(filepath, str | Path):
+            raise TypeError("`filepath` must be a string or Path.")
+        if weights_only is not None and type(weights_only) is not bool:
+            raise TypeError("`weights_only` must be a bool or None.")
+        if storage_options is not None:
+            raise MisconfigurationError(
+                "`storage_options` requires a checkpoint I/O plugin, which is not configured."
+            )
+        if self.module is None:
+            raise AttributeError(
+                "Saving a checkpoint requires a model attached through a Trainer stage."
+            )
+        path: Path = Path(filepath).expanduser()
+        checkpoint: CheckpointDict = self._build_checkpoint(bool(weights_only))
+        if self.is_global_zero:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            file_descriptor: int
+            temporary_path_value: str
+            file_descriptor, temporary_path_value = tempfile.mkstemp(
+                dir=str(path.parent),
+                suffix=".tmp"
+            )
+            os.close(file_descriptor)
+            temporary_path: Path = Path(temporary_path_value)
+            try:
+                torch.save(checkpoint, temporary_path)
+                temporary_path.replace(path)
+            finally:
+                if temporary_path.exists():
+                    temporary_path.unlink()
+        self.strategy.barrier()
 
     def _handle_exception(
         self,
@@ -2017,6 +2311,29 @@ class Trainer:
     def _log_hyperparams(self, params: HyperparameterDict) -> None:
         for configured_logger in self._loggers:
             configured_logger.log_hyperparams(params)
+
+    @property
+    def checkpoint_callback(self) -> Checkpoint | None:
+        callbacks: list[Checkpoint] = self.checkpoint_callbacks
+        return callbacks[0] if callbacks else None
+
+    @property
+    def checkpoint_callbacks(self) -> list[Checkpoint]:
+        return [
+            callback
+            for callback in self.callbacks
+            if isinstance(callback, Checkpoint)
+        ]
+
+    @property
+    def ckpt_path(self) -> str | Path | None:
+        return self._ckpt_path
+
+    @ckpt_path.setter
+    def ckpt_path(self, ckpt_path: str | Path | None) -> None:
+        if ckpt_path is not None and not isinstance(ckpt_path, str | Path):
+            raise TypeError("`ckpt_path` must be a string, Path, or None.")
+        self._ckpt_path = ckpt_path
 
     @property
     def logger(self) -> Logger | None:

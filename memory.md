@@ -188,3 +188,13 @@
     5. `log_every_n_steps=0` disables only step-cadence logging. Epoch reductions remain semantically distinct events and must continue reaching experiment backends.
     6. Teardown is a collection-wide operation. Every logger must receive `finalize`, with the first failure retaining causal priority and later failures attached rather than swallowed or allowed to prevent subsequent cleanup.
     7. A no-operation logger during fast development preserves user code that accesses logger integrations while enforcing the stronger requirement that no experiment artifacts are written.
+
+| Memory | Checkpoint State and Exact Resume | Date: 19 August 2026 | Time: 04:11 PM | Name: Ghost |
+
+    1. Distributed checkpoint correctness includes callback state, not only file ownership. If rank zero alone evaluates top-k or last-path decisions, the model files may be valid while every other rank carries divergent `best_model_path`, score, ranking, and last-path state.
+    2. Exact mid-epoch continuation needs two random-state coordinates. The epoch-start state reconstructs a shuffled dataloader and permits deterministic skipping, while the interruption-time state restores dropout and all model-side stochastic operations immediately before the first unfinished batch.
+    3. A checkpoint epoch value is a lifecycle coordinate rather than the current loop integer. It advances only after the actual epoch-end extension boundary; incrementing it during arbitrary public saves creates a phantom completed epoch.
+    4. Standard checkpoint keys should be the primary interoperability surface, but removing historical aliases immediately would turn a hardening phase into silent data loss. Writing or reading deliberate compatibility aliases is safer while the schema transition remains explicit.
+    5. Public inheritance audits must compare methods as well as constructor signatures. The missing `on_validation_end` override would have bypassed expected subclass behavior even though checkpoint artifacts appeared to save successfully through adjacent hooks.
+    6. On this MPS runtime, recursive tensor transfer with `non_blocking=True` produced zeroed or corrupted batches and non-finite training loss. Asynchronous host-to-device transfer is therefore restricted to CUDA until another backend has executable evidence for safe semantics.
+    7. Distributed saves must build state on all participating ranks before rank-zero persistence when checkpoint hooks or callback decisions contain collectives. Making only the final filesystem write rank-zero owned avoids deadlock while preserving one authoritative artifact.

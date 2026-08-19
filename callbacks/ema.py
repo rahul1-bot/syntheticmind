@@ -31,7 +31,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, cast, override
 
 import torch
 from torch import nn
@@ -153,9 +153,14 @@ class EMACallback(Callback):
         if self._shadow_model is not None:
             checkpoint["ema_state_dict"] = self._shadow_model.state_dict()
         if self._original_state is not None:
-            checkpoint["model_state_dict"] = {
+            model_state_dict: dict[str, torch.Tensor] = {
                 k: v.clone() for k, v in self._original_state.items()
             }
+            checkpoint["state_dict"] = cast(CheckpointValue, model_state_dict)
+            checkpoint["model_state_dict"] = cast(
+                CheckpointValue,
+                model_state_dict
+            )
 
     @override
     def on_load_checkpoint(

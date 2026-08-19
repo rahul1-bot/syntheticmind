@@ -188,6 +188,7 @@ class TrainingEpochLoop(Loop):
         self._has_entered_batch_loop: bool = False
         self._epoch_start_rng_state: CheckpointDict | None = None
         self._resume_rng_state: CheckpointDict | None = None
+        self._resume_checkpoint_rng_state: CheckpointDict | None = None
 
     def reset_on_run(self) -> None:
         # Clears the mid-epoch resume markers at the start of a new run so a
@@ -195,6 +196,8 @@ class TrainingEpochLoop(Loop):
         self._completed_batches: int = 0
         self._total_batches_processed: int = 0
         self._has_entered_batch_loop: bool = False
+        self._resume_rng_state = None
+        self._resume_checkpoint_rng_state = None
 
     def run(self) -> None:
         # Executes one complete training epoch. The sequence per batch is:
@@ -278,6 +281,11 @@ class TrainingEpochLoop(Loop):
             # sequence and execution continues at the first incomplete batch.
             if batch_idx < skip_batches:
                 continue
+            if self._resume_checkpoint_rng_state is not None:
+                CheckpointState._restore_rng_states(
+                    self._resume_checkpoint_rng_state
+                )
+                self._resume_checkpoint_rng_state = None
 
             with module._hook_context("on_train_batch_start"):
                 for callback in callbacks:
@@ -338,6 +346,9 @@ class TrainingEpochLoop(Loop):
                 outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
                 is_accumulating: bool = False
 
+            self._completed_batches = batch_idx + 1
+            self._total_batches_processed += 1
+
             with module._hook_context("on_train_batch_end"):
                 for callback in callbacks:
                     callback.on_train_batch_end(trainer, module, outputs, batch, batch_idx)
@@ -352,8 +363,6 @@ class TrainingEpochLoop(Loop):
                 is_accumulating
             )
 
-            self._completed_batches: int = batch_idx + 1
-            self._total_batches_processed += 1
             tail_is_accumulating: bool = is_accumulating
 
             is_last_batch: bool = (
@@ -388,6 +397,12 @@ class TrainingEpochLoop(Loop):
                 break
             if trainer.should_stop and trainer.fit_loop._can_stop_early(state):
                 break
+
+        if self._resume_checkpoint_rng_state is not None:
+            CheckpointState._restore_rng_states(
+                self._resume_checkpoint_rng_state
+            )
+            self._resume_checkpoint_rng_state = None
 
         # Tail flush: when the epoch ends inside an accumulation window, one
         # more optimizer step runs so accumulated gradients are never

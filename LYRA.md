@@ -142,3 +142,12 @@
     4. Step-cadence zero suppresses only step traffic, preserving epoch metrics. Cleanup attempts every backend even when one finalizer fails, preventing an early failure from abandoning later buffers or file handles.
     5. CPU, MPS, CSV, multiple custom backends, callback singleton, malformed configuration, teardown failure, and distributed ownership paths are verified; all modified files are type-clean and compile successfully without invoking a linter.
     6. The next sequential boundary is Trainer-owned default checkpoint composition. It must preserve standard callback ownership, directory semantics, disabling behavior, user conflicts, and fast-development suppression before model-summary or profiler composition is considered.
+
+| Strategic Note | Checkpoint Integrity and Continuation | Date: 19 August 2026 | Time: 04:11 PM | Name: Ghost |
+
+    1. ✅ Trainer-owned checkpoint composition now preserves standard enablement, disabling, default callback, generic extension, ordering, root-directory, fast-development, and public save and restore meanings.
+    2. ModelCheckpoint is a SyntheticMind implementation of established checkpoint capability rather than a Lightning clone. Its public parameters and override contracts match the mature reference where the concepts are universal, while framework branding and unavailable integration promises remain excluded.
+    3. Full checkpoints restore the complete training transaction and weights-only checkpoints restore the model boundary without stale optimizer or callback mutation. Standard state names are primary and earlier SyntheticMind state names remain load-compatible.
+    4. Exact stochastic continuation is verified across shuffled data and dropout, including interruption inside an epoch. Correctness depends on preserving both dataloader reconstruction state and the random state at the unfinished computation boundary.
+    5. Filesystem mutation remains rank-zero owned while checkpoint callback decisions and state remain synchronized across forked, spawned, and externally launched Gloo workers. CPU and MPS paths are executable; CUDA remains explicitly hardware-unverified.
+    6. The next dependency-ordered phase is standard model-summary composition through `enable_model_summary`, followed only after its public callback and parameter-count behavior are understood end to end.

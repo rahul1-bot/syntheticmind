@@ -22,6 +22,7 @@
 import os
 import tempfile
 from pathlib import Path
+from typing import cast
 
 import torch
 
@@ -52,12 +53,24 @@ def save_checkpoint(checkpoint: CheckpointDict, filepath: Path) -> None:
         raise
 
 
-def load_checkpoint(filepath: Path, map_location: str | torch.device = "cpu") -> CheckpointDict:
+def load_checkpoint(
+    filepath: Path,
+    map_location: str | torch.device = "cpu",
+    weights_only: bool | None = None
+) -> CheckpointDict:
     # Deserializes a checkpoint payload, raising FileNotFoundError with the
     # offending path instead of letting torch.load fail with a less direct
     # message. map_location defaults to CPU so restoration never requires the
     # original device.
     if not filepath.exists():
         raise FileNotFoundError(f"Checkpoint not found: {filepath}")
-    checkpoint: CheckpointDict = torch.load(filepath, map_location=map_location, weights_only=False)
-    return checkpoint
+    checkpoint: object = torch.load(
+        filepath,
+        map_location=map_location,
+        weights_only=False if weights_only is None else weights_only
+    )
+    if not isinstance(checkpoint, dict):
+        raise TypeError(
+            f"Checkpoint payload must be a dictionary, got {type(checkpoint).__name__}."
+        )
+    return cast(CheckpointDict, checkpoint)

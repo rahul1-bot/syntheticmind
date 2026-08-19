@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, TypeVar, cast
 
 import torch
 from torch import nn
@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from syntheticmind.strategies.launcher import _ProcessLauncher
 
 __all__: list[str] = ["Strategy"]
+
+TBroadcast = TypeVar("TBroadcast")
 
 
 class Strategy(ABC):
@@ -175,9 +177,9 @@ class Strategy(ABC):
         # execution so call sites need no guards.
         pass
 
-    def broadcast(self, tensor: torch.Tensor, src: int = 0) -> torch.Tensor:
+    def broadcast(self, obj: TBroadcast, src: int = 0) -> TBroadcast:
         # Broadcasts from the source rank; local execution returns the input.
-        return tensor
+        return obj
 
     def reduce_boolean_decision(self, decision: bool) -> bool:
         # Agrees on a control decision across ranks; local execution returns

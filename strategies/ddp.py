@@ -45,7 +45,7 @@ from torch.nn.parallel import DistributedDataParallel
 from syntheticmind.core.module import Module
 from syntheticmind.precision.precision import Precision
 from syntheticmind.strategies.launcher import _ProcessLauncher, ProcessStartMethod
-from syntheticmind.strategies.strategy import Strategy
+from syntheticmind.strategies.strategy import Strategy, TBroadcast
 from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
 
 if TYPE_CHECKING:
@@ -336,12 +336,18 @@ class DDPStrategy(Strategy):
             dist.barrier()
 
     @override
-    def broadcast(self, tensor: torch.Tensor, src: int = 0) -> torch.Tensor:
+    def broadcast(self, obj: TBroadcast, src: int = 0) -> TBroadcast:
         # Broadcasts the tensor from the source rank to all ranks in place and
         # returns it, so call sites can use the result directly.
-        if dist.is_initialized():
-            dist.broadcast(tensor, src=src)
-        return tensor
+        if not dist.is_initialized():
+            return obj
+        objects: list[object] = [obj]
+        dist.broadcast_object_list(
+            objects,
+            src=src,
+            device=(self.root_device if self.root_device.type == "cuda" else None)
+        )
+        return cast(TBroadcast, objects[0])
 
     @property
     @override
@@ -412,7 +418,10 @@ class DDPStrategy(Strategy):
         # rank commits every rank to the same outcome.
         if not dist.is_initialized():
             return decision
-        decision_tensor: torch.Tensor = torch.tensor(int(decision), device=self._device)
+        decision_tensor: torch.Tensor = torch.tensor(
+            int(decision),
+            device=self.root_device
+        )
         dist.all_reduce(decision_tensor, op=dist.ReduceOp.SUM)
         return bool(decision_tensor.item() > 0)
 

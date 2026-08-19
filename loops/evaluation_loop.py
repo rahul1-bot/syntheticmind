@@ -40,8 +40,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from syntheticmind.callbacks.callback import Callback
+from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
-from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.batch_limits import resolve_batch_limit
@@ -103,10 +103,10 @@ class EvaluationLoop(Loop):
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
         monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if isinstance(callback, (EarlyStopping, ModelCheckpoint))
+            callback for callback in callbacks if isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         non_monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, ModelCheckpoint))
+            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model
