@@ -460,4 +460,15 @@
     4. The runtime contract remains inheritance-safe: custom progress callbacks receive the complete print call, logger order and identity remain Trainer-owned, and detached printing fails because no global-rank authority exists.
     5. Focused verification covers detached and attached access, multiple loggers, exact signatures and keyword behavior, custom and disabled progress callbacks, active interactive rendering, redirected output, CPU, MPS, and global-rank suppression under subprocess, spawn, and fork DDP.
     6. Compilation, diff validation, source-comment preservation, and targeted type inspection pass without invoking a linter; the existing unrelated `Module` type-checking baseline remains unchanged.
-    7. The next dependency-ordered boundary is `Module.all_gather`, including nested data structures, gradient preservation, synchronization barriers, shape semantics, and every supported process launcher.
+    7. The next dependency-ordered boundary was completed through the independent collective contract recorded below.
+
+| Architecture Decision | Standard Model Collective Gathering | Date: 19 August 2026 | Time: 11:16 PM | Name: Ghost |
+
+    1. `Module.all_gather(data, group=None, sync_grads=False)` now preserves the established public names, order, defaults, inheritance surface, and nested tensor-collection meaning without adopting Lightning-owned identities or internal architecture.
+    2. Tensor, NumPy array, boolean, integer, and floating-point inputs move to the model device with established collective-compatible dtypes, while nested dictionaries, lists, tuples, and named tuples retain their structure.
+    3. Single-device execution returns each tensor without an artificial leading dimension. Distributed execution adds a leading dimension equal to the selected process-group size and preserves exact rank order.
+    4. Default gathering returns graph-free distributed results, while `sync_grads=True` uses PyTorch's differentiable collective so backward propagation accumulates contributions across participating ranks.
+    5. Process-group selection is owned by the Strategy boundary. Every supported stage initializes the distributed environment before model setup hooks, and callers remain responsible for entering the collective on every participating rank with equal tensor shapes.
+    6. Focused verification covers detached failure, scalar and nested conversion, named tuples, non-contiguous and empty tensors, single-device CPU and MPS, explicit subgroups, synchronized gradients, subprocess, spawn, fork, and direct two-rank Gloo execution.
+    7. Direct `code-guidelines.md` review, Python compilation, signature and inheritance inspection, exception probes, and diff review pass. No linter or static type checker was invoked after the governing prohibition.
+    8. The next dependency-ordered universal model capability is standard checkpoint-based class loading; device-mesh and export surfaces remain separate later phases.

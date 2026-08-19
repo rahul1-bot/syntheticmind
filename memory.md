@@ -399,3 +399,12 @@
     4. `Module.loggers` is a live reference to Trainer ownership, matching the singular first-logger view without duplicating or independently mutating logger configuration. Detached access returns a new empty collection because no logger owner exists.
     5. Rank suppression must occur before progress callback dispatch and file output. Real two-rank launcher evidence confirmed that nonzero ranks create no output bytes even when every process executes the same inherited model hook.
     6. The adjacent collective API is semantically independent from console access. `all_gather` requires explicit nested-structure and autograd ownership rather than being grouped into this completed accessor phase.
+
+| Memory | Collective Structure and Autograd Ownership | Date: 19 August 2026 | Time: 11:16 PM | Name: Ghost |
+
+    1. The model wrapper owns recursive data conversion and structure preservation, while the Strategy owns process-group communication. Mixing these responsibilities would duplicate collection logic across every distributed implementation.
+    2. World-size-one execution is an identity operation and must not add a leading dimension. Distributed execution stacks rank results along a new leading dimension controlled by the selected group rather than the Trainer's global world size.
+    3. A collective is already a synchronization boundary. Adding a separate barrier increases coordination cost and creates another deadlock surface without strengthening correctness.
+    4. Ordinary gathering must not retain autograd state across ranks. Differentiable gathering requires PyTorch's distributed autograd implementation because native buffer gathering destroys the cross-rank backward path.
+    5. Equal shapes and participation by every rank in the selected group are contract preconditions. Pretending to accept uneven tensors without an explicit padding or object-gather protocol would turn user mistakes into process stalls.
+    6. Named tuple preservation requires reconstructing the concrete tuple type after recursive transformation; treating every tuple as plain storage silently weakens inherited user data contracts.

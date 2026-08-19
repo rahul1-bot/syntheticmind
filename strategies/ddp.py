@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, cast, override
 import torch
 import torch.distributed as dist
 from torch import nn
+from torch.distributed.nn.functional import all_gather as distributed_all_gather
 from torch.nn.parallel import DistributedDataParallel
 
 from syntheticmind.core.module import Module
@@ -411,15 +412,34 @@ class DDPStrategy(Strategy):
         return bool(decision_tensor.item() > 0)
 
     @override
-    def all_gather(self, tensor: torch.Tensor) -> torch.Tensor:
+    def all_gather(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup | None = None,
+        sync_grads: bool = False
+    ) -> torch.Tensor:
         # Gathers the tensor from every rank into a new leading dimension. A
         # zero-initialized buffer is allocated per rank and filled by the
         # collective, and the buffers are stacked so the caller receives one
         # tensor of shape (world_size, *tensor.shape).
         if not dist.is_initialized():
             return tensor
-        gathered: list[torch.Tensor] = [torch.zeros_like(tensor) for _ in range(self.world_size)]
-        dist.all_gather(gathered, tensor)
+        contiguous_tensor: torch.Tensor = tensor.contiguous()
+        if sync_grads:
+            gathered_tensors: tuple[torch.Tensor, ...] = cast(
+                tuple[torch.Tensor, ...],
+                distributed_all_gather(
+                    contiguous_tensor,
+                    group=group
+                )
+            )
+            return torch.stack(gathered_tensors)
+        world_size: int = dist.get_world_size(group)
+        gathered: list[torch.Tensor] = [
+            torch.zeros_like(contiguous_tensor)
+            for _ in range(world_size)
+        ]
+        dist.all_gather(gathered, contiguous_tensor, group=group)
         return torch.stack(gathered)
 
     @override

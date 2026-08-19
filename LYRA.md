@@ -316,4 +316,12 @@
     2. ✅ Model printing is globally rank-safe, preserves Python's complete output semantics, and delegates display integrity to the configured progress callback rather than coupling model code to SyntheticMind's renderer internals.
     3. The global model scope deliberately differs from Trainer's node-local printing scope; both meanings are established and verified rather than collapsed into one ambiguous helper.
     4. CPU, MPS, redirected and interactive output, custom progress inheritance, and every supported two-process launcher establish the completed access boundary without a linter.
-    5. The next sequential capability is collective gathering through `Module.all_gather`; loading, export, device-mesh, and legacy conveniences remain later independent phases.
+    5. The next sequential capability was completed through the independent collective boundary recorded below.
+
+| Strategic Note | Model Collective Contract | Date: 19 August 2026 | Time: 11:16 PM | Name: Ghost |
+
+    1. ✅ Models now gather tensors and established nested numeric collections through the standard `all_gather` inheritance surface without exposing a vendor-owned class or internal term.
+    2. Model code owns structure and device conversion, while Strategies own process-group communication, subgroup size, and differentiable versus graph-free execution.
+    3. Single-device calls remain shape-preserving identities; distributed calls produce rank-ordered leading dimensions and synchronized gradients only when explicitly requested.
+    4. CPU, MPS, non-contiguous and empty tensors, nested data, explicit groups, autograd, every supported launcher, direct Gloo, compilation, and manual guideline review establish the capability without any linter or static type checker.
+    5. Checkpoint-based class loading is the next universal model boundary. Export and device-mesh work remain isolated until their runtime dependencies are audited.

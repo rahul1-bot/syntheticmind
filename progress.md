@@ -225,8 +225,15 @@
     3. ✅ Progress-safe output, custom callback routing, disabled fallback, detached failure, logger identity, exact signatures, CPU, MPS, redirected streams, and all three supported two-rank launch models pass focused verification.
     4. ✅ Compilation, diff validation, source-comment preservation, and targeted type inspection pass without Ruff or another linter.
 
-| Progress Todo | Standard Collective Gathering | Date: 19 August 2026 | Time: 11:01 PM | Name: Ghost |
+| Progress Complete | Standard Collective Gathering | Date: 19 August 2026 | Time: 11:16 PM | Name: Ghost |
 
-    1. Audit the pinned `Module.all_gather` signature, nested-data contract, synchronization barrier, scalar and tensor shape rules, autograd behavior, and strategy ownership before implementation.
-    2. Verify detached failure, single-device identity, nested structures, supported dtypes, uneven or invalid inputs, gradient propagation, CPU Gloo, and subprocess, spawn, and fork launch behavior.
-    3. Keep device-mesh, loading, export, and legacy convenience surfaces separate until their own runtime dependencies are reached.
+    1. ✅ `Module.all_gather` now exposes the established data, group, and synchronized-gradient contract and preserves supported nested collection structures on the model device.
+    2. ✅ Single-device identity, distributed rank stacking, explicit subgroup size and order, graph-free default gathering, and differentiable synchronized gathering are implemented at the Strategy boundary.
+    3. ✅ Detached access, invalid values, scalar dtypes, NumPy arrays, named tuples, non-contiguous and empty tensors, CPU, MPS, subprocess, spawn, fork, and direct two-rank Gloo paths pass focused execution.
+    4. ✅ Direct guideline review, Python compilation, public signature and inheritance inspection, exception probes, source-comment preservation, and diff validation pass without any linter or static type checker.
+
+| Progress Todo | Standard Module Checkpoint Loading | Date: 19 August 2026 | Time: 11:16 PM | Name: Ghost |
+
+    1. Audit the pinned `Module.load_from_checkpoint` classmethod, constructor reconstruction, hyperparameter precedence, map-location, strict loading, and checkpoint-hook contracts against SyntheticMind's existing persistence architecture.
+    2. Implement only the universal checkpoint-loading capability under SyntheticMind ownership and preserve subclass inheritance semantics and standard parameter vocabulary.
+    3. Verify real saved checkpoints, constructor overrides, missing and unexpected keys, CPU and MPS mapping, custom loading hooks, malformed inputs, and distributed-safe usage before committing the phase.

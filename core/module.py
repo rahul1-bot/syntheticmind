@@ -60,7 +60,15 @@ from syntheticmind.loggers.logger import Logger
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
-from syntheticmind.utilities.types import Batch, ModelOutput, Reduction, StepOutput
+from syntheticmind.utilities.tensor_collections import transform_tensor_collection
+from syntheticmind.utilities.types import (
+    Batch,
+    GatherData,
+    GatherResult,
+    ModelOutput,
+    Reduction,
+    StepOutput
+)
 
 if TYPE_CHECKING:
     from torchmetrics import Metric, MetricCollection
@@ -1316,6 +1324,29 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             progress_bar.print(*args, sep=sep, end=end, file=file, flush=flush)
             return
         builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
+
+    def all_gather(
+        self,
+        data: GatherData,
+        group: dist.ProcessGroup | None = None,
+        sync_grads: bool = False
+    ) -> GatherResult:
+        if type(sync_grads) is not bool:
+            raise TypeError(
+                f"`sync_grads` must be a bool, got {type(sync_grads).__name__}."
+            )
+        resolved_group: dist.ProcessGroup | None = (
+            group if group is not None else dist.group.WORLD
+        )
+
+        def gather_tensor(tensor: torch.Tensor) -> torch.Tensor:
+            return self.trainer.strategy.all_gather(
+                tensor,
+                group=resolved_group,
+                sync_grads=sync_grads
+            )
+
+        return transform_tensor_collection(data, self.device, gather_tensor)
 
     @property
     def current_epoch(self) -> int:

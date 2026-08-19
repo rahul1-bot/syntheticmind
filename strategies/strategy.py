@@ -273,7 +273,12 @@ class Strategy(ABC):
         # the local decision unchanged.
         return decision
 
-    def all_gather(self, tensor: torch.Tensor) -> torch.Tensor:
+    def all_gather(
+        self,
+        tensor: torch.Tensor,
+        group: torch.distributed.ProcessGroup | None = None,
+        sync_grads: bool = False
+    ) -> torch.Tensor:
         # Gathers tensors from every rank; local execution returns the input.
         return tensor
 

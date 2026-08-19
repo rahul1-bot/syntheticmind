@@ -43,6 +43,8 @@ __all__: list[str] = [
     "StepOutput",
     "ModelScalar",
     "ModelOutput",
+    "GatherData",
+    "GatherResult",
     "HyperparameterScalar",
     "HyperparameterValue",
     "HyperparameterDict",
@@ -129,6 +131,24 @@ type ModelOutput = (
     | list[ModelOutput]
     | tuple[ModelOutput, ...]
     | dict[str, ModelOutput]
+)
+
+type GatherData = (
+    bool
+    | int
+    | float
+    | np.ndarray
+    | torch.Tensor
+    | dict[object, GatherData]
+    | list[GatherData]
+    | tuple[GatherData, ...]
+)
+
+type GatherResult = (
+    torch.Tensor
+    | dict[object, GatherResult]
+    | list[GatherResult]
+    | tuple[GatherResult, ...]
 )
 
 type HyperparameterScalar = bool | int | float | str | None
