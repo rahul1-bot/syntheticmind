@@ -390,6 +390,8 @@ class TrainingEpochLoop(Loop):
         # more optimizer step runs so accumulated gradients are never
         # silently discarded.
         if module.automatic_optimization and tail_is_accumulating:
+            assert optimizer is not None
+            strategy.sync_gradients(optimizer)
             self._do_optimizer_step(
                 trainer, module, optimizer, state, batch_idx
             )

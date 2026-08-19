@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, override
@@ -42,6 +43,7 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
 from syntheticmind.core.module import Module
+from syntheticmind.strategies.launcher import _ProcessLauncher, ProcessStartMethod
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
 
@@ -60,7 +62,8 @@ class DDPStrategy(Strategy):
         self,
         accelerator: Accelerator | None = None,
         parallel_devices: list[torch.device] | None = None,
-        process_group_backend: str | None = None
+        process_group_backend: str | None = None,
+        start_method: ProcessStartMethod = "popen"
     ) -> None:
         # Records the requested communication backend. The local rank is
         # resolved later, during environment setup, from the launcher-provided
@@ -81,7 +84,9 @@ class DDPStrategy(Strategy):
             if process_group_backend is not None
             else None
         )
+        self._launcher: _ProcessLauncher = _ProcessLauncher(self, start_method)
         self._local_rank: int = 0
+        self._process_group_cleanup_registered: bool = False
 
     @override
     def setup_environment(self) -> None:
@@ -109,11 +114,18 @@ class DDPStrategy(Strategy):
         configured_world_size: int = self.num_nodes * self.num_processes
         if dist.is_initialized():
             active_world_size: int = dist.get_world_size()
+            active_backend: str = str(dist.get_backend()).lower()
             if active_world_size != configured_world_size:
                 raise MisconfigurationError(
                     f"The initialized process group has world_size={active_world_size}, but the "
                     f"configured topology requires {configured_world_size} processes."
                 )
+            if active_backend != backend:
+                raise MisconfigurationError(
+                    f"The initialized process group uses backend={active_backend!r}, but "
+                    f"DDPStrategy requires backend={backend!r}."
+                )
+            self._register_process_group_cleanup()
             return
         if backend == "nccl" and not torch.cuda.is_available():
             raise MisconfigurationError(
@@ -145,13 +157,47 @@ class DDPStrategy(Strategy):
             raise MisconfigurationError(
                 f"WORLD_SIZE must be an integer, got {os.environ['WORLD_SIZE']!r}."
             ) from exception
+        try:
+            global_rank: int = int(os.environ["RANK"])
+        except ValueError as exception:
+            raise MisconfigurationError(
+                f"RANK must be an integer, got {os.environ['RANK']!r}."
+            ) from exception
+        if global_rank < 0 or global_rank >= launched_world_size:
+            raise MisconfigurationError(
+                f"RANK={global_rank} is outside the launched world range "
+                f"[0, {launched_world_size - 1}]."
+            )
         if launched_world_size != configured_world_size:
             raise MisconfigurationError(
                 f"WORLD_SIZE={launched_world_size} does not match the configured topology "
                 f"of num_nodes={self.num_nodes} and num_devices={self.num_processes} "
                 f"({configured_world_size} processes)."
             )
+        node_rank_value: str | None = os.environ.get(
+            "GROUP_RANK",
+            os.environ.get("NODE_RANK")
+        )
+        if node_rank_value is not None:
+            try:
+                node_rank: int = int(node_rank_value)
+            except ValueError as exception:
+                raise MisconfigurationError(
+                    f"NODE_RANK must be an integer, got {node_rank_value!r}."
+                ) from exception
+            expected_global_rank: int = node_rank * self.num_processes + self._local_rank
+            if node_rank < 0 or node_rank >= self.num_nodes:
+                raise MisconfigurationError(
+                    f"NODE_RANK={node_rank} is outside the configured node range "
+                    f"[0, {self.num_nodes - 1}]."
+                )
+            if expected_global_rank != global_rank:
+                raise MisconfigurationError(
+                    f"RANK={global_rank} does not match NODE_RANK={node_rank} and "
+                    f"LOCAL_RANK={self._local_rank}; expected RANK={expected_global_rank}."
+                )
         dist.init_process_group(backend=backend)
+        self._register_process_group_cleanup()
 
     @override
     def setup(self, model: nn.Module, device: torch.device) -> nn.Module:
@@ -268,6 +314,11 @@ class DDPStrategy(Strategy):
 
     @property
     @override
+    def launcher(self) -> _ProcessLauncher:
+        return self._launcher
+
+    @property
+    @override
     def root_device(self) -> torch.device:
         if not self.parallel_devices:
             return self._device
@@ -312,6 +363,10 @@ class DDPStrategy(Strategy):
     def process_group_backend(self) -> str | None:
         return self._process_group_backend
 
+    @property
+    def start_method(self) -> ProcessStartMethod:
+        return self._launcher.start_method
+
     @override
     def reduce_boolean_decision(self, decision: bool) -> bool:
         # Agrees on a boolean control decision across ranks with logical-OR
@@ -337,8 +392,64 @@ class DDPStrategy(Strategy):
         return torch.stack(gathered)
 
     @override
+    def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
+        if not dist.is_initialized():
+            return
+        synchronized_parameters: set[int] = set()
+        for parameter_group in optimizer.param_groups:
+            parameters: object = parameter_group["params"]
+            if not isinstance(parameters, list):
+                raise TypeError("Optimizer parameter groups must contain a parameter list.")
+            for parameter in parameters:
+                if not isinstance(parameter, torch.nn.Parameter):
+                    raise TypeError("Optimizer parameter groups must contain Parameters.")
+                parameter_identity: int = id(parameter)
+                if parameter_identity in synchronized_parameters:
+                    continue
+                gradient_flags: torch.Tensor = torch.tensor(
+                    [
+                        int(parameter.grad is not None),
+                        int(parameter.grad is not None and parameter.grad.is_sparse)
+                    ],
+                    device=parameter.device,
+                    dtype=torch.int64
+                )
+                dist.all_reduce(gradient_flags, op=dist.ReduceOp.SUM)
+                if int(gradient_flags[1].item()) > 0:
+                    raise RuntimeError(
+                        "Distributed accumulation tails with sparse gradients are not supported."
+                    )
+                if int(gradient_flags[0].item()) == 0:
+                    synchronized_parameters.add(parameter_identity)
+                    continue
+                gradient: torch.Tensor = (
+                    parameter.grad
+                    if parameter.grad is not None
+                    else torch.zeros_like(parameter)
+                )
+                dist.all_reduce(gradient, op=dist.ReduceOp.SUM)
+                gradient.div_(self.world_size)
+                if parameter.grad is None:
+                    parameter.grad = gradient
+                synchronized_parameters.add(parameter_identity)
+
+    @override
+    def on_exception(self, exception: BaseException) -> None:
+        self._destroy_process_group()
+
+    @override
     def teardown(self) -> None:
         # Destroys the process group so a subsequent run inside the same
         # process can initialize a fresh group without conflict.
+        if isinstance(self._model, DistributedDataParallel):
+            self._model = self._model.module
+
+    def _register_process_group_cleanup(self) -> None:
+        if self._process_group_cleanup_registered:
+            return
+        atexit.register(self._destroy_process_group)
+        self._process_group_cleanup_registered = True
+
+    def _destroy_process_group(self) -> None:
         if dist.is_initialized():
             dist.destroy_process_group()

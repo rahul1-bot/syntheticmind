@@ -660,6 +660,16 @@ class Trainer:
         #         overrides the constructor-level resume path for this
         #         call. ``None`` falls back to that path or a fresh start.
         #         Default: ``None``.
+        launcher = self.strategy.launcher
+        if launcher is not None and launcher.should_launch:
+            launcher.launch(
+                "fit",
+                self,
+                module,
+                datamodule,
+                {"ckpt_path": ckpt_path}
+            )
+            return
         # Clear every run-local surface before anything executes, so a second
         # fit call on the same trainer inherits no stop request, cached
         # callback metrics, progress counters, or mid-epoch resume markers
@@ -745,12 +755,12 @@ class Trainer:
                         self.train_dataloader,
                         shuffle=not bool(self.overfit_batches)
                     )
-                else:
+                elif is_rank_zero():
                     log.warning("Skipping DistributedSampler for train dataloader: IterableDataset detected.")
                 if self.val_dataloader is not None:
                     if not isinstance(self.val_dataloader.dataset, IterableDataset):
                         self.val_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.val_dataloader, shuffle=False)
-                    else:
+                    elif is_rank_zero():
                         log.warning("Skipping DistributedSampler for val dataloader: IterableDataset detected.")
 
             # Record loader lengths where they are knowable; unsized iterable
@@ -959,6 +969,12 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the validation pass, keyed by
         #     metric name.
+        launcher = self.strategy.launcher
+        if launcher is not None and launcher.should_launch:
+            return cast(
+                dict[str, float],
+                launcher.launch("validate", self, module, datamodule, {})
+            )
         self.state.set_stage("validate")
         self._active_exception = None
         self._callback_metrics.clear()
@@ -996,7 +1012,7 @@ class Trainer:
             if self.use_distributed_sampler and self.strategy.is_distributed:
                 if not isinstance(self.val_dataloader.dataset, IterableDataset):
                     self.val_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.val_dataloader, shuffle=False)
-                else:
+                elif is_rank_zero():
                     log.warning("Skipping DistributedSampler for val dataloader: IterableDataset detected.")
 
             self._total_val_batches: int | None = self._safe_len(self.val_dataloader) if self.val_dataloader is not None else None
@@ -1047,6 +1063,12 @@ class Trainer:
         # Returns:
         #     The reduced epoch metrics of the test pass, keyed by metric
         #     name.
+        launcher = self.strategy.launcher
+        if launcher is not None and launcher.should_launch:
+            return cast(
+                dict[str, float],
+                launcher.launch("test", self, module, datamodule, {})
+            )
         self.state.set_stage("test")
         self._active_exception = None
         self._callback_metrics.clear()
@@ -1084,7 +1106,7 @@ class Trainer:
             if self.use_distributed_sampler and self.strategy.is_distributed:
                 if not isinstance(self.test_dataloader.dataset, IterableDataset):
                     self.test_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.test_dataloader, shuffle=False)
-                else:
+                elif is_rank_zero():
                     log.warning("Skipping DistributedSampler for test dataloader: IterableDataset detected.")
 
             self._total_test_batches: int | None = self._safe_len(self.test_dataloader) if self.test_dataloader is not None else None
@@ -1142,6 +1164,18 @@ class Trainer:
         # Returns:
         #     The prediction-step outputs in batch order, or an empty list
         #     when retention is disabled.
+        launcher = self.strategy.launcher
+        if launcher is not None and launcher.should_launch:
+            return cast(
+                list[ModelOutput],
+                launcher.launch(
+                    "predict",
+                    self,
+                    module,
+                    datamodule,
+                    {"return_predictions": return_predictions}
+                )
+            )
         self.state.set_stage("predict")
         self._active_exception = None
         self._callback_metrics.clear()
@@ -1179,7 +1213,7 @@ class Trainer:
             if self.use_distributed_sampler and self.strategy.is_distributed:
                 if not isinstance(self.predict_dataloader.dataset, IterableDataset):
                     self.predict_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_unrepeated_sampler(self.predict_dataloader)
-                else:
+                elif is_rank_zero():
                     log.warning("Skipping DistributedSampler for predict dataloader: IterableDataset detected.")
 
             self._total_predict_batches: int | None = self._safe_len(self.predict_dataloader)
@@ -1416,6 +1450,10 @@ class Trainer:
             match normalized_strategy:
                 case "ddp":
                     resolved_strategy = DDPStrategy()
+                case "ddp_spawn":
+                    resolved_strategy = DDPStrategy(start_method="spawn")
+                case "ddp_fork" | "ddp_notebook":
+                    resolved_strategy = DDPStrategy(start_method="fork")
                 case "single_device":
                     resolved_strategy = SingleDeviceStrategy()
                 case "auto":
@@ -1426,7 +1464,8 @@ class Trainer:
                 case _:
                     raise ValueError(
                         f"Unknown strategy {strategy!r}. Available choices are "
-                        "'auto', 'single_device', and 'ddp'."
+                        "'auto', 'single_device', 'ddp', 'ddp_spawn', "
+                        "'ddp_fork', and 'ddp_notebook'."
                     )
         requires_distributed_strategy: bool = (
             len(parallel_devices) > 1 or num_nodes > 1

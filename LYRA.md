@@ -106,3 +106,12 @@
     3. CPU multi-process execution defaults to Gloo, CUDA execution defaults to NCCL, explicit GPU identifiers retain their declared order, and unsupported or contradictory configurations fail before model placement.
     4. Real CPU and MPS execution plus a two-process CPU `torchrun` fit verify the supported local hardware paths; CUDA parsing and rank mapping are verified through controlled availability probes because the current MacBook exposes no CUDA runtime.
     5. Topology alone is not distributed user parity. The next sequential phase is a local subprocess launcher that converts a multi-device Trainer request into the required worker processes while preserving entry-point arguments, failures, teardown, and parent-process results.
+
+| Strategic Note | Distributed Process Ownership | Date: 19 August 2026 | Time: 02:17 PM | Name: Ghost |
+
+    1. ✅ A multi-device Trainer can now create its own local DDP workers through standard `ddp`, `ddp_spawn`, `ddp_fork`, and `ddp_notebook` strategy names while externally launched `torchrun` execution remains supported.
+    2. The default script launcher owns one process lifetime, not one Trainer stage. Consecutive stages reuse the same healthy process group, eliminating stale-rendezvous races without copying Lightning's connector architecture or product terminology.
+    3. Spawn and fork workers reconcile rank-zero execution state into the parent; subprocess workers instead continue the same user program. These are intentionally different standard process models and must not be disguised behind one false state-transfer promise.
+    4. Distributed failures are terminal to the affected local job, broken process groups are destroyed, launch mutations are restored when control returns, and worker observers prevent blocked collectives from leaving zombie processes.
+    5. The unsized gradient-accumulation tail now synchronizes dense gradients, including parameters absent on an individual rank, before stepping. Sparse tail synchronization remains an explicit limitation rather than silent corruption.
+    6. The next dependency-ordered boundary is the standard precision contract and its interaction with optimizers, strategies, devices, checkpoint restoration, and user-visible Trainer semantics.

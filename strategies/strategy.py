@@ -32,6 +32,7 @@ from syntheticmind.utilities.types import Batch, ModelOutput, StepOutput
 
 if TYPE_CHECKING:
     from syntheticmind.accelerators.accelerator import Accelerator
+    from syntheticmind.strategies.launcher import _ProcessLauncher
 
 __all__: list[str] = ["Strategy"]
 
@@ -155,11 +156,18 @@ class Strategy(ABC):
         # Gathers tensors from every rank; local execution returns the input.
         return tensor
 
+    def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
+        pass
+
     @property
     def is_distributed(self) -> bool:
         # Whether this strategy coordinates multiple processes; base default is
         # single-process.
         return False
+
+    @property
+    def launcher(self) -> _ProcessLauncher | None:
+        return None
 
     @property
     def accelerator(self) -> Accelerator | None:
