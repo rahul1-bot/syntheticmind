@@ -31,11 +31,11 @@
     3. The ledgers preserve current direction and reusable knowledge only. Git history preserves chronological implementation detail, and duplication between those systems is prohibited.
     4. Every completed phase must leave local `dev` and `origin/dev` synchronized after verification and review.
 
-| Strategic Note | Extension Contracts and Verification Boundary | Date: 19 August 2026 | Time: 09:03 AM | Name: Ghost |
+| Strategic Note | Extension Contracts and Verification Boundary | Date: 19 August 2026 | Time: 11:10 PM | Name: Ghost |
 
     1. SyntheticMind's base classes must preserve standard machine-learning terminology, inheritance chains, method-resolution behavior, override names, signatures, parameter meanings, defaults, and lifecycle effects because downstream models and integrations extend these contracts directly.
     2. `code-guidelines.md` governs every implementation decision, while PyTorch and PyTorch Lightning conventions govern public concepts that users already understand.
-    3. Ruff and other linters are excluded. Verification proceeds through focused executable behavior, signature and inheritance inspection, source comparison, failure-path probes, and compilation.
+    3. `ruff`, `mypy`, `pyright`, every other linter, and every static type checker are prohibited. Verification proceeds through direct guideline review, focused executable behavior, signature and inheritance inspection, source comparison, failure-path probes, and compilation.
 
 | Strategic Note | Optimization Foundation | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
 

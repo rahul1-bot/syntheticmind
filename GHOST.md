@@ -68,12 +68,13 @@
     6. Persistence does not permit speculative interfaces, copied baggage, or false completion. When evidence exposes a weak assumption, the implementation direction must be corrected and work must continue from the strongest supported design.
     7. Python dependencies may be installed when verification requires them, including global installation through `python -m pip install --break-system-packages`. The existing dependency graph must be inspected first, and targeted or isolated installation is preferred whenever a global change could destabilize unrelated workloads.
 
-| Verification Policy | Executable Evidence Without Linters | Date: 19 August 2026 | Time: 09:03 AM | Name: Ghost |
+| Verification Policy | Executable Evidence Without Linters | Date: 19 August 2026 | Time: 11:10 PM | Name: Ghost |
 
-    1. Ruff and other linting tools are excluded from the active hardening workflow and must not be invoked.
-    2. Compliance with `code-guidelines.md` is established through deliberate source review rather than automated lint output.
+    1. `ruff`, `mypy`, `pyright`, all other linters, and all static type-checking tools are excluded from the active hardening workflow and must not be invoked.
+    2. Compliance with `code-guidelines.md` is established through deliberate source review rather than automated lint or static-analysis output.
     3. Capability claims require focused runtime assertions, end-to-end execution, exception-path probes, signature and method-resolution inspection, source-backed contract comparison, and Python compilation where relevant.
-    4. Verification must prioritize observable behavior, public compatibility, and inheritance safety. Passing a stylistic tool could never substitute for correct lifecycle semantics, parameter meaning, or override behavior.
+    4. Verification must prioritize observable behavior, public compatibility, and inheritance safety. Automated stylistic or type-checking output cannot substitute for correct lifecycle semantics, parameter meaning, override behavior, or direct guideline review.
+    5. Historical ledger references to earlier static-analysis results describe evidence collected before this prohibition and do not authorize future invocation.
 
 | Architecture Decision | Optimization Extension Contract | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
 
