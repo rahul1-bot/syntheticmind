@@ -41,8 +41,10 @@
 # Author: Rahul Sawhney
 
 import time
-from collections.abc import Iterator
+import warnings
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, nullcontext
+from functools import partial
 from typing import TYPE_CHECKING, Literal
 
 import torch
@@ -54,20 +56,94 @@ from torch.utils.data import DataLoader
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.core.optimizer import SchedulerConfig
+from syntheticmind.core.optimizer import LightningOptimizer
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.distributed import DistributedUtils
+from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.metric_accumulator import MetricAccumulator
 from syntheticmind.utilities.model_helpers import is_overridden
-from syntheticmind.utilities.types import Batch, CheckpointDict, StepOutput
+from syntheticmind.utilities.types import Batch, CheckpointDict, ClipAlgorithm, StepOutput
 
 if TYPE_CHECKING:
     from syntheticmind.core.trainer import Trainer
 
 __all__: list[str] = ["TrainingEpochLoop"]
+
+
+class _AutomaticClosure:
+    __slots__: tuple[str, ...] = (
+        "_strategy",
+        "_step_fn",
+        "_backward_fn",
+        "_zero_grad_fn",
+        "_normalize",
+        "_outputs"
+    )
+
+    def __init__(
+        self,
+        strategy: Strategy,
+        step_fn: Callable[[], object],
+        backward_fn: Callable[[torch.Tensor], None],
+        zero_grad_fn: Callable[[], None] | None,
+        normalize: int
+    ) -> None:
+        self._strategy: Strategy = strategy
+        self._step_fn: Callable[[], object] = step_fn
+        self._backward_fn: Callable[[torch.Tensor], None] = backward_fn
+        self._zero_grad_fn: Callable[[], None] | None = zero_grad_fn
+        self._normalize: int = normalize
+        self._outputs: StepOutput = {}
+
+    @property
+    def outputs(self) -> StepOutput:
+        return dict(self._outputs)
+
+    @torch.enable_grad()
+    def __call__(self) -> torch.Tensor | None:
+        raw_outputs: object = self._step_fn()
+        if raw_outputs is None:
+            warnings.warn(
+                "training_step returned None; this batch will be skipped.",
+                UserWarning,
+                stacklevel=3
+            )
+            if self._strategy.is_distributed:
+                raise RuntimeError(
+                    "Returning None from training_step is not supported with distributed training."
+                )
+            self._outputs: StepOutput = {}
+            if self._zero_grad_fn is not None:
+                self._zero_grad_fn()
+            return None
+        if isinstance(raw_outputs, torch.Tensor):
+            raw_loss: object = raw_outputs
+            normalized_outputs: StepOutput = {}
+        elif isinstance(raw_outputs, Mapping):
+            if "loss" not in raw_outputs or raw_outputs["loss"] is None:
+                raise MisconfigurationError(
+                    "In automatic optimization, a training_step mapping must contain the key 'loss'."
+                )
+            raw_loss: object = raw_outputs["loss"]
+            normalized_outputs: StepOutput = dict(raw_outputs)
+        else:
+            raise MisconfigurationError(
+                "In automatic optimization, training_step must return a Tensor, a mapping, or None."
+            )
+        if not isinstance(raw_loss, torch.Tensor):
+            raise MisconfigurationError(
+                "The loss returned by training_step must be a torch.Tensor."
+            )
+        loss: torch.Tensor = raw_loss / self._normalize
+        normalized_outputs["loss"] = loss.detach().clone()
+        self._outputs: StepOutput = normalized_outputs
+        if self._zero_grad_fn is not None:
+            self._zero_grad_fn()
+        self._backward_fn(loss)
+        return loss.detach().clone()
 
 
 class TrainingEpochLoop(Loop):
@@ -84,8 +160,8 @@ class TrainingEpochLoop(Loop):
         val_check_interval_scope: Literal["epoch", "global_step"] = "epoch",
         validate_at_epoch_end: bool = True,
         precision: str = "32-true",
-        gradient_clip_val: float | None = None,
-        gradient_clip_algorithm: str = "norm",
+        gradient_clip_val: int | float | None = None,
+        gradient_clip_algorithm: ClipAlgorithm | None = None,
         log_every_n_steps: int = 10,
         limit_train_batches: int | float | None = None
     ) -> None:
@@ -99,12 +175,13 @@ class TrainingEpochLoop(Loop):
         self.val_check_interval_scope: Literal["epoch", "global_step"] = val_check_interval_scope
         self.validate_at_epoch_end: bool = validate_at_epoch_end
         self.precision: str = precision
-        self.gradient_clip_val: float | None = gradient_clip_val
-        self.gradient_clip_algorithm: str = gradient_clip_algorithm
+        self.gradient_clip_val: int | float | None = gradient_clip_val
+        self.gradient_clip_algorithm: ClipAlgorithm | None = gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
         self.limit_train_batches: int | float | None = limit_train_batches
         self.validation_ran_this_epoch: bool = False
         self._grad_scaler: GradScaler | None = None
+        self._gradients_unscaled: bool = False
         self._completed_batches: int = 0
         self._has_entered_batch_loop: bool = False
         self._epoch_start_rng_state: CheckpointDict | None = None
@@ -145,8 +222,6 @@ class TrainingEpochLoop(Loop):
         if not optimizers:
             raise RuntimeError("Trainer has no optimizers configured for training.")
         optimizer: torch.optim.Optimizer | None = trainer.optimizer
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None = trainer.scheduler
-        scheduler_config: SchedulerConfig | None = trainer.scheduler_config
         train_dataloader: DataLoader | None = trainer.train_dataloader  # type: ignore[type-arg]
         assert train_dataloader is not None
         log_fn: Logger | None = trainer.logger
@@ -182,7 +257,7 @@ class TrainingEpochLoop(Loop):
                 "training",
                 time.perf_counter() - dataloader_fetch_start_time
             )
-            batch_idx += 1
+            batch_idx: int = batch_idx + 1
             if max_batches is not None and batch_idx >= max_batches:
                 break
             # Mid-epoch resume: the already-completed prefix is consumed and
@@ -230,23 +305,25 @@ class TrainingEpochLoop(Loop):
                 if isinstance(model, DistributedDataParallel) and is_accumulating:
                     no_sync_ctx: AbstractContextManager[None] = model.no_sync()
 
-                with no_sync_ctx:
-                    outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
-                    loss_raw: torch.Tensor | float = outputs["loss"]
-                    loss: torch.Tensor = (
-                        loss_raw if isinstance(loss_raw, torch.Tensor) else torch.tensor(loss_raw, device=device)
-                    )
-                    scaled_loss: torch.Tensor = loss / self.accumulate_grad_batches
-                    self.manual_backward(trainer, module, scaled_loss)
-
-                if not is_accumulating:
+                automatic_closure: _AutomaticClosure = self._make_automatic_closure(
+                    trainer,
+                    module,
+                    strategy,
+                    model,
+                    batch,
+                    batch_idx
+                )
+                if is_accumulating:
+                    with no_sync_ctx:
+                        automatic_closure()
+                else:
                     self._do_optimizer_step(
-                        trainer, module, optimizer, scheduler, scheduler_config, state
+                        trainer, module, optimizer, state, batch_idx, automatic_closure
                     )
+                outputs: StepOutput = automatic_closure.outputs
             else:
                 outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
                 is_accumulating: bool = False
-                self._increment_global_step(state, module)
 
             with module._hook_context("on_train_batch_end"):
                 for callback in callbacks:
@@ -275,6 +352,15 @@ class TrainingEpochLoop(Loop):
                 state.set_running_stage("training")
                 module._running_stage: str | None = "training"
 
+            if module.automatic_optimization and not is_accumulating:
+                self.update_lr_schedulers(
+                    trainer,
+                    module,
+                    "step",
+                    batch_idx + 1,
+                    update_plateau_schedulers=True
+                )
+
             if state.should_stop:
                 break
 
@@ -283,7 +369,23 @@ class TrainingEpochLoop(Loop):
         # silently discarded.
         if module.automatic_optimization and tail_is_accumulating:
             self._do_optimizer_step(
-                trainer, module, optimizer, scheduler, scheduler_config, state
+                trainer, module, optimizer, state, batch_idx
+            )
+            self.update_lr_schedulers(
+                trainer,
+                module,
+                "step",
+                batch_idx + 1,
+                update_plateau_schedulers=True
+            )
+
+        if module.automatic_optimization:
+            self.update_lr_schedulers(
+                trainer,
+                module,
+                "epoch",
+                state.current_epoch + 1,
+                update_plateau_schedulers=False
             )
 
         self._has_entered_batch_loop: bool = False
@@ -307,15 +409,55 @@ class TrainingEpochLoop(Loop):
         model: nn.Module,
         batch: Batch,
         batch_idx: int
-    ) -> StepOutput:
+    ) -> object:
         # Executes the training step through the strategy inside the precision
         # context. The module's current-hook marker is set for the duration of
         # the step so Module.log can resolve its logging rule, and it is cleared
         # in a finally block so a raising step cannot leave a stale marker.
         with self._make_autocast_context(self.trainer.strategy.root_device):
             with module._hook_context("training_step"):
-                outputs: StepOutput = strategy.training_step(model, batch, batch_idx)
+                outputs: object = strategy.training_step(model, batch, batch_idx)
         return outputs
+
+    def _make_automatic_closure(
+        self,
+        trainer: Trainer,
+        module: Module,
+        strategy: Strategy,
+        model: nn.Module,
+        batch: Batch,
+        batch_idx: int
+    ) -> _AutomaticClosure:
+        step_fn: Callable[[], object] = partial(
+            self._run_training_step,
+            strategy,
+            module,
+            model,
+            batch,
+            batch_idx
+        )
+        backward_fn: Callable[[torch.Tensor], None] = partial(
+            self.manual_backward,
+            trainer,
+            module
+        )
+        zero_grad_fn: Callable[[], None] | None = None
+        if batch_idx % self.accumulate_grad_batches == 0:
+            zero_grad_fn: Callable[[], None] | None = partial(
+                self._optimizer_zero_grad,
+                trainer,
+                module,
+                trainer.optimizers[0],
+                batch_idx
+            )
+        automatic_closure: _AutomaticClosure = _AutomaticClosure(
+            strategy,
+            step_fn,
+            backward_fn,
+            zero_grad_fn,
+            self.accumulate_grad_batches
+        )
+        return automatic_closure
 
     @staticmethod
     def _safe_len(dataloader: DataLoader) -> int | None:  # type: ignore[type-arg]
@@ -366,7 +508,7 @@ class TrainingEpochLoop(Loop):
     def clip_gradients(
         self,
         optimizer: torch.optim.Optimizer,
-        gradient_clip_val: float | None = None,
+        gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
         # Public clipping entry point for manual-optimization modules. Explicit
@@ -375,15 +517,15 @@ class TrainingEpochLoop(Loop):
         # and gradients are unscaled first when a GradScaler is active so the
         # threshold applies to true magnitudes. A non-positive resolved value
         # disables clipping for the invocation.
-        resolved_gradient_clip_val: float | None = (
+        resolved_gradient_clip_val: int | float | None = (
             self.gradient_clip_val if gradient_clip_val is None else gradient_clip_val
         )
         if resolved_gradient_clip_val is None or resolved_gradient_clip_val <= 0:
             return
         resolved_gradient_clip_algorithm: str = (
-            self.gradient_clip_algorithm
+            self.gradient_clip_algorithm or "norm"
             if gradient_clip_algorithm is None
-            else gradient_clip_algorithm
+            else gradient_clip_algorithm.lower()
         )
         if resolved_gradient_clip_algorithm not in {"norm", "value"}:
             from syntheticmind.utilities.exceptions import MisconfigurationError
@@ -391,23 +533,28 @@ class TrainingEpochLoop(Loop):
             raise MisconfigurationError(
                 "gradient_clip_algorithm must be 'norm' or 'value'."
             )
-        original_gradient_clip_val: float | None = self.gradient_clip_val
-        original_gradient_clip_algorithm: str = self.gradient_clip_algorithm
-        self.gradient_clip_val: float | None = resolved_gradient_clip_val
-        self.gradient_clip_algorithm: str = resolved_gradient_clip_algorithm
+        original_gradient_clip_val: int | float | None = self.gradient_clip_val
+        validated_gradient_clip_algorithm: ClipAlgorithm = (
+            "norm" if resolved_gradient_clip_algorithm == "norm" else "value"
+        )
+        original_gradient_clip_algorithm: ClipAlgorithm | None = self.gradient_clip_algorithm
+        self.gradient_clip_val: int | float | None = resolved_gradient_clip_val
+        self.gradient_clip_algorithm: ClipAlgorithm | None = validated_gradient_clip_algorithm
         try:
-            if self._grad_scaler is not None:
+            if self._grad_scaler is not None and not self._gradients_unscaled:
                 self._grad_scaler.unscale_(optimizer)
             self._clip_gradients(optimizer)
         finally:
-            self.gradient_clip_val: float | None = original_gradient_clip_val
-            self.gradient_clip_algorithm: str = original_gradient_clip_algorithm
+            self.gradient_clip_val: int | float | None = original_gradient_clip_val
+            self.gradient_clip_algorithm: ClipAlgorithm | None = original_gradient_clip_algorithm
 
     def manual_backward(
         self,
         trainer: Trainer,
         module: Module,
-        loss: torch.Tensor
+        loss: torch.Tensor,
+        *args: object,
+        **kwargs: object
     ) -> None:
         # Runs the backward pass surrounded by the backward hook pair. Callback
         # hooks fire before the corresponding module hooks. With an active
@@ -420,9 +567,9 @@ class TrainingEpochLoop(Loop):
             module.on_before_backward(loss)
 
         if self._grad_scaler is not None:
-            self._grad_scaler.scale(loss).backward()
+            self._grad_scaler.scale(loss).backward(*args, **kwargs)
         else:
-            trainer.strategy.backward(loss)
+            trainer.strategy.backward(loss, *args, **kwargs)
 
         with module._hook_context("on_after_backward"):
             for callback in callbacks:
@@ -433,75 +580,179 @@ class TrainingEpochLoop(Loop):
         self,
         trainer: Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
-    ) -> None:
+        optimizer: torch.optim.Optimizer,
+        closure: Callable[[], object] | None = None,
+        kwargs: dict[str, object] | None = None,
+        automatic: bool = False,
+        increment_global_step: bool = True
+    ) -> object:
         # Public optimizer-step entry point for manual-optimization modules;
         # delegates to the shared stepping helper so hook order and scaler
         # handling match the automatic path.
-        self._optimizer_step_only(trainer, module, optimizer)
+        output: object = self._optimizer_step_only(
+            trainer,
+            module,
+            optimizer,
+            closure=closure,
+            kwargs=kwargs,
+            automatic=automatic
+        )
+        if increment_global_step:
+            self._increment_global_step(trainer.state, module)
+        return output
 
     def optimizer_zero_grad(
         self,
         trainer: Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
+        optimizer: torch.optim.Optimizer,
+        batch_idx: int
     ) -> None:
         # Public gradient-clearing entry point for manual-optimization modules;
         # delegates to the shared helper so the zero-grad hooks always fire.
-        self._optimizer_zero_grad(trainer, module, optimizer)
+        self._optimizer_zero_grad(trainer, module, optimizer, batch_idx)
 
     def _do_optimizer_step(
         self,
         trainer: Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None,
-        scheduler_config: SchedulerConfig | None,
-        state: TrainerState
+        state: TrainerState,
+        batch_idx: int,
+        closure: Callable[[], object] | None = None
     ) -> None:
         # Executes the full step sequence for the automatic-optimization path:
         # optimizer step, step-interval scheduler advance, gradient clearing,
         # and the global-step increment. Plateau schedulers are excluded here
         # because they advance on monitored metrics at epoch boundaries.
-        self._optimizer_step_only(trainer, module, optimizer)
-        if scheduler is not None and scheduler_config is not None:
-            if scheduler_config.interval == "step" and scheduler_config.name != "reduce_on_plateau":
-                scheduler.step()
-        self._optimizer_zero_grad(trainer, module, optimizer)
+        lightning_optimizer: LightningOptimizer = next(
+            wrapped_optimizer
+            for wrapped_optimizer in trainer._lightning_optimizers
+            if wrapped_optimizer.optimizer is optimizer
+        )
+        lightning_optimizer._automatic_step: bool = True
+        try:
+            with module._hook_context("optimizer_step"):
+                module.optimizer_step(
+                    module.current_epoch,
+                    batch_idx,
+                    lightning_optimizer,
+                    closure
+                )
+        finally:
+            lightning_optimizer._automatic_step: bool = False
         self._increment_global_step(state, module)
+        self.update_lr_schedulers(
+            trainer,
+            module,
+            "step",
+            batch_idx + 1,
+            update_plateau_schedulers=False
+        )
+
+    def update_lr_schedulers(
+        self,
+        trainer: Trainer,
+        module: Module,
+        interval: str,
+        current_index: int,
+        update_plateau_schedulers: bool
+    ) -> None:
+        for configuration in trainer.lr_scheduler_configs:
+            if configuration.reduce_on_plateau != update_plateau_schedulers:
+                continue
+            if configuration.interval != interval:
+                continue
+            if current_index % configuration.frequency != 0:
+                continue
+            monitor_value: float | None = None
+            if configuration.reduce_on_plateau:
+                monitor: str | None = configuration.monitor
+                assert monitor is not None
+                monitor_value: float | None = trainer.callback_metrics.get(monitor)
+                if monitor_value is None:
+                    message: str = (
+                        f"ReduceLROnPlateau monitor {monitor!r} is unavailable. "
+                        f"Available metrics: {list(trainer.callback_metrics)}"
+                    )
+                    if configuration.strict:
+                        from syntheticmind.utilities.exceptions import MisconfigurationError
+                        raise MisconfigurationError(message)
+                    warnings.warn(message, RuntimeWarning, stacklevel=3)
+                    continue
+            with module._hook_context("lr_scheduler_step"):
+                module.lr_scheduler_step(configuration.scheduler, monitor_value)
 
     def _optimizer_step_only(
         self,
         trainer: Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
-    ) -> None:
+        optimizer: torch.optim.Optimizer,
+        closure: Callable[[], object] | None = None,
+        kwargs: dict[str, object] | None = None,
+        automatic: bool = False
+    ) -> object:
         # Applies the optimizer step preceded by its hooks and by gradient
         # clipping. When a GradScaler is active, gradients are unscaled before
         # clipping and the step runs through the scaler, which skips the update
         # on overflow and adjusts the scale afterward.
+        step_kwargs: dict[str, object] = {} if kwargs is None else kwargs
+        if self._grad_scaler is not None:
+            if isinstance(optimizer, torch.optim.LBFGS):
+                raise MisconfigurationError(
+                    "16-mixed precision and the LBFGS optimizer are not compatible."
+                )
+            closure_result: object | None = closure() if closure is not None else None
+            if closure_result is None and automatic:
+                self._gradients_unscaled: bool = True
+                try:
+                    self._call_before_optimizer_step(trainer, module, optimizer, automatic)
+                finally:
+                    self._gradients_unscaled: bool = False
+                return closure_result
+            self._grad_scaler.unscale_(optimizer)
+            self._gradients_unscaled: bool = True
+            try:
+                self._call_before_optimizer_step(trainer, module, optimizer, automatic)
+            finally:
+                self._gradients_unscaled: bool = False
+            output: object = self._grad_scaler.step(optimizer, **step_kwargs)
+            self._grad_scaler.update()
+        else:
+            def wrapped_closure() -> object | None:
+                closure_result: object | None = closure() if closure is not None else None
+                self._call_before_optimizer_step(trainer, module, optimizer, automatic)
+                return closure_result
+
+            output: object = optimizer.step(closure=wrapped_closure, **step_kwargs)
+        return output
+
+    def _call_before_optimizer_step(
+        self,
+        trainer: Trainer,
+        module: Module,
+        optimizer: torch.optim.Optimizer,
+        automatic: bool
+    ) -> None:
         callbacks: list[Callback] = trainer.callbacks
         with module._hook_context("on_before_optimizer_step"):
             for callback in callbacks:
                 callback.on_before_optimizer_step(trainer, module, optimizer)
             module.on_before_optimizer_step(optimizer)
-
-        if self.gradient_clip_val is not None and self.gradient_clip_val > 0:
-            if self._grad_scaler is not None:
-                self._grad_scaler.unscale_(optimizer)
-            self._clip_gradients(optimizer)
-
-        if self._grad_scaler is not None:
-            self._grad_scaler.step(optimizer)
-            self._grad_scaler.update()
-        else:
-            optimizer.step()
+        if automatic:
+            with module._hook_context("configure_gradient_clipping"):
+                module.configure_gradient_clipping(
+                    optimizer,
+                    self.gradient_clip_val,
+                    self.gradient_clip_algorithm
+                )
 
     def _optimizer_zero_grad(
         self,
         trainer: Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
+        optimizer: torch.optim.Optimizer,
+        batch_idx: int
     ) -> None:
         # Clears gradients preceded by the zero-grad hooks, so callbacks and
         # the module observe gradients in their final post-step state before
@@ -511,7 +762,8 @@ class TrainingEpochLoop(Loop):
             for callback in callbacks:
                 callback.on_before_zero_grad(trainer, module, optimizer)
             module.on_before_zero_grad(optimizer)
-        optimizer.zero_grad()
+        with module._hook_context("optimizer_zero_grad"):
+            module.optimizer_zero_grad(module.current_epoch, batch_idx, optimizer)
 
     @staticmethod
     def _increment_global_step(state: TrainerState, module: Module) -> None:
@@ -563,6 +815,7 @@ class TrainingEpochLoop(Loop):
             return
 
         step_metrics: dict[str, float] = {}
+        callback_step_metrics: dict[str, float] = {}
         for name, metric in logged.items():
             value: torch.Tensor | float = metric.value
             if metric.sync_distributed and DistributedUtils.is_distributed():
@@ -572,8 +825,10 @@ class TrainingEpochLoop(Loop):
             if isinstance(value, torch.Tensor):
                 value: torch.Tensor | float = value.item()
 
-            if metric.on_step and metric.logger:
-                step_metrics[name] = value
+            if metric.on_step:
+                callback_step_metrics[name] = value
+                if metric.logger:
+                    step_metrics[name] = value
             if metric.on_epoch:
                 if name not in epoch_accum:
                     epoch_accum[name] = MetricAccumulator(reduction=metric.reduction)
@@ -581,6 +836,7 @@ class TrainingEpochLoop(Loop):
                 if metric.logger:
                     epoch_logger_names.add(name)
 
+        self.trainer._callback_metrics.update(callback_step_metrics)
         if step_metrics and log_fn is not None and not is_accumulating and state.global_step % self.log_every_n_steps == 0:
             if DistributedUtils.is_rank_zero():
                 log_fn.log_metrics(step_metrics, step=state.global_step)

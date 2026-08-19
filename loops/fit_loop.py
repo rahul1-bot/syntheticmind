@@ -171,28 +171,13 @@ class FitLoop(Loop):
             # metric; a missing monitor key is a configuration error, never a
             # silent skip.
             if module.automatic_optimization:
-                for scheduler, scheduler_config in zip(
-                    trainer.schedulers, trainer.scheduler_configs, strict=True
-                ):
-                    if scheduler_config is None or scheduler_config.interval != "epoch":
-                        continue
-                    if scheduler_config.name == "reduce_on_plateau":
-                        eval_loop: EvaluationLoop = trainer.validate_loop
-                        metric_val: float | None = eval_loop.epoch_metrics.get(
-                            scheduler_config.monitor  # type: ignore[arg-type]
-                        )
-                        if metric_val is not None:
-                            scheduler.step(metric_val)  # type: ignore[arg-type]
-                        else:
-                            from syntheticmind.utilities.exceptions import MisconfigurationError
-                            available: list[str] = list(eval_loop.epoch_metrics.keys())
-                            raise MisconfigurationError(
-                                f"ReduceLROnPlateau monitor '{scheduler_config.monitor}' "
-                                f"not found in validation metrics. "
-                                f"Available: {available}"
-                            )
-                    else:
-                        scheduler.step()
+                self.epoch_loop.update_lr_schedulers(
+                    trainer,
+                    module,
+                    "epoch",
+                    state.current_epoch + 1,
+                    update_plateau_schedulers=True
+                )
 
             state.increment_epoch()
             module._current_epoch: int = state.current_epoch
@@ -218,12 +203,16 @@ class FitLoop(Loop):
         if not logged:
             return
         log_metrics: dict[str, float] = {}
+        callback_metrics: dict[str, float] = {}
         for name, metric in logged.items():
             val: torch.Tensor | float = metric.value
             if isinstance(val, torch.Tensor):
                 val: torch.Tensor | float = val.item()
+            if metric.on_step or metric.on_epoch:
+                callback_metrics[name] = val
             if metric.logger:
                 log_metrics[name] = val
+        trainer._callback_metrics.update(callback_metrics)
         if log_metrics and trainer.logger is not None and DistributedUtils.is_rank_zero():
             trainer.logger.log_metrics(log_metrics, step=state.global_step)
         module._reset_logged_metrics()

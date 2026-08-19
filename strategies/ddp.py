@@ -171,11 +171,16 @@ class DDPStrategy(Strategy):
         return unwrapped.predict_step(batch, batch_idx)
 
     @override
-    def backward(self, loss: torch.Tensor) -> None:
+    def backward(
+        self,
+        loss: torch.Tensor,
+        *args: object,
+        **kwargs: object
+    ) -> None:
         # Executes the standard autograd backward pass. Gradient averaging
         # across ranks is performed by the DistributedDataParallel hooks armed
         # during the training-step forward, not by this method.
-        loss.backward()
+        loss.backward(*args, **kwargs)
 
     @override
     def barrier(self) -> None:

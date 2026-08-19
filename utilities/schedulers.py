@@ -35,13 +35,13 @@ from torch.optim.lr_scheduler import (
     StepLR,
 )
 
-from syntheticmind.core.optimizer import SchedulerConfig
+from syntheticmind.core.optimizer import _SchedulerFactoryConfig
 
 __all__: list[str] = ["build_scheduler"]
 
 
 def build_scheduler(
-    config: SchedulerConfig,
+    config: _SchedulerFactoryConfig,
     optimizer: torch.optim.Optimizer,
     total_steps: int
 ) -> LRScheduler:

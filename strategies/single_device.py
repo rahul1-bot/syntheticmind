@@ -84,7 +84,12 @@ class SingleDeviceStrategy(Strategy):
         return output
 
     @override
-    def backward(self, loss: torch.Tensor) -> None:
+    def backward(
+        self,
+        loss: torch.Tensor,
+        *args: object,
+        **kwargs: object
+    ) -> None:
         # Plain autograd backward; nothing to synchronize in single-process
         # execution.
-        loss.backward()
+        loss.backward(*args, **kwargs)

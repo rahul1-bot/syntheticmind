@@ -32,6 +32,7 @@ import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
+from syntheticmind.core.optimizer import _SchedulerInstance
 from syntheticmind.utilities.types import CheckpointDict, CheckpointValue, StateDict
 
 __all__: list[str] = ["CheckpointState"]
@@ -47,8 +48,8 @@ class CheckpointState:
         cls,
         model: torch.nn.Module,
         optimizers: list[torch.optim.Optimizer],
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None,
-        schedulers: list[torch.optim.lr_scheduler.LRScheduler] | None,
+        scheduler: _SchedulerInstance | None,
+        schedulers: list[_SchedulerInstance] | None,
         epoch: int,
         global_step: int,
         callbacks: list[Callback],
@@ -77,11 +78,11 @@ class CheckpointState:
         if epoch_rng_state is not None:
             checkpoint["epoch_rng_state"] = epoch_rng_state
 
-        scheduler_list: list[torch.optim.lr_scheduler.LRScheduler] = []
+        scheduler_list: list[_SchedulerInstance] = []
         if schedulers is not None:
-            scheduler_list: list[torch.optim.lr_scheduler.LRScheduler] = schedulers
+            scheduler_list: list[_SchedulerInstance] = schedulers
         elif scheduler is not None:
-            scheduler_list: list[torch.optim.lr_scheduler.LRScheduler] = [scheduler]
+            scheduler_list: list[_SchedulerInstance] = [scheduler]
         if scheduler_list:
             checkpoint["scheduler_state_dicts"] = [
                 current_scheduler.state_dict() for current_scheduler in scheduler_list
@@ -114,8 +115,8 @@ class CheckpointState:
         checkpoint: CheckpointDict,
         model: torch.nn.Module,
         optimizers: list[torch.optim.Optimizer],
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None,
-        schedulers: list[torch.optim.lr_scheduler.LRScheduler] | None,
+        scheduler: _SchedulerInstance | None,
+        schedulers: list[_SchedulerInstance] | None,
         callbacks: list[Callback],
         datamodule: DataModule | None = None
     ) -> tuple[int, int, int, CheckpointDict | None]:
@@ -138,11 +139,11 @@ class CheckpointState:
             )
 
         scheduler_state_dicts_raw: CheckpointValue | None = checkpoint.get("scheduler_state_dicts")
-        scheduler_list: list[torch.optim.lr_scheduler.LRScheduler] = []
+        scheduler_list: list[_SchedulerInstance] = []
         if schedulers is not None:
-            scheduler_list: list[torch.optim.lr_scheduler.LRScheduler] = schedulers
+            scheduler_list: list[_SchedulerInstance] = schedulers
         elif scheduler is not None:
-            scheduler_list: list[torch.optim.lr_scheduler.LRScheduler] = [scheduler]
+            scheduler_list: list[_SchedulerInstance] = [scheduler]
         if isinstance(scheduler_state_dicts_raw, list):
             for current_scheduler, scheduler_state_dict in zip(
                 scheduler_list,

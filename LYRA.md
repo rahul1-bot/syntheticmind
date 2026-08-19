@@ -36,3 +36,11 @@
     1. SyntheticMind's base classes must preserve standard machine-learning terminology, inheritance chains, method-resolution behavior, override names, signatures, parameter meanings, defaults, and lifecycle effects because downstream models and integrations extend these contracts directly.
     2. `code-guidelines.md` governs every implementation decision, while PyTorch and PyTorch Lightning conventions govern public concepts that users already understand.
     3. Ruff and other linters are excluded. Verification proceeds through focused executable behavior, signature and inheritance inspection, source comparison, failure-path probes, and compilation.
+
+| Strategic Note | Optimization Foundation | Date: 19 August 2026 | Time: 10:39 AM | Name: Ghost |
+
+    1. The optimization boundary now speaks the established PyTorch Lightning vocabulary and preserves the signatures that inherited models override, including optimizer access, scheduler access, manual backward, optimizer stepping, zeroing, clipping, and scheduler stepping.
+    2. The accepted `configure_optimizers` structures are normalized behind a private parser, allowing SyntheticMind to retain a smaller internal architecture without changing the public machine-learning contract.
+    3. Closure execution, manual multi-optimizer behavior, parameter toggling, scheduler cadence, mixed-precision ordering, checkpoint restoration, and optimizer-state device placement are executable capabilities rather than declared placeholders.
+    4. The immediate compliance correction is removal of callback-layer future-annotation imports through runtime-safe Python 3.14 boundaries. Full `Module` surface reconstruction resumes after that defect is closed.
+    5. Existing comments remain untouched, new code comments remain prohibited, and no linter may substitute for direct guideline review and behavioral evidence.

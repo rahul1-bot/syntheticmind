@@ -34,16 +34,22 @@
 # Author: Rahul Sawhney
 
 import builtins
-from collections.abc import Iterator
+import warnings
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, Literal, overload, override
 
 import torch
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 
 from syntheticmind.core.hooks import DataHooks, MetricLoggingContract, ModelHooks
-from syntheticmind.core.optimizer import OptimizationConfiguration
+from syntheticmind.core.optimizer import (
+    LRSchedulerPLType,
+    LRSchedulerTypeUnion,
+    LightningOptimizer,
+    OptimizerLRScheduler
+)
 from syntheticmind.core.saving import CheckpointHooks
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.utilities.exceptions import MisconfigurationError
@@ -206,7 +212,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
     def forward(self, *args: object, **kwargs: object) -> ModelOutput:
         # The model's tensor computation. Subclasses must override; the
         # default predict step and any direct invocation route through here.
-        raise NotImplementedError
+        return super().forward(*args, **kwargs)
 
     def training_step(self, batch: Batch, batch_idx: int) -> StepOutput:
         # Operates on a single batch from the training dataloader. This is
@@ -306,7 +312,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         #             return self(features)
         return self.forward(batch)
 
-    def configure_optimizers(self) -> OptimizationConfiguration:
+    def configure_optimizers(self) -> OptimizerLRScheduler:
         # Declares the run's optimizers and schedulers. The trainer calls
         # this once at the start of fit and materializes the declaration
         # into live torch objects before the first epoch.
@@ -361,7 +367,12 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         #                 monitor="val_loss"
         #             )
         #         )
-        raise NotImplementedError
+        warnings.warn(
+            "configure_optimizers must be implemented to use optimization during Trainer.fit.",
+            UserWarning,
+            stacklevel=2
+        )
+        return None
 
     def log(
         self,
@@ -523,7 +534,23 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         # begins.
         self.eval()
 
-    def optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
+    def lr_scheduler_step(
+        self,
+        scheduler: LRSchedulerTypeUnion,
+        metric: object | None
+    ) -> None:
+        if metric is None:
+            scheduler.step()
+        else:
+            scheduler.step(metric)
+
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: torch.optim.Optimizer | LightningOptimizer,
+        optimizer_closure: Callable[[], object] | None = None
+    ) -> None:
         # Manual-optimization entry point that executes one optimizer step
         # through the trainer's epoch loop, so the step hooks, gradient
         # clipping, and scaler handling match the automatic path exactly.
@@ -531,22 +558,26 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         # Args:
         #     optimizer: The torch.optim.Optimizer to step, as returned by
         #         self.optimizers().
-        trainer: Trainer = self.trainer
-        epoch_loop: TrainingEpochLoop | None = trainer.fit_loop.epoch_loop
-        if epoch_loop is None:
-            raise RuntimeError("Trainer fit loop is not initialized.")
-        epoch_loop.optimizer_step(trainer, self, optimizer)
+        del epoch, batch_idx
+        optimizer.step(closure=optimizer_closure)
 
-    def optimizer_zero_grad(self, optimizer: torch.optim.Optimizer) -> None:
+    def optimizer_zero_grad(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: torch.optim.Optimizer
+    ) -> None:
         # Manual-optimization entry point that clears gradients through the
         # trainer's epoch loop, preserving the zero-grad hook order.
-        trainer: Trainer = self.trainer
-        epoch_loop: TrainingEpochLoop | None = trainer.fit_loop.epoch_loop
-        if epoch_loop is None:
-            raise RuntimeError("Trainer fit loop is not initialized.")
-        epoch_loop.optimizer_zero_grad(trainer, self, optimizer)
+        del epoch, batch_idx
+        optimizer.zero_grad()
 
-    def manual_backward(self, loss: torch.Tensor) -> None:
+    def manual_backward(
+        self,
+        loss: torch.Tensor,
+        *args: object,
+        **kwargs: object
+    ) -> None:
         # Manual-optimization entry point for the backward pass. Refused under
         # automatic optimization, where the loop owns backward; otherwise the
         # epoch loop runs backward with the backward hook pair and any active
@@ -575,12 +606,12 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         epoch_loop: TrainingEpochLoop | None = trainer.fit_loop.epoch_loop
         if epoch_loop is None:
             raise RuntimeError("Trainer fit loop is not initialized.")
-        epoch_loop.manual_backward(trainer, self, loss)
+        epoch_loop.manual_backward(trainer, self, loss, *args, **kwargs)
 
     def clip_gradients(
         self,
         optimizer: torch.optim.Optimizer,
-        gradient_clip_val: float | None = None,
+        gradient_clip_val: int | builtins.float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
         # Manual-optimization entry point for gradient clipping, delegated to
@@ -590,44 +621,118 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         epoch_loop: TrainingEpochLoop | None = trainer.fit_loop.epoch_loop
         if epoch_loop is None:
             raise RuntimeError("Trainer fit loop is not initialized.")
+        raw_optimizer: torch.optim.Optimizer = (
+            optimizer.optimizer if isinstance(optimizer, LightningOptimizer) else optimizer
+        )
+        resolved_gradient_clip_val: int | builtins.float
+        if gradient_clip_val is None:
+            resolved_gradient_clip_val: int | builtins.float = trainer.gradient_clip_val or 0.0
+        elif (
+            trainer.gradient_clip_val is not None
+            and trainer.gradient_clip_val != gradient_clip_val
+        ):
+            raise MisconfigurationError(
+                f"You have set `Trainer(gradient_clip_val={trainer.gradient_clip_val!r})`"
+                f" and have passed `clip_gradients(gradient_clip_val={gradient_clip_val!r})`."
+                " Please use only one of them."
+            )
+        else:
+            resolved_gradient_clip_val: int | builtins.float = gradient_clip_val
+        resolved_gradient_clip_algorithm: str
+        if gradient_clip_algorithm is None:
+            resolved_gradient_clip_algorithm: str = trainer.gradient_clip_algorithm or "norm"
+        else:
+            resolved_gradient_clip_algorithm: str = gradient_clip_algorithm.lower()
+            if (
+                trainer.gradient_clip_algorithm is not None
+                and trainer.gradient_clip_algorithm != resolved_gradient_clip_algorithm
+            ):
+                raise MisconfigurationError(
+                    "You have set "
+                    f"`Trainer(gradient_clip_algorithm={trainer.gradient_clip_algorithm!r})`"
+                    " and have passed "
+                    "`clip_gradients(gradient_clip_algorithm="
+                    f"{resolved_gradient_clip_algorithm!r})` Please use only one of them."
+                )
+        if not isinstance(resolved_gradient_clip_val, (int, float)):
+            raise TypeError(
+                "`gradient_clip_val` should be an int or a float. "
+                f"Got {resolved_gradient_clip_val}."
+            )
+        if resolved_gradient_clip_algorithm not in {"norm", "value"}:
+            raise MisconfigurationError(
+                f"`gradient_clip_algorithm` {resolved_gradient_clip_algorithm} is invalid. "
+                "Allowed algorithms: ('norm', 'value')."
+            )
         epoch_loop.clip_gradients(
-            optimizer=optimizer,
+            optimizer=raw_optimizer,
+            gradient_clip_val=resolved_gradient_clip_val,
+            gradient_clip_algorithm=resolved_gradient_clip_algorithm
+        )
+
+    def configure_gradient_clipping(
+        self,
+        optimizer: torch.optim.Optimizer,
+        gradient_clip_val: int | builtins.float | None = None,
+        gradient_clip_algorithm: str | None = None
+    ) -> None:
+        self.clip_gradients(
+            optimizer,
             gradient_clip_val=gradient_clip_val,
             gradient_clip_algorithm=gradient_clip_algorithm
         )
 
-    def toggle_optimizer(self, optimizer: torch.optim.Optimizer) -> None:
+    @torch.compiler.disable
+    def toggle_optimizer(self, optimizer: torch.optim.Optimizer | LightningOptimizer) -> None:
         # Restricts training to one optimizer's parameters during manual
         # optimization. The requires_grad state of every parameter is recorded
         # first, then only the parameters owned by the given optimizer keep
         # gradient tracking enabled, so alternating optimization schemes never
         # accumulate gradients into inactive parameters.
-        if self.automatic_optimization:
-            raise MisconfigurationError(
-                "toggle_optimizer() requires automatic_optimization = False."
-            )
-        self._param_requires_grad_state: dict[torch.nn.Parameter, bool] = {
-            parameter: parameter.requires_grad for parameter in self.parameters()
-        }
-        optimizer_parameters: set[torch.nn.Parameter] = {
-            parameter
-            for parameter_group in optimizer.param_groups
-            for parameter in parameter_group["params"]
-        }
-        for parameter in self.parameters():
-            parameter.requires_grad: bool = parameter in optimizer_parameters
+        param_requires_grad_state: dict[torch.nn.Parameter, bool] = {}
+        trainer_optimizer: torch.optim.Optimizer
+        parameter_group: dict[str, object]
+        parameter: torch.nn.Parameter
+        for trainer_optimizer in self.trainer.optimizers:
+            for parameter_group in trainer_optimizer.param_groups:
+                for parameter in parameter_group["params"]:
+                    if parameter in param_requires_grad_state:
+                        continue
+                    param_requires_grad_state[parameter] = parameter.requires_grad
+                    parameter.requires_grad: bool = False
+        for parameter_group in optimizer.param_groups:
+            for parameter in parameter_group["params"]:
+                parameter.requires_grad: bool = param_requires_grad_state[parameter]
+        self._param_requires_grad_state: dict[
+            torch.nn.Parameter,
+            bool
+        ] = param_requires_grad_state
 
-    def untoggle_optimizer(self, optimizer: torch.optim.Optimizer) -> None:
+    @torch.compiler.disable
+    def untoggle_optimizer(self, optimizer: torch.optim.Optimizer | LightningOptimizer) -> None:
         # Restores the exact requires_grad state recorded by toggle_optimizer
         # and clears the snapshot. The optimizer argument exists for call-site
         # symmetry with toggle_optimizer and is not consulted.
-        del optimizer
-        for parameter, requires_grad in self._param_requires_grad_state.items():
-            parameter.requires_grad: bool = requires_grad
-        self._param_requires_grad_state.clear()
+        raw_optimizer: torch.optim.Optimizer = (
+            optimizer.optimizer if isinstance(optimizer, LightningOptimizer) else optimizer
+        )
+        trainer_optimizer: torch.optim.Optimizer
+        parameter_group: dict[str, object]
+        parameter: torch.nn.Parameter
+        for trainer_optimizer in self.trainer.optimizers:
+            if trainer_optimizer is raw_optimizer:
+                continue
+            for parameter_group in trainer_optimizer.param_groups:
+                for parameter in parameter_group["params"]:
+                    if parameter in self._param_requires_grad_state:
+                        parameter.requires_grad: bool = self._param_requires_grad_state[parameter]
+        self._param_requires_grad_state: dict[torch.nn.Parameter, bool] = {}
 
     @contextmanager
-    def toggled_optimizer(self, optimizer: torch.optim.Optimizer) -> Iterator[torch.optim.Optimizer]:
+    def toggled_optimizer(
+        self,
+        optimizer: torch.optim.Optimizer | LightningOptimizer
+    ) -> Iterator[None]:
         # Context manager form of the toggle pair: parameters are restricted
         # on entry and restored in the finally block, so an exception inside
         # the block cannot leave gradient flags in the toggled state.
@@ -645,11 +750,42 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         #         ...
         self.toggle_optimizer(optimizer)
         try:
-            yield optimizer
+            yield
         finally:
             self.untoggle_optimizer(optimizer)
 
-    def optimizers(self) -> torch.optim.Optimizer | list[torch.optim.Optimizer] | None:
+    @overload
+    def optimizers(
+        self,
+        use_pl_optimizer: Literal[True] = True
+    ) -> LightningOptimizer | list[LightningOptimizer]: ...
+
+    @overload
+    def optimizers(
+        self,
+        use_pl_optimizer: Literal[False]
+    ) -> torch.optim.Optimizer | list[torch.optim.Optimizer]: ...
+
+    @overload
+    def optimizers(
+        self,
+        use_pl_optimizer: bool
+    ) -> (
+        LightningOptimizer
+        | list[LightningOptimizer]
+        | torch.optim.Optimizer
+        | list[torch.optim.Optimizer]
+    ): ...
+
+    def optimizers(
+        self,
+        use_pl_optimizer: bool = True
+    ) -> (
+        LightningOptimizer
+        | list[LightningOptimizer]
+        | torch.optim.Optimizer
+        | list[torch.optim.Optimizer]
+    ):
         # Returns the trainer-materialized optimizers for manual optimization.
         #
         # Return:
@@ -658,26 +794,28 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         #     or the full list in configure_optimizers order when several
         #     are, so a two-optimizer model can unpack directly:
         #     ``generator_opt, discriminator_opt = self.optimizers()``.
-        if self._trainer is None:
-            return None
-        if not self._trainer.optimizers:
-            return None
-        if len(self._trainer.optimizers) == 1:
-            return self._trainer.optimizers[0]
-        return self._trainer.optimizers
+        trainer: Trainer = self.trainer
+        optimizers: list[LightningOptimizer] | list[torch.optim.Optimizer] = (
+            trainer._lightning_optimizers if use_pl_optimizer else trainer.optimizers
+        )
+        if len(optimizers) == 1:
+            return optimizers[0]
+        return optimizers
 
     def lr_schedulers(
         self
-    ) -> torch.optim.lr_scheduler.LRScheduler | list[torch.optim.lr_scheduler.LRScheduler] | None:
+    ) -> LRSchedulerPLType | list[LRSchedulerPLType] | None:
         # Returns the trainer-materialized schedulers with the same unwrapping
         # convention as optimizers().
-        if self._trainer is None:
+        trainer: Trainer = self.trainer
+        if not trainer.lr_scheduler_configs:
             return None
-        if not self._trainer.schedulers:
-            return None
-        if len(self._trainer.schedulers) == 1:
-            return self._trainer.schedulers[0]
-        return self._trainer.schedulers
+        schedulers: list[LRSchedulerPLType] = [
+            configuration.scheduler for configuration in trainer.lr_scheduler_configs
+        ]
+        if len(schedulers) == 1:
+            return schedulers[0]
+        return schedulers
 
     def freeze(self) -> None:
         # Disables gradient tracking for every parameter and switches to

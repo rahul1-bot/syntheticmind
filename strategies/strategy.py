@@ -82,7 +82,12 @@ class Strategy(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def backward(self, loss: torch.Tensor) -> None:
+    def backward(
+        self,
+        loss: torch.Tensor,
+        *args: object,
+        **kwargs: object
+    ) -> None:
         # Runs the backward pass, including any gradient synchronization the
         # strategy requires.
         raise NotImplementedError

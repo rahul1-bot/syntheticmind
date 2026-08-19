@@ -39,6 +39,7 @@
 #
 # Author: Rahul Sawhney
 
+import inspect
 import math
 import warnings
 from collections.abc import Callable, Iterator
@@ -58,11 +59,10 @@ from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import (
-    OptimizationConfiguration,
-    OptimizerConfig,
-    OptimizerDefinition,
-    SchedulerConfig,
-    SchedulerDefinition,
+    LRSchedulerConfig,
+    LightningOptimizer,
+    _SchedulerInstance,
+    _init_optimizers_and_lr_schedulers,
 )
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.evaluation_loop import EvaluationLoop
@@ -78,8 +78,7 @@ from syntheticmind.utilities.checkpoint import load_checkpoint
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
-from syntheticmind.utilities.optimizers import build_optimizer
-from syntheticmind.utilities.schedulers import build_scheduler
+from syntheticmind.utilities.optimizers import _optimizers_to_device
 from syntheticmind.utilities.seed import SeedManager
 from syntheticmind.utilities.types import (
     CheckpointDict,
@@ -165,8 +164,8 @@ class Trainer:
         val_check_interval_scope: Literal["epoch", "global_step"] = "epoch",
         validate_at_epoch_end: bool = True,
         precision: Precision = "32-true",
-        gradient_clip_val: float | None = None,
-        gradient_clip_algorithm: ClipAlgorithm = "norm",
+        gradient_clip_val: int | float | None = None,
+        gradient_clip_algorithm: str | None = None,
         log_every_n_steps: int = 10,
         enable_progress_bar: bool = True,
         deterministic: bool = False,
@@ -298,11 +297,27 @@ class Trainer:
         #         scope is invalid, the ``"global_step"`` scope receives a
         #         non-integer interval, or log_every_n_steps is below one.
         #     ValueError: If the accelerator or strategy name is unknown.
+        if gradient_clip_val is not None and not isinstance(gradient_clip_val, (int, float)):
+            raise TypeError(
+                f"`gradient_clip_val` should be an int or a float. Got {gradient_clip_val}."
+            )
+        resolved_gradient_clip_algorithm: ClipAlgorithm | None = None
+        if gradient_clip_algorithm is not None:
+            normalized_gradient_clip_algorithm: str = gradient_clip_algorithm.lower()
+            if normalized_gradient_clip_algorithm not in {"norm", "value"}:
+                raise MisconfigurationError(
+                    f"`gradient_clip_algorithm` {gradient_clip_algorithm} is invalid. "
+                    "Allowed algorithms: ('norm', 'value')."
+                )
+            resolved_gradient_clip_algorithm: ClipAlgorithm | None = (
+                "norm" if normalized_gradient_clip_algorithm == "norm" else "value"
+            )
+
         self.max_epochs: int = max_epochs
         self.devices: int = devices
         self.precision: Precision = precision
-        self.gradient_clip_val: float | None = gradient_clip_val
-        self.gradient_clip_algorithm: ClipAlgorithm = gradient_clip_algorithm
+        self.gradient_clip_val: int | float | None = gradient_clip_val
+        self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
         self.num_sanity_val_steps: int = num_sanity_val_steps
         self.use_distributed_sampler: bool = use_distributed_sampler
@@ -350,8 +365,8 @@ class Trainer:
             val_check_interval_scope=val_check_interval_scope,
             validate_at_epoch_end=validate_at_epoch_end,
             precision=precision,
-            gradient_clip_val=gradient_clip_val,
-            gradient_clip_algorithm=gradient_clip_algorithm,
+            gradient_clip_val=self.gradient_clip_val,
+            gradient_clip_algorithm=self.gradient_clip_algorithm,
             log_every_n_steps=log_every_n_steps,
             limit_train_batches=limit_train_batches
         )
@@ -370,11 +385,12 @@ class Trainer:
         self.module: Module | None = None
         self.datamodule: DataModule | None = None
         self.optimizers: list[torch.optim.Optimizer] = []
-        self.schedulers: list[torch.optim.lr_scheduler.LRScheduler] = []
-        self.scheduler_configs: list[SchedulerConfig | None] = []
+        self._lightning_optimizers: list[LightningOptimizer] = []
+        self.schedulers: list[_SchedulerInstance] = []
+        self.lr_scheduler_configs: list[LRSchedulerConfig] = []
         self.optimizer: torch.optim.Optimizer | None = None
-        self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
-        self.scheduler_config: SchedulerConfig | None = None
+        self.scheduler: _SchedulerInstance | None = None
+        self.scheduler_config: LRSchedulerConfig | None = None
         self.train_dataloader: torch.utils.data.DataLoader | None = None
         self.val_dataloader: torch.utils.data.DataLoader | None = None
         self.test_dataloader: torch.utils.data.DataLoader | None = None
@@ -525,60 +541,39 @@ class Trainer:
             # declaration is normalized to parallel definition lists first, so
             # single-optimizer and multi-optimizer modules flow through one
             # build path.
+            training_step_signature: inspect.Signature = inspect.signature(module.training_step)
+            if "optimizer_idx" in training_step_signature.parameters:
+                raise RuntimeError(
+                    "Training with multiple optimizers is only supported with manual optimization. Remove "
+                    "the optimizer_idx parameter from training_step, set automatic_optimization = False, "
+                    "and access optimizers through self.optimizers()."
+                )
             with module._hook_context("configure_optimizers"):
-                optimization_configuration: OptimizationConfiguration = module.configure_optimizers()
-            optimizer_config_value: OptimizerDefinition | list[OptimizerDefinition] = (
-                optimization_configuration.optimizer
+                optimization_configuration: object = module.configure_optimizers()
+            optimizer_initialization: tuple[
+                list[torch.optim.Optimizer],
+                list[LRSchedulerConfig]
+            ] = _init_optimizers_and_lr_schedulers(
+                optimization_configuration,
+                module.automatic_optimization,
+                is_overridden("lr_scheduler_step", module, Module)
             )
-            scheduler_config_value: SchedulerDefinition | list[SchedulerDefinition] | None = (
-                optimization_configuration.scheduler
-            )
-            if isinstance(optimizer_config_value, list):
-                optimizer_definitions: list[OptimizerDefinition] = optimizer_config_value
-            else:
-                optimizer_definitions: list[OptimizerDefinition] = [optimizer_config_value]
-            if scheduler_config_value is None:
-                scheduler_definitions: list[SchedulerDefinition] = []
-            elif isinstance(scheduler_config_value, list):
-                scheduler_definitions: list[SchedulerDefinition] = scheduler_config_value
-            else:
-                scheduler_definitions: list[SchedulerDefinition] = [scheduler_config_value]
+            self.optimizers: list[torch.optim.Optimizer] = optimizer_initialization[0]
+            self.lr_scheduler_configs: list[LRSchedulerConfig] = optimizer_initialization[1]
+            self._lightning_optimizers: list[LightningOptimizer] = [
+                LightningOptimizer._to_lightning_optimizer(optimizer, self, module)
+                for optimizer in self.optimizers
+            ]
 
             # OptimizerConfig records are compiled into live torch.optim
             # objects against the module's parameters; pre-built
             # torch.optim.Optimizer instances pass through untouched.
-            self.optimizers: list[torch.optim.Optimizer] = [
-                build_optimizer(optimizer_definition, module)
-                if isinstance(optimizer_definition, OptimizerConfig)
-                else optimizer_definition
-                for optimizer_definition in optimizer_definitions
-            ]
-            self.scheduler_configs: list[SchedulerConfig | None] = [
-                scheduler_definition
-                for scheduler_definition in scheduler_definitions
-                if isinstance(scheduler_definition, SchedulerConfig)
-            ]
-
             # Contract guards, enforced before any hook can observe the run:
             # multiple optimizers demand manual optimization; automatic
             # optimization demands SchedulerConfig records so the loop owns
             # stepping cadence; manual optimization excludes trainer-managed
             # accumulation and clipping because the module owns its backward
             # path.
-            if len(self.optimizers) > 1 and module.automatic_optimization:
-                raise MisconfigurationError(
-                    "Training with multiple optimizers requires manual optimization. "
-                    "Set module.automatic_optimization = False before fitting."
-                )
-            if module.automatic_optimization and any(
-                not isinstance(scheduler_definition, SchedulerConfig)
-                for scheduler_definition in scheduler_definitions
-            ):
-                raise MisconfigurationError(
-                    "Automatic optimization requires SchedulerConfig definitions so the loop can manage "
-                    "scheduler stepping intervals. Provide SchedulerConfig objects or switch to "
-                    "automatic_optimization = False and step schedulers manually."
-                )
             if not module.automatic_optimization:
                 assert self.fit_loop.epoch_loop is not None
                 if self.fit_loop.epoch_loop.accumulate_grad_batches != 1:
@@ -596,56 +591,28 @@ class Trainer:
             # automatic-optimization path; the scheduler surfaces start empty
             # and are filled only when definitions exist.
             self.optimizer: torch.optim.Optimizer | None = self.optimizers[0] if self.optimizers else None
-            self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
-            self.scheduler_config: SchedulerConfig | None = None
-            self.schedulers: list[torch.optim.lr_scheduler.LRScheduler] = []
+            self.schedulers: list[_SchedulerInstance] = [
+                configuration.scheduler for configuration in self.lr_scheduler_configs
+            ]
+            self.scheduler: _SchedulerInstance | None = (
+                self.schedulers[0] if self.schedulers else None
+            )
+            self.scheduler_config: LRSchedulerConfig | None = (
+                self.lr_scheduler_configs[0] if self.lr_scheduler_configs else None
+            )
 
             # Schedulers pair positionally with optimizers, one definition per
             # optimizer. SchedulerConfig records are compiled against the
             # resolved total-step horizon; pre-built scheduler instances pass
             # through with no managed config, leaving their stepping to the
             # module.
-            if scheduler_definitions:
-                if len(scheduler_definitions) != len(self.optimizers):
-                    raise MisconfigurationError(
-                        "The number of scheduler definitions must match the number of optimizers."
-                    )
-                config_scheduler_count: int = sum(
-                    1 for scheduler_definition in scheduler_definitions
-                    if isinstance(scheduler_definition, SchedulerConfig)
-                )
-                total_scheduler_steps: int | None = None
-                if config_scheduler_count > 0:
-                    total_scheduler_steps: int | None = self._resolve_total_scheduler_steps(
-                        scheduler_definitions=scheduler_definitions
-                    )
-
-                built_schedulers: list[torch.optim.lr_scheduler.LRScheduler] = []
-                built_scheduler_configs: list[SchedulerConfig | None] = []
-                for scheduler_definition, optimizer in zip(scheduler_definitions, self.optimizers, strict=True):
-                    if isinstance(scheduler_definition, SchedulerConfig):
-                        assert total_scheduler_steps is not None
-                        built_schedulers.append(
-                            build_scheduler(scheduler_definition, optimizer, total_scheduler_steps)
-                        )
-                        built_scheduler_configs.append(scheduler_definition)
-                    else:
-                        built_schedulers.append(scheduler_definition)
-                        built_scheduler_configs.append(None)
-
-                self.schedulers: list[torch.optim.lr_scheduler.LRScheduler] = built_schedulers
-                self.scheduler_configs: list[SchedulerConfig | None] = built_scheduler_configs
-                self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = self.schedulers[0]
-                self.scheduler_config: SchedulerConfig | None = (
-                    self.scheduler_configs[0] if self.scheduler_configs else None
-                )
-
             # Checkpoint restoration happens after optimizers and schedulers
             # exist, because their serialized state must land on live objects,
             # and before any hook fires, so every hook observes the resumed
             # run.
             if resume_path is not None:
                 self._restore_checkpoint(resume_path, module)
+            _optimizers_to_device(self.optimizers, device)
 
             # Duplicate stateful-callback keys are rejected before callback
             # setup so two instances cannot silently overwrite each other's
@@ -1289,7 +1256,7 @@ class Trainer:
 
     def _resolve_total_scheduler_steps(
         self,
-        scheduler_definitions: list[SchedulerDefinition]
+        scheduler_definitions: list[LRSchedulerConfig]
     ) -> int:
         # Computes the horizon passed to the scheduler builder. When any
         # configured schedule advances per step, the horizon is the number of
@@ -1298,11 +1265,7 @@ class Trainer:
         # unknown batch total with a step-interval schedule is a configuration
         # error because the schedule cannot be sized. Epoch-interval schedules
         # use the epoch budget directly.
-        config_schedulers: list[SchedulerConfig] = [
-            scheduler_definition
-            for scheduler_definition in scheduler_definitions
-            if isinstance(scheduler_definition, SchedulerConfig)
-        ]
+        config_schedulers: list[LRSchedulerConfig] = list(scheduler_definitions)
         if not config_schedulers:
             raise MisconfigurationError(
                 "Expected at least one scheduler configuration when resolving scheduler steps."
