@@ -37,13 +37,13 @@
     2. `code-guidelines.md` governs every implementation decision, while PyTorch and PyTorch Lightning conventions govern public concepts that users already understand.
     3. Ruff and other linters are excluded. Verification proceeds through focused executable behavior, signature and inheritance inspection, source comparison, failure-path probes, and compilation.
 
-| Strategic Note | Optimization Foundation | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+| Strategic Note | Optimization Foundation | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
 
     1. The optimization boundary must preserve meaningful optimizer access, scheduler access, manual backward, optimizer stepping, zeroing, clipping, and scheduler stepping contracts without importing Lightning's product identity.
     2. The accepted `configure_optimizers` structures are normalized behind a private parser, allowing SyntheticMind to retain a smaller internal architecture without changing the public machine-learning contract.
     3. Closure execution, manual multi-optimizer behavior, parameter toggling, scheduler cadence, mixed-precision ordering, checkpoint restoration, and optimizer-state device placement are executable capabilities rather than declared placeholders.
     4. `LightningOptimizer` is a Lightning-owned managed wrapper rather than an industry optimizer term. SyntheticMind's equivalent public wrapper is `SyntheticOptimizer`, with the actual algorithm remaining a `torch.optim.Optimizer`.
-    5. The immediate correction removes `LightningOptimizer`, `use_pl_optimizer`, `_lightning_optimizers`, and comparable brand leakage before callback future-annotation compliance and full `Module` surface reconstruction resume.
+    5. ✅ The ownership correction removed `LightningOptimizer`, `use_pl_optimizer`, `_lightning_optimizers`, `LRSchedulerPLType`, and `pl_module`. The resulting `SyntheticOptimizer`, explicit raw-access flag, generic scheduler union, and `module` callback parameter were reverified across extension and execution paths.
     6. Existing comments remain untouched, new code comments remain prohibited, and no linter may substitute for direct guideline review and behavioral evidence.
 
 | Strategic Note | Console Experience Boundary | Date: 19 August 2026 | Time: 11:28 AM | Name: Ghost |

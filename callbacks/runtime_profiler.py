@@ -151,7 +151,7 @@ class RuntimeProfiler(Callback):
         self._cpu_count: int = max(1, os.cpu_count() or 1)
 
     @override
-    def setup(self, trainer: Trainer, pl_module: Module, stage: TrainerStage) -> None:
+    def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
         # Resolves the artifact paths inside the logger's metrics directory,
         # reloads any existing summary so sequential dispatches accumulate,
         # and records the profiling configuration sidecar. Without a logger
@@ -169,42 +169,42 @@ class RuntimeProfiler(Callback):
         self._write_profile_config(stage)
 
     @override
-    def teardown(self, trainer: Trainer, pl_module: Module, stage: TrainerStage) -> None:
+    def teardown(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
         # Writes the final summary at stage teardown so the artifact reflects
         # every sample the stage produced.
         self._write_profile_summary()
 
     @override
-    def on_train_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_train_start(self, trainer: Trainer, module: Module) -> None:
         # Opens the training-stage duration measurement.
         self._mark_stage_start("train")
 
     @override
-    def on_train_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_train_end(self, trainer: Trainer, module: Module) -> None:
         # Closes the training-stage measurement and emits its total duration.
-        self._record_stage_end(trainer, pl_module, "train", "runtime/train_time_ms")
+        self._record_stage_end(trainer, module, "train", "runtime/train_time_ms")
 
     @override
-    def on_train_epoch_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_train_epoch_start(self, trainer: Trainer, module: Module) -> None:
         # Re-baselines the inter-batch timestamp at the epoch boundary so the
         # first batch's wait measurement excludes epoch-end work.
         self._last_batch_end_times["train"] = time.perf_counter()
 
     @override
     def on_train_batch_start(
-        self, trainer: Trainer, pl_module: Module, batch: Batch, batch_idx: int
+        self, trainer: Trainer, module: Module, batch: Batch, batch_idx: int
     ) -> None:
         # Marks the training batch start and captures its dataloader wait.
         self._mark_batch_start(trainer, "train")
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Records the sampled training batch event with its runtime metrics.
         self._record_batch_end(
             trainer=trainer,
-            module=pl_module,
+            module=module,
             stage_name="train",
             event_name="train_batch",
             batch_idx=batch_idx,
@@ -214,7 +214,7 @@ class RuntimeProfiler(Callback):
         )
 
     @override
-    def on_validation_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_validation_start(self, trainer: Trainer, module: Module) -> None:
         # Opens the validation-stage measurement; sanity-check passes are
         # excluded so their bounded runs never contaminate the telemetry.
         if trainer._sanity_checking:
@@ -223,15 +223,15 @@ class RuntimeProfiler(Callback):
         self._last_batch_end_times["validation"] = time.perf_counter()
 
     @override
-    def on_validation_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_validation_end(self, trainer: Trainer, module: Module) -> None:
         # Closes the validation-stage measurement outside sanity checking.
         if trainer._sanity_checking:
             return
-        self._record_stage_end(trainer, pl_module, "validation", "runtime/validation_time_ms")
+        self._record_stage_end(trainer, module, "validation", "runtime/validation_time_ms")
 
     @override
     def on_validation_batch_start(
-        self, trainer: Trainer, pl_module: Module, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, module: Module, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Marks the validation batch start outside sanity checking.
@@ -241,7 +241,7 @@ class RuntimeProfiler(Callback):
 
     @override
     def on_validation_batch_end(
-        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Records the sampled validation batch event outside sanity checking.
@@ -249,7 +249,7 @@ class RuntimeProfiler(Callback):
             return
         self._record_batch_end(
             trainer=trainer,
-            module=pl_module,
+            module=module,
             stage_name="validation",
             event_name="validation_batch",
             batch_idx=batch_idx,
@@ -259,19 +259,19 @@ class RuntimeProfiler(Callback):
         )
 
     @override
-    def on_test_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_test_start(self, trainer: Trainer, module: Module) -> None:
         # Opens the test-stage measurement and baselines the batch timestamp.
         self._mark_stage_start("test")
         self._last_batch_end_times["test"] = time.perf_counter()
 
     @override
-    def on_test_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_test_end(self, trainer: Trainer, module: Module) -> None:
         # Closes the test-stage measurement and emits its total duration.
-        self._record_stage_end(trainer, pl_module, "test", "runtime/test_time_ms")
+        self._record_stage_end(trainer, module, "test", "runtime/test_time_ms")
 
     @override
     def on_test_batch_start(
-        self, trainer: Trainer, pl_module: Module, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, module: Module, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Marks the test batch start and captures its dataloader wait.
@@ -279,13 +279,13 @@ class RuntimeProfiler(Callback):
 
     @override
     def on_test_batch_end(
-        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Records the sampled test batch event with its runtime metrics.
         self._record_batch_end(
             trainer=trainer,
-            module=pl_module,
+            module=module,
             stage_name="test",
             event_name="test_batch",
             batch_idx=batch_idx,
@@ -295,21 +295,21 @@ class RuntimeProfiler(Callback):
         )
 
     @override
-    def on_predict_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_predict_start(self, trainer: Trainer, module: Module) -> None:
         # Opens the prediction-stage measurement and baselines the batch
         # timestamp.
         self._mark_stage_start("prediction")
         self._last_batch_end_times["prediction"] = time.perf_counter()
 
     @override
-    def on_predict_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_predict_end(self, trainer: Trainer, module: Module) -> None:
         # Closes the prediction-stage measurement and emits its total
         # duration.
-        self._record_stage_end(trainer, pl_module, "prediction", "runtime/prediction_time_ms")
+        self._record_stage_end(trainer, module, "prediction", "runtime/prediction_time_ms")
 
     @override
     def on_predict_batch_start(
-        self, trainer: Trainer, pl_module: Module, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, module: Module, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Marks the prediction batch start and captures its dataloader wait.
@@ -317,14 +317,14 @@ class RuntimeProfiler(Callback):
 
     @override
     def on_predict_batch_end(
-        self, trainer: Trainer, pl_module: Module, outputs: ModelOutput, batch: Batch, batch_idx: int,
+        self, trainer: Trainer, module: Module, outputs: ModelOutput, batch: Batch, batch_idx: int,
         dataloader_idx: int = 0
     ) -> None:
         # Records the sampled prediction batch event with its runtime
         # metrics.
         self._record_batch_end(
             trainer=trainer,
-            module=pl_module,
+            module=module,
             stage_name="prediction",
             event_name="prediction_batch",
             batch_idx=batch_idx,
@@ -334,7 +334,7 @@ class RuntimeProfiler(Callback):
         )
 
     @override
-    def on_exception(self, trainer: Trainer, pl_module: Module, exception: BaseException) -> None:
+    def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
         # Persists the summary on failure so the telemetry collected before
         # the exception survives the run.
         self._write_profile_summary()

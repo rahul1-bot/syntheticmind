@@ -18,15 +18,16 @@
     7. Industry-standard machine-learning concepts and key terms control the public vocabulary. Cosmetic aliases, renamed hooks, and project-specific substitutes for established concepts are prohibited because downstream users inherit these classes and override methods by name.
     8. The complete `code-guidelines.md` is mandatory implementation policy rather than optional style guidance. New and modified code must be reviewed directly against it while preserving the stronger public compatibility boundary where inheritance and machine-learning conventions apply.
 
-| Architecture Decision | Framework Ownership and Reference Taxonomy | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+| Architecture Decision | Framework Ownership and Reference Taxonomy | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
 
     1. SyntheticMind is an independent machine-learning harness. PyTorch Lightning is evidence for mature capabilities and runtime contracts, not a product identity, source template, drop-in namespace, or naming authority.
     2. Public vocabulary must be classified before adoption: universal machine-learning and PyTorch terminology is preserved, descriptive extension contracts are adopted only through an explicit SyntheticMind decision, and Lightning-branded vocabulary is rejected or translated into SyntheticMind-owned language.
     3. `LightningOptimizer` is not an optimizer algorithm or an industry-standard term. It is Lightning's public framework wrapper around a user-supplied `torch.optim.Optimizer` for managed stepping, precision, profiling, progress accounting, closures, and optimizer toggling.
     4. SyntheticMind requires the same managed-optimizer capability under the public name `SyntheticOptimizer`. The underlying algorithm remains a standard `torch.optim.Optimizer`, and the wrapper must remain transparent about that distinction.
-    5. Existing identifiers including `LightningOptimizer`, `use_pl_optimizer`, and `_lightning_optimizers` are rejected framework-brand leakage in the current development implementation and require a normal corrective commit before the optimization boundary is accepted.
-    6. Other copied identifiers, including the callback parameter name `pl_module`, are not automatically valid merely because the pinned reference uses them. Each must be audited for genuine ecosystem value, inheritance compatibility, and SyntheticMind ownership.
+    5. The rejected `LightningOptimizer`, `use_pl_optimizer`, and `_lightning_optimizers` identifiers have been removed. The accepted managed surface is `SyntheticOptimizer`, `use_synthetic_optimizer`, and the private `_synthetic_optimizers` collection, while explicit raw access continues to return `torch.optim.Optimizer` instances.
+    6. The copied callback parameter name `pl_module` was Lightning-owned branding without a broader machine-learning meaning. Every SyntheticMind callback hook and built-in override now uses `module`, preserving method names, parameter order, defaults, positional invocation, and override compatibility inside the SyntheticMind inheritance contract.
     7. Capability parity means that users can complete the same core workflows with equivalent semantics. It does not require copying Lightning-specific class names, prefixes, internal decomposition, or historical implementation baggage.
+    8. Ownership correction is accepted only with executable evidence: the source contains no remaining Lightning-branded Python identifiers, callback override signatures match the corrected base, dynamic wrappers retain their underlying PyTorch optimizer inheritance, and automatic, manual multi-optimizer, LBFGS closure, scheduler, toggling, and raw-access paths execute successfully.
 
 | Repository Policy | Main and Development Branches | Date: 19 August 2026 | Time: 04:31 AM | Name: Ghost |
 
@@ -74,7 +75,7 @@
     3. Capability claims require focused runtime assertions, end-to-end execution, exception-path probes, signature and method-resolution inspection, source-backed contract comparison, and Python compilation where relevant.
     4. Verification must prioritize observable behavior, public compatibility, and inheritance safety. Passing a stylistic tool could never substitute for correct lifecycle semantics, parameter meaning, or override behavior.
 
-| Architecture Decision | Optimization Extension Contract | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+| Architecture Decision | Optimization Extension Contract | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
 
     1. `configure_optimizers` currently accepts an optimizer, an optimizer sequence, the paired optimizer-and-scheduler sequence form, optimizer dictionaries, optimizer-plus-scheduler dictionaries, dictionary sequences, and `None`. These structures are deliberately supported capability contracts and must not be described as universal terminology merely because Lightning also supports them.
     2. `torch.optim.Optimizer` is the canonical optimizer-algorithm contract. SyntheticMind's framework-managed public adapter is named `SyntheticOptimizer`; scheduler configuration types remain subject to the same ownership and terminology audit before their public status is finalized.
@@ -82,7 +83,7 @@
     4. Optimizer closures own training-step execution, zeroing, backward, pre-step hooks, gradient clipping, and optimizer execution in the required order. This preserves LBFGS re-entry, gradient accumulation, mixed-precision scaling, manual backward arguments, and optimizer-step-based global progress.
     5. Scheduler configuration preserves interval, frequency, plateau-monitor, strictness, name, optimizer attachment, custom-scheduler override, and checkpoint-state contracts. Optimizer state is placed on the execution device while the top-level optimizer step counter remains on its required device.
     6. Parameter toggling preserves originally frozen parameters, shared optimizer parameters, unmanaged parameters, and exception-safe restoration. The standard context managers yield no value and remain safe when invoked through compiled model code.
-    7. Existing behavioral verification covers accepted and rejected configuration shapes, public signatures and runtime annotations, inheritance order, CPU automatic and manual training, LBFGS closure repetition, scaler ordering, clipping conflicts, scheduler cadence, checkpoint resume, and prebuilt optimizer state on MPS without invoking a linter. The optimization phase is not accepted as complete until the rejected Lightning branding is removed and the corrected surface is reverified.
+    7. The optimization foundation is accepted under SyntheticMind ownership. Existing behavioral verification covers accepted and rejected configuration shapes, public signatures and runtime annotations, inheritance order, CPU automatic and manual training, LBFGS closure repetition, scaler ordering, clipping conflicts, scheduler cadence, checkpoint resume, prebuilt optimizer state on MPS, managed-versus-raw access, and callback signature consistency without invoking a linter.
 
 | Architecture Decision | Minimal Terminal Presentation Contract | Date: 19 August 2026 | Time: 11:28 AM | Name: Ghost |
 

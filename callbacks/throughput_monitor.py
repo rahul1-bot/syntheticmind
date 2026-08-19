@@ -49,21 +49,21 @@ class ThroughputMonitor(Callback):
         self._epoch_samples: int = 0
 
     @override
-    def on_train_epoch_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_train_epoch_start(self, trainer: Trainer, module: Module) -> None:
         # Marks the epoch start and resets the epoch sample counter.
         self._epoch_start_time: float = time.perf_counter()
         self._epoch_samples: int = 0
 
     @override
     def on_train_batch_start(
-        self, trainer: Trainer, pl_module: Module, batch: Batch, batch_idx: int
+        self, trainer: Trainer, module: Module, batch: Batch, batch_idx: int
     ) -> None:
         # Marks the batch start for the per-batch duration measurement.
         self._batch_start_time: float = time.perf_counter()
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Computes the batch duration and inferred sample count, accumulates
         # the epoch total, and on the configured step cadence emits samples
@@ -74,15 +74,15 @@ class ThroughputMonitor(Callback):
         batch_size: int = self._infer_batch_size(batch)
         self._epoch_samples += batch_size
 
-        if pl_module.global_step % self.log_every_n_steps == 0 and trainer.logger is not None:
+        if module.global_step % self.log_every_n_steps == 0 and trainer.logger is not None:
             samples_per_sec: float = batch_size / batch_time if batch_time > 0 else 0.0
             trainer.logger.log_metrics(
                 {"throughput/samples_per_sec": samples_per_sec, "throughput/batch_time_ms": batch_time * 1000},
-                step=pl_module.global_step
+                step=module.global_step
             )
 
     @override
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_train_epoch_end(self, trainer: Trainer, module: Module) -> None:
         # Writes the whole-epoch samples-per-second summary to the log from
         # rank zero.
         if not is_rank_zero():

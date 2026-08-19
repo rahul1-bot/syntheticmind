@@ -56,7 +56,7 @@ from torch.utils.data import DataLoader
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.core.optimizer import LightningOptimizer
+from syntheticmind.core.optimizer import SyntheticOptimizer
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.loop import Loop
 from syntheticmind.state.trainer_state import TrainerState
@@ -625,22 +625,22 @@ class TrainingEpochLoop(Loop):
         # optimizer step, step-interval scheduler advance, gradient clearing,
         # and the global-step increment. Plateau schedulers are excluded here
         # because they advance on monitored metrics at epoch boundaries.
-        lightning_optimizer: LightningOptimizer = next(
+        synthetic_optimizer: SyntheticOptimizer = next(
             wrapped_optimizer
-            for wrapped_optimizer in trainer._lightning_optimizers
+            for wrapped_optimizer in trainer._synthetic_optimizers
             if wrapped_optimizer.optimizer is optimizer
         )
-        lightning_optimizer._automatic_step: bool = True
+        synthetic_optimizer._automatic_step: bool = True
         try:
             with module._hook_context("optimizer_step"):
                 module.optimizer_step(
                     module.current_epoch,
                     batch_idx,
-                    lightning_optimizer,
+                    synthetic_optimizer,
                     closure
                 )
         finally:
-            lightning_optimizer._automatic_step: bool = False
+            synthetic_optimizer._automatic_step: bool = False
         self._increment_global_step(state, module)
         self.update_lr_schedulers(
             trainer,

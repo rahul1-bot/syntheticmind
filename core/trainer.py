@@ -60,7 +60,7 @@ from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import (
     LRSchedulerConfig,
-    LightningOptimizer,
+    SyntheticOptimizer,
     _SchedulerInstance,
     _init_optimizers_and_lr_schedulers,
 )
@@ -385,7 +385,7 @@ class Trainer:
         self.module: Module | None = None
         self.datamodule: DataModule | None = None
         self.optimizers: list[torch.optim.Optimizer] = []
-        self._lightning_optimizers: list[LightningOptimizer] = []
+        self._synthetic_optimizers: list[SyntheticOptimizer] = []
         self.schedulers: list[_SchedulerInstance] = []
         self.lr_scheduler_configs: list[LRSchedulerConfig] = []
         self.optimizer: torch.optim.Optimizer | None = None
@@ -560,8 +560,8 @@ class Trainer:
             )
             self.optimizers: list[torch.optim.Optimizer] = optimizer_initialization[0]
             self.lr_scheduler_configs: list[LRSchedulerConfig] = optimizer_initialization[1]
-            self._lightning_optimizers: list[LightningOptimizer] = [
-                LightningOptimizer._to_lightning_optimizer(optimizer, self, module)
+            self._synthetic_optimizers: list[SyntheticOptimizer] = [
+                SyntheticOptimizer._to_synthetic_optimizer(optimizer, self, module)
                 for optimizer in self.optimizers
             ]
 

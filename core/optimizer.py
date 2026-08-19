@@ -60,10 +60,9 @@ from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.types import SchedulerInterval
 
 __all__: list[str] = [
-    "LightningOptimizer",
+    "SyntheticOptimizer",
     "LRSchedulerConfig",
     "LRSchedulerConfigType",
-    "LRSchedulerPLType",
     "LRSchedulerType",
     "LRSchedulerTypeTuple",
     "LRSchedulerTypeUnion",
@@ -200,8 +199,6 @@ type LRSchedulerTypeUnion = LRScheduler | ReduceLROnPlateau
 
 type LRSchedulerType = type[LRScheduler] | type[ReduceLROnPlateau]
 
-type LRSchedulerPLType = LRScheduler | ReduceLROnPlateau
-
 type _SchedulerInstance = LRSchedulerTypeUnion | _StatefulScheduler
 
 
@@ -251,7 +248,7 @@ type OptimizerLRScheduler = (
 )
 
 
-class LightningOptimizer:
+class SyntheticOptimizer:
     def __init__(self, optimizer: torch.optim.Optimizer) -> None:
         self._optimizer: torch.optim.Optimizer = optimizer
         self._trainer: OptimizerTrainerProtocol | None = None
@@ -259,8 +256,8 @@ class LightningOptimizer:
         self._on_before_step: Callable[[], None] = do_nothing_closure
         self._on_after_step: Callable[[], None] = do_nothing_closure
         self._automatic_step: bool = False
-        self.__class__: type[LightningOptimizer] = type(
-            "Lightning" + optimizer.__class__.__name__,
+        self.__class__: type[SyntheticOptimizer] = type(
+            "Synthetic" + optimizer.__class__.__name__,
             (self.__class__, optimizer.__class__),
             {}
         )
@@ -274,7 +271,7 @@ class LightningOptimizer:
         trainer: OptimizerTrainerProtocol | None = self._trainer
         module: OptimizerModuleProtocol | None = self._module
         if trainer is None or module is None:
-            raise RuntimeError("The LightningOptimizer is not attached to a Trainer and Module.")
+            raise RuntimeError("The SyntheticOptimizer is not attached to a Trainer and Module.")
         model: torch.nn.Module | None = trainer.strategy.model
         synchronization_context: AbstractContextManager[None] = nullcontext()
         if not sync_grad and isinstance(model, DistributedDataParallel):
@@ -297,7 +294,7 @@ class LightningOptimizer:
         trainer: OptimizerTrainerProtocol | None = self._trainer
         module: OptimizerModuleProtocol | None = self._module
         if trainer is None or module is None:
-            raise RuntimeError("The LightningOptimizer is not attached to a Trainer and Module.")
+            raise RuntimeError("The SyntheticOptimizer is not attached to a Trainer and Module.")
         epoch_loop: OptimizerEpochLoopProtocol | None = trainer.fit_loop.epoch_loop
         if epoch_loop is None:
             raise RuntimeError("Trainer fit loop is not initialized.")
@@ -315,18 +312,18 @@ class LightningOptimizer:
         return output
 
     @classmethod
-    def _to_lightning_optimizer(
+    def _to_synthetic_optimizer(
         cls,
-        optimizer: torch.optim.Optimizer | LightningOptimizer,
+        optimizer: torch.optim.Optimizer | SyntheticOptimizer,
         trainer: OptimizerTrainerProtocol,
         module: OptimizerModuleProtocol
-    ) -> LightningOptimizer:
-        lightning_optimizer: LightningOptimizer = (
-            optimizer if isinstance(optimizer, LightningOptimizer) else cls(optimizer)
+    ) -> SyntheticOptimizer:
+        synthetic_optimizer: SyntheticOptimizer = (
+            optimizer if isinstance(optimizer, SyntheticOptimizer) else cls(optimizer)
         )
-        lightning_optimizer._trainer: OptimizerTrainerProtocol | None = trainer
-        lightning_optimizer._module: OptimizerModuleProtocol | None = module
-        return lightning_optimizer
+        synthetic_optimizer._trainer: OptimizerTrainerProtocol | None = trainer
+        synthetic_optimizer._module: OptimizerModuleProtocol | None = module
+        return synthetic_optimizer
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._optimizer, name)
@@ -468,7 +465,7 @@ def _configure_optimizers(
             "{'optimizer': Optimizer, 'lr_scheduler': LRScheduler}."
         )
     optimizers: list[torch.optim.Optimizer] = [
-        optimizer.optimizer if isinstance(optimizer, LightningOptimizer) else optimizer
+        optimizer.optimizer if isinstance(optimizer, SyntheticOptimizer) else optimizer
         for optimizer in optimizers
     ]
     return optimizers, schedulers, monitor

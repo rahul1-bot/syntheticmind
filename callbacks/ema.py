@@ -68,18 +68,18 @@ class EMACallback(Callback):
         self._original_state: dict[str, torch.Tensor] | None = None
 
     @override
-    def setup(self, trainer: Trainer, pl_module: Module, stage: TrainerStage) -> None:
+    def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
         # Creates the gradient-free shadow copy once per fit. Other stages
         # leave the shadow absent, in which case every hook in this callback
         # degrades to a no-op.
         if stage == "fit":
-            self._shadow_model: nn.Module | None = copy.deepcopy(pl_module)
+            self._shadow_model: nn.Module | None = copy.deepcopy(module)
             for param in self._shadow_model.parameters():
                 param.requires_grad_(False)
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, pl_module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
     ) -> None:
         # Advances the average after each training batch under no_grad, with
         # strict pairing between shadow and live parameters.
@@ -87,7 +87,7 @@ class EMACallback(Callback):
             return
         with torch.no_grad():
             for shadow_param, model_param in zip(
-                self._shadow_model.parameters(), pl_module.parameters(), strict=True
+                self._shadow_model.parameters(), module.parameters(), strict=True
             ):
                 shadow_param.data.mul_(self.decay).add_(model_param.data, alpha=1.0 - self.decay)
 
@@ -113,38 +113,38 @@ class EMACallback(Callback):
         self._original_state: dict[str, torch.Tensor] | None = None
 
     @override
-    def on_validation_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_validation_start(self, trainer: Trainer, module: Module) -> None:
         # Swaps the averaged weights in before the validation pass begins.
-        self._swap_to_ema(pl_module)
+        self._swap_to_ema(module)
 
     @override
-    def on_validation_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_validation_end(self, trainer: Trainer, module: Module) -> None:
         # Restores the live training weights after the validation pass.
-        self._restore_from_ema(pl_module)
+        self._restore_from_ema(module)
 
     @override
-    def on_test_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_test_start(self, trainer: Trainer, module: Module) -> None:
         # Swaps the averaged weights in before the test pass begins.
-        self._swap_to_ema(pl_module)
+        self._swap_to_ema(module)
 
     @override
-    def on_test_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_test_end(self, trainer: Trainer, module: Module) -> None:
         # Restores the live training weights after the test pass.
-        self._restore_from_ema(pl_module)
+        self._restore_from_ema(module)
 
     @override
-    def on_predict_start(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_predict_start(self, trainer: Trainer, module: Module) -> None:
         # Swaps the averaged weights in before the prediction pass begins.
-        self._swap_to_ema(pl_module)
+        self._swap_to_ema(module)
 
     @override
-    def on_predict_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_predict_end(self, trainer: Trainer, module: Module) -> None:
         # Restores the live training weights after the prediction pass.
-        self._restore_from_ema(pl_module)
+        self._restore_from_ema(module)
 
     @override
     def on_save_checkpoint(
-        self, trainer: Trainer, pl_module: Module, checkpoint: CheckpointDict
+        self, trainer: Trainer, module: Module, checkpoint: CheckpointDict
     ) -> None:
         # Stores the shadow state under its dedicated key, and when a swap is
         # active replaces the payload's model state with the cloned pre-swap
@@ -159,7 +159,7 @@ class EMACallback(Callback):
 
     @override
     def on_load_checkpoint(
-        self, trainer: Trainer, pl_module: Module, checkpoint: CheckpointDict
+        self, trainer: Trainer, module: Module, checkpoint: CheckpointDict
     ) -> None:
         # Restores the shadow from its dedicated key when both the key and
         # the shadow exist; payloads from runs without this callback restore

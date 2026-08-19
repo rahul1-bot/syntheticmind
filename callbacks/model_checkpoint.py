@@ -132,14 +132,14 @@ class ModelCheckpoint(Callback):
         self._save_count: int = 0
 
     @override
-    def setup(self, trainer: Trainer, pl_module: Module, stage: TrainerStage) -> None:
+    def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
         # Creates the checkpoint directory on rank zero before the stage
         # begins, so later saves never race on directory creation.
         if is_rank_zero():
             self.dirpath.mkdir(parents=True, exist_ok=True)
 
     @override
-    def on_validation_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_validation_epoch_end(self, trainer: Trainer, module: Module) -> None:
         # Checkpoint decision point, executed on rank zero after each real
         # validation pass inside fit. The rolling last.ckpt is refreshed
         # first when enabled; the monitored path then requires the monitor
@@ -151,13 +151,13 @@ class ModelCheckpoint(Callback):
             return
         if not is_rank_zero():
             return
-        if not self._should_save_on_validation_end(trainer, pl_module):
+        if not self._should_save_on_validation_end(trainer, module):
             return
 
         metrics: dict[str, float] = trainer.callback_metrics
         if self.save_last:
             last_path: Path = self.dirpath / "last.ckpt"
-            self._save_checkpoint(trainer, pl_module, last_path)
+            self._save_checkpoint(trainer, module, last_path)
 
         if self.save_top_k == 0:
             return
@@ -173,10 +173,10 @@ class ModelCheckpoint(Callback):
 
         improved: bool = self._is_improvement(current_score)
         if improved or self.save_top_k == -1:
-            current_epoch: int = pl_module.current_epoch
+            current_epoch: int = module.current_epoch
             filepath: Path = self._format_filepath(current_epoch, trainer.state.global_step, metrics)
 
-            self._save_checkpoint(trainer, pl_module, filepath)
+            self._save_checkpoint(trainer, module, filepath)
 
             if improved:
                 self.best_score: float = current_score
@@ -351,7 +351,7 @@ class ModelCheckpoint(Callback):
                     old_path.unlink()
 
     @override
-    def on_exception(self, trainer: Trainer, pl_module: Module, exception: BaseException) -> None:
+    def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
         # Optional last-resort save on run failure, restricted to rank zero
         # during fit. A full checkpoint is attempted when the optimizer
         # exists; otherwise the partial weights-only form is written. A
@@ -367,9 +367,9 @@ class ModelCheckpoint(Callback):
         try:
             self.dirpath.mkdir(parents=True, exist_ok=True)
             if trainer.optimizer is not None:
-                self._save_checkpoint(trainer, pl_module, exception_path)
+                self._save_checkpoint(trainer, module, exception_path)
             else:
-                self._save_partial_checkpoint(pl_module, exception_path)
+                self._save_partial_checkpoint(module, exception_path)
             log.info(f"Exception checkpoint saved: {exception_path}")
         except Exception:
             log.warning("Failed to save exception checkpoint")

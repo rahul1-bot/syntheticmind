@@ -37,14 +37,14 @@
     7. Inheritance order and method-resolution order are public behavior whenever users subclass the harness. Cooperative initialization, `super()` chains, override discovery, signatures, defaults, and return types must be verified together rather than reviewing method names in isolation.
     8. Industry-standard machine-learning key terms and naming conventions are mandatory at every public boundary. An internal abstraction may be cleaner than Lightning's implementation, but it may not force users to translate an invented vocabulary for an established concept.
 
-| Memory | Callback Extension Contract | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+| Memory | Callback Extension Contract | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
 
-    1. The current SyntheticMind `Callback` method surface contains every method in the pinned PyTorch Lightning base contract with matching positional shapes and defaults; this is implementation evidence, not proof that every copied name belongs in SyntheticMind's final public API.
-    2. The current public callback hooks use `pl_module`, which is Lightning-owned branding rather than universal machine-learning terminology. The callback layer requires an ownership audit and should use `module` unless a narrower compatibility requirement justifies an explicit alias.
+    1. The current SyntheticMind `Callback` method surface contains every method in the pinned PyTorch Lightning base contract with equivalent positional shapes and defaults, while its public parameter vocabulary is owned by SyntheticMind rather than copied mechanically.
+    2. Every public callback hook and built-in override uses `module`. The previous `pl_module` spelling was Lightning-owned branding rather than universal machine-learning terminology; removing it preserves the SyntheticMind override contract because all runtime hook dispatch is positional and every built-in override matches the corrected base signature.
     3. Evaluation publishes reduced metrics before ordinary epoch-end callbacks, merges metrics logged by the module epoch-end hook, and republishes them before monitoring callbacks. This preserves the standard signature while allowing EarlyStopping and ModelCheckpoint to observe module-contributed values.
     4. Callback state identity follows the qualified-class-name convention, parameterized keys use the standard class-qualified dictionary representation, and `_legacy_state_key` preserves the established compatibility surface.
     5. Python 3.14 callback modules require deferred annotations because `Trainer` is imported only during type checking to avoid circular imports. Without deferred annotations, standard `inspect.signature()` calls evaluate the missing runtime name and fail, obstructing extension discovery and override tooling.
-    6. Source comparison checked the complete base surface, structural inspection checked seventy-one built-in overrides, and CPU executions covered fit, validation, test, prediction, EarlyStopping, ModelCheckpoint, callback metrics, state keys, and runtime signature inspection.
+    6. Source comparison checked the complete base surface, structural inspection checked every built-in override, and CPU executions covered fit, validation, test, prediction, EarlyStopping, ModelCheckpoint, callback metrics, state keys, runtime signature inspection, and callback dispatch after the ownership correction.
 
 | Memory | Evidence Escalation and Ledger Discipline | Date: 19 August 2026 | Time: 08:21 AM | Name: Ghost |
 
@@ -56,14 +56,14 @@
     6. Package installation is authorized through `python -m pip install --break-system-packages` when a verification dependency is genuinely required. Diagnose the existing package graph first and avoid broad global repairs when a targeted pin or isolated environment answers the engineering question safely.
     7. Ruff and other linters are not part of this program. Guideline compliance is reviewed directly, while behavior is proven through runtime assertions, end-to-end flows, source-backed signature and inheritance inspection, exception probes, and compilation.
 
-| Memory | Optimizer and Scheduler Compatibility | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+| Memory | Optimizer and Scheduler Compatibility | Date: 19 August 2026 | Time: 11:37 AM | Name: Ghost |
 
     1. Optimizer compatibility is an execution contract rather than a parser contract. Correctness requires the closure to compose training-step execution, gradient clearing, backward, pre-step inspection, clipping, scaler handling, and the raw optimizer step in the expected order.
     2. `global_step` now advances once for each real managed-optimizer `step()` invocation in manual optimization and once for each loop-owned automatic optimizer step. It no longer advances merely because a manual-optimization batch completed.
     3. Step schedulers use the training batch index and configured frequency, while epoch schedulers split non-plateau updates before validation from plateau updates after monitored metrics are available. Scheduler stepping remains overridable through `lr_scheduler_step`.
     4. Python 3.14 evaluates deferred class annotations during runtime signature inspection. A public annotation using bare `float` inside a `torch.nn.Module` subclass can resolve to the inherited `Module.float` method; `builtins.float` is required at that boundary to preserve introspection.
     5. A preconstructed optimizer may already contain CPU state before its model is moved. Recursive state movement must preserve the top-level `step` state while moving tensors such as Adagrad accumulators to the selected device.
-    6. Dynamic optimizer wrapping is required for managed extension behavior and `isinstance` compatibility. The public wrapper is a SyntheticMind-owned adapter named `SyntheticOptimizer`; it must expose the raw `torch.optim.Optimizer` through `optimizer`, delegate ordinary optimizer attributes, and route `step` through Trainer-owned precision and progress handling.
+    6. Dynamic optimizer wrapping is required for managed extension behavior and `isinstance` compatibility. The public wrapper is the SyntheticMind-owned `SyntheticOptimizer`; runtime subclasses retain the underlying PyTorch optimizer family, expose the raw `torch.optim.Optimizer` through `optimizer`, delegate ordinary attributes, and route `step` through Trainer-owned precision and progress handling. `Module.optimizers()` returns managed wrappers by default and `use_synthetic_optimizer=False` returns raw PyTorch optimizers explicitly.
     7. The distributed unsized-dataloader accumulation tail remains unresolved: a final batch executed under `no_sync()` can still reach the tail optimizer step with rank-local gradients. It must be corrected in the distributed execution phase rather than concealed by optimizer-layer success.
 
 | Memory | Console Experience Contract | Date: 19 August 2026 | Time: 11:28 AM | Name: Ghost |

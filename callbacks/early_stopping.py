@@ -83,7 +83,7 @@ class EarlyStopping(Callback):
         self.stopped_epoch: int = 0
 
     @override
-    def on_validation_epoch_end(self, trainer: Trainer, pl_module: Module) -> None:
+    def on_validation_epoch_end(self, trainer: Trainer, module: Module) -> None:
         # Core stopping logic, executed after every real validation pass.
         # Reads the monitored value from the reduced epoch metrics, resets the
         # patience counter on improvement, and otherwise advances it; when the
@@ -111,7 +111,7 @@ class EarlyStopping(Callback):
             should_stop: bool = self.wait_count >= self.patience
             should_stop: bool = trainer.strategy.reduce_boolean_decision(should_stop)
             if should_stop:
-                self.stopped_epoch: int = pl_module.current_epoch
+                self.stopped_epoch: int = module.current_epoch
                 trainer.state.should_stop: bool = True
                 log.info(
                     f"EarlyStopping triggered at epoch {self.stopped_epoch}. "

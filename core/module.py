@@ -45,9 +45,8 @@ from torch import nn
 
 from syntheticmind.core.hooks import DataHooks, MetricLoggingContract, ModelHooks
 from syntheticmind.core.optimizer import (
-    LRSchedulerPLType,
     LRSchedulerTypeUnion,
-    LightningOptimizer,
+    SyntheticOptimizer,
     OptimizerLRScheduler
 )
 from syntheticmind.core.saving import CheckpointHooks
@@ -548,7 +547,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         self,
         epoch: int,
         batch_idx: int,
-        optimizer: torch.optim.Optimizer | LightningOptimizer,
+        optimizer: torch.optim.Optimizer | SyntheticOptimizer,
         optimizer_closure: Callable[[], object] | None = None
     ) -> None:
         # Manual-optimization entry point that executes one optimizer step
@@ -622,7 +621,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         if epoch_loop is None:
             raise RuntimeError("Trainer fit loop is not initialized.")
         raw_optimizer: torch.optim.Optimizer = (
-            optimizer.optimizer if isinstance(optimizer, LightningOptimizer) else optimizer
+            optimizer.optimizer if isinstance(optimizer, SyntheticOptimizer) else optimizer
         )
         resolved_gradient_clip_val: int | builtins.float
         if gradient_clip_val is None:
@@ -683,7 +682,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         )
 
     @torch.compiler.disable
-    def toggle_optimizer(self, optimizer: torch.optim.Optimizer | LightningOptimizer) -> None:
+    def toggle_optimizer(self, optimizer: torch.optim.Optimizer | SyntheticOptimizer) -> None:
         # Restricts training to one optimizer's parameters during manual
         # optimization. The requires_grad state of every parameter is recorded
         # first, then only the parameters owned by the given optimizer keep
@@ -709,12 +708,12 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         ] = param_requires_grad_state
 
     @torch.compiler.disable
-    def untoggle_optimizer(self, optimizer: torch.optim.Optimizer | LightningOptimizer) -> None:
+    def untoggle_optimizer(self, optimizer: torch.optim.Optimizer | SyntheticOptimizer) -> None:
         # Restores the exact requires_grad state recorded by toggle_optimizer
         # and clears the snapshot. The optimizer argument exists for call-site
         # symmetry with toggle_optimizer and is not consulted.
         raw_optimizer: torch.optim.Optimizer = (
-            optimizer.optimizer if isinstance(optimizer, LightningOptimizer) else optimizer
+            optimizer.optimizer if isinstance(optimizer, SyntheticOptimizer) else optimizer
         )
         trainer_optimizer: torch.optim.Optimizer
         parameter_group: dict[str, object]
@@ -731,7 +730,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
     @contextmanager
     def toggled_optimizer(
         self,
-        optimizer: torch.optim.Optimizer | LightningOptimizer
+        optimizer: torch.optim.Optimizer | SyntheticOptimizer
     ) -> Iterator[None]:
         # Context manager form of the toggle pair: parameters are restricted
         # on entry and restored in the finally block, so an exception inside
@@ -757,32 +756,32 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
     @overload
     def optimizers(
         self,
-        use_pl_optimizer: Literal[True] = True
-    ) -> LightningOptimizer | list[LightningOptimizer]: ...
+        use_synthetic_optimizer: Literal[True] = True
+    ) -> SyntheticOptimizer | list[SyntheticOptimizer]: ...
 
     @overload
     def optimizers(
         self,
-        use_pl_optimizer: Literal[False]
+        use_synthetic_optimizer: Literal[False]
     ) -> torch.optim.Optimizer | list[torch.optim.Optimizer]: ...
 
     @overload
     def optimizers(
         self,
-        use_pl_optimizer: bool
+        use_synthetic_optimizer: bool
     ) -> (
-        LightningOptimizer
-        | list[LightningOptimizer]
+        SyntheticOptimizer
+        | list[SyntheticOptimizer]
         | torch.optim.Optimizer
         | list[torch.optim.Optimizer]
     ): ...
 
     def optimizers(
         self,
-        use_pl_optimizer: bool = True
+        use_synthetic_optimizer: bool = True
     ) -> (
-        LightningOptimizer
-        | list[LightningOptimizer]
+        SyntheticOptimizer
+        | list[SyntheticOptimizer]
         | torch.optim.Optimizer
         | list[torch.optim.Optimizer]
     ):
@@ -795,8 +794,8 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         #     are, so a two-optimizer model can unpack directly:
         #     ``generator_opt, discriminator_opt = self.optimizers()``.
         trainer: Trainer = self.trainer
-        optimizers: list[LightningOptimizer] | list[torch.optim.Optimizer] = (
-            trainer._lightning_optimizers if use_pl_optimizer else trainer.optimizers
+        optimizers: list[SyntheticOptimizer] | list[torch.optim.Optimizer] = (
+            trainer._synthetic_optimizers if use_synthetic_optimizer else trainer.optimizers
         )
         if len(optimizers) == 1:
             return optimizers[0]
@@ -804,13 +803,13 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
 
     def lr_schedulers(
         self
-    ) -> LRSchedulerPLType | list[LRSchedulerPLType] | None:
+    ) -> LRSchedulerTypeUnion | list[LRSchedulerTypeUnion] | None:
         # Returns the trainer-materialized schedulers with the same unwrapping
         # convention as optimizers().
         trainer: Trainer = self.trainer
         if not trainer.lr_scheduler_configs:
             return None
-        schedulers: list[LRSchedulerPLType] = [
+        schedulers: list[LRSchedulerTypeUnion] = [
             configuration.scheduler for configuration in trainer.lr_scheduler_configs
         ]
         if len(schedulers) == 1:
