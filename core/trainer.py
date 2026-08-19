@@ -430,6 +430,16 @@ class Trainer:
             raise TypeError(
                 f"`sync_batchnorm` must be a bool, got {sync_batchnorm!r}."
             )
+        if type(reload_dataloaders_every_n_epochs) is not int:
+            raise TypeError(
+                "`reload_dataloaders_every_n_epochs` must be an int, got "
+                f"{reload_dataloaders_every_n_epochs!r}."
+            )
+        if reload_dataloaders_every_n_epochs < 0:
+            raise MisconfigurationError(
+                "`reload_dataloaders_every_n_epochs` must be >= 0, got "
+                f"{reload_dataloaders_every_n_epochs}."
+            )
         if (
             log_every_n_steps is not None
             and (
@@ -851,6 +861,8 @@ class Trainer:
         self._total_test_batches: int | None = None
         self._total_predict_batches: int | None = None
         self.reload_dataloaders_every_n_epochs: int = reload_dataloaders_every_n_epochs
+        self._last_train_dataloader_reload_epoch: int | None = None
+        self._last_val_dataloader_reload_epoch: int | None = None
         self._callback_metrics: dict[str, float] = {}
         self._progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]] = {
             "training": {},
@@ -924,6 +936,10 @@ class Trainer:
         self._reset_progress_bar_metrics()
         self._total_train_batches: int | None = None
         self._total_val_batches: int | None = None
+        self.train_dataloader = None
+        self.val_dataloader = None
+        self._last_train_dataloader_reload_epoch = None
+        self._last_val_dataloader_reload_epoch = None
         self.fit_loop.should_stop = False
         if self.fit_loop.epoch_loop is not None:
             self.fit_loop.epoch_loop.reset_on_run()
@@ -934,6 +950,7 @@ class Trainer:
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer = self
+        datamodule.trainer = self
         module._current_epoch = 0
         module._global_step = 0
         module_mode: ModuleMode = ModuleMode()
@@ -970,79 +987,58 @@ class Trainer:
                 "fit"
             )
 
+            preloaded_checkpoint: CheckpointDict | None = None
+            if resume_path is not None:
+                preloaded_checkpoint = self.strategy.load_checkpoint(
+                    resume_path,
+                    weights_only
+                )
+                resume_epoch: int = CheckpointState._integer_value(
+                    preloaded_checkpoint.get("epoch"),
+                    0
+                )
+                resume_global_step: int = CheckpointState._integer_value(
+                    preloaded_checkpoint.get("global_step"),
+                    0
+                )
+                self.state.load_state_dict(
+                    {
+                        "current_epoch": resume_epoch,
+                        "global_step": resume_global_step
+                    }
+                )
+                module._current_epoch = resume_epoch
+                module._global_step = resume_global_step
+                CheckpointState.load_datamodule_state(
+                    preloaded_checkpoint,
+                    datamodule
+                )
+
             # Retrieve the fit-stage dataloaders. The harness supports exactly
             # one loader per stage, so collection returns are rejected here
             # rather than failing obscurely inside the loops.
-            with self.profiler.profile("setup_train_dataloader"):
-                self.train_dataloader: torch.utils.data.DataLoader | None = (
-                    self._call_datamodule_hook(
-                        datamodule,
-                        "train_dataloader",
-                        datamodule.train_dataloader
-                    )
-                )
-
-            if isinstance(self.train_dataloader, (list, tuple, dict)):
-                raise MisconfigurationError(
-                    "Multiple train dataloaders are not supported. train_dataloader() must return a single DataLoader."
-                )
-
-            with self.profiler.profile("setup_val_dataloader"):
-                self.val_dataloader: torch.utils.data.DataLoader | None = (
-                    self._call_datamodule_hook(
-                        datamodule,
-                        "val_dataloader",
-                        datamodule.val_dataloader
-                    )
-                )
-
-            if isinstance(self.val_dataloader, (list, tuple, dict)):
-                raise MisconfigurationError(
-                    "Multiple val dataloaders are not supported. val_dataloader() must return a single DataLoader."
-                )
-
-            if self.overfit_batches:
-                self.train_dataloader = self._prepare_overfit_dataloader(
-                    self.train_dataloader,
-                    "train"
-                )
-                if self.val_dataloader is not None:
-                    self.val_dataloader = self._prepare_overfit_dataloader(
-                        self.val_dataloader,
-                        "val"
-                    )
-
             # Under a distributed strategy, map-style datasets are re-wrapped
             # with rank-aware samplers so every process sees a disjoint shard;
             # iterable datasets own their sharding and pass through with a
             # warning.
-            if self.use_distributed_sampler and self.strategy.is_distributed:
-                if not isinstance(self.train_dataloader.dataset, IterableDataset):
-                    self.train_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(
-                        self.train_dataloader,
-                        shuffle=not bool(self.overfit_batches)
-                    )
-                elif is_rank_zero():
-                    log.warning("Skipping DistributedSampler for train dataloader: IterableDataset detected.")
-                if self.val_dataloader is not None:
-                    if not isinstance(self.val_dataloader.dataset, IterableDataset):
-                        self.val_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.val_dataloader, shuffle=False)
-                    elif is_rank_zero():
-                        log.warning("Skipping DistributedSampler for val dataloader: IterableDataset detected.")
-
             # Record loader lengths where they are knowable; unsized iterable
             # loaders leave the totals as None and downstream cadence math
             # degrades to its unsized behavior.
-            self._total_train_batches: int | None = self._safe_len(self.train_dataloader)
-            if self.val_dataloader is not None:
-                self._total_val_batches: int | None = self._safe_len(self.val_dataloader)
+            if (
+                self.limit_train_batches != 0
+                and is_overridden("training_step", module, Module)
+            ):
+                self._request_dataloader("train")
+            else:
+                self._total_train_batches = 0
             self._configure_validation_schedule(reset_time=True)
 
             # Advisory only: single-process loading feeding a non-CPU
             # accelerator is a common throughput mistake worth one warning,
             # never an error.
             if is_rank_zero():
-                if hasattr(self.train_dataloader, 'num_workers') and self.train_dataloader.num_workers == 0:
+                train_dataloader: torch.utils.data.DataLoader | None = self.train_dataloader
+                if train_dataloader is not None and train_dataloader.num_workers == 0:
                     if not isinstance(self.accelerator, CPUAccelerator):
                         log.warning("num_workers=0 with GPU accelerator. Consider increasing for better throughput.")
 
@@ -1147,10 +1143,13 @@ class Trainer:
             # run.
             self._resolve_checkpoint_callback_directories()
             if resume_path is not None:
+                assert preloaded_checkpoint is not None
                 self._restore_checkpoint(
                     resume_path,
                     module,
-                    weights_only=weights_only
+                    weights_only=weights_only,
+                    checkpoint=preloaded_checkpoint,
+                    restore_datamodule_state=False
                 )
             _optimizers_to_device(self.optimizers, device)
 
@@ -1185,7 +1184,6 @@ class Trainer:
             if (
                 self.enable_validation
                 and self.num_sanity_val_steps > 0
-                and self._validation_schedule.is_epoch_eligible(self.current_epoch)
                 and resume_path is None
             ):
                 self._sanity_check_validation(module)
@@ -1275,6 +1273,7 @@ class Trainer:
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer = self
+        datamodule.trainer = self
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1302,33 +1301,7 @@ class Trainer:
                 datamodule.setup,
                 "validate"
             )
-            with self.profiler.profile("setup_val_dataloader"):
-                self.val_dataloader: torch.utils.data.DataLoader | None = (
-                    self._call_datamodule_hook(
-                        datamodule,
-                        "val_dataloader",
-                        datamodule.val_dataloader
-                    )
-                )
-
-            if isinstance(self.val_dataloader, (list, tuple, dict)):
-                raise MisconfigurationError(
-                    "Multiple val dataloaders are not supported. val_dataloader() must return a single DataLoader."
-                )
-
-            if self.overfit_batches:
-                self.val_dataloader = self._prepare_overfit_dataloader(
-                    self.val_dataloader,
-                    "val"
-                )
-
-            if self.use_distributed_sampler and self.strategy.is_distributed:
-                if not isinstance(self.val_dataloader.dataset, IterableDataset):
-                    self.val_dataloader: torch.utils.data.DataLoader | None = self._wrap_with_distributed_sampler(self.val_dataloader, shuffle=False)
-                elif is_rank_zero():
-                    log.warning("Skipping DistributedSampler for val dataloader: IterableDataset detected.")
-
-            self._total_val_batches: int | None = self._safe_len(self.val_dataloader) if self.val_dataloader is not None else None
+            self._request_dataloader("val")
 
             device: torch.device = self._resolve_device()
             module = self._setup_model(module, device)
@@ -1406,6 +1379,7 @@ class Trainer:
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer = self
+        datamodule.trainer = self
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1545,6 +1519,7 @@ class Trainer:
         self.module: Module | None = module
         self.datamodule: DataModule | None = datamodule
         module._trainer = self
+        datamodule.trainer = self
 
         module_mode: ModuleMode = ModuleMode()
         module_mode.capture(module)
@@ -1646,19 +1621,120 @@ class Trainer:
         except TypeError:
             return None
 
+    def _request_dataloader(
+        self,
+        stage: Literal["train", "val"]
+    ) -> torch.utils.data.DataLoader:
+        datamodule: DataModule | None = self.datamodule
+        assert datamodule is not None
+        hook_name: str
+        dataloader_hook: Callable[[], torch.utils.data.DataLoader]
+        if stage == "train":
+            hook_name = "train_dataloader"
+            dataloader_hook = datamodule.train_dataloader
+        else:
+            hook_name = "val_dataloader"
+            dataloader_hook = datamodule.val_dataloader
+        with self.profiler.profile(f"setup_{stage}_dataloader"):
+            dataloader_result: object = self._call_datamodule_hook(
+                datamodule,
+                hook_name,
+                dataloader_hook
+            )
+        if isinstance(dataloader_result, (list, tuple, dict)):
+            raise MisconfigurationError(
+                f"Multiple {stage} dataloaders are not supported. "
+                f"{hook_name}() must return a single DataLoader."
+            )
+        if not isinstance(dataloader_result, torch.utils.data.DataLoader):
+            raise MisconfigurationError(
+                f"{hook_name}() must return a torch.utils.data.DataLoader, got "
+                f"{type(dataloader_result).__qualname__}."
+            )
+        dataloader: torch.utils.data.DataLoader = dataloader_result
+        if self.overfit_batches:
+            dataloader = self._prepare_overfit_dataloader(dataloader, stage)
+        if self.use_distributed_sampler and self.strategy.is_distributed:
+            if isinstance(dataloader.dataset, IterableDataset):
+                if is_rank_zero():
+                    log.warning(
+                        f"Skipping DistributedSampler for {stage} dataloader: "
+                        "IterableDataset detected."
+                    )
+            else:
+                dataloader = self._wrap_with_distributed_sampler(
+                    dataloader,
+                    shuffle=(stage == "train" and not bool(self.overfit_batches))
+                )
+        if (
+            self.reload_dataloaders_every_n_epochs > 0
+            and dataloader.persistent_workers
+            and dataloader.pin_memory
+        ):
+            warnings.warn(
+                "The combination of `persistent_workers=True`, `pin_memory=True`, and "
+                "`reload_dataloaders_every_n_epochs > 0` can lead to instability due "
+                "to limitations in PyTorch.",
+                UserWarning,
+                stacklevel=3
+            )
+        self._call_strategy_hook("barrier", self.strategy.barrier)
+        if stage == "train":
+            self.train_dataloader = dataloader
+            self._total_train_batches = self._safe_len(dataloader)
+            self._last_train_dataloader_reload_epoch = self.current_epoch
+        else:
+            self.val_dataloader = dataloader
+            self._total_val_batches = self._safe_len(dataloader)
+            self._last_val_dataloader_reload_epoch = self.current_epoch
+        return dataloader
+
+    def _ensure_train_dataloader(self) -> None:
+        reload_interval: int = self.reload_dataloaders_every_n_epochs
+        last_reload_epoch: int | None = self._last_train_dataloader_reload_epoch
+        if self.train_dataloader is not None and (
+            reload_interval == 0
+            or (
+                last_reload_epoch is not None
+                and self.current_epoch - last_reload_epoch < reload_interval
+            )
+        ):
+            return
+        self._request_dataloader("train")
+        self._configure_validation_schedule(reset_time=False)
+
+    def _ensure_val_dataloader(self) -> None:
+        reload_interval: int = self.reload_dataloaders_every_n_epochs
+        last_reload_epoch: int | None = self._last_val_dataloader_reload_epoch
+        if self.val_dataloader is not None and (
+            reload_interval == 0
+            or (
+                last_reload_epoch is not None
+                and self.current_epoch - last_reload_epoch < reload_interval
+            )
+        ):
+            return
+        self._request_dataloader("val")
+        self._configure_validation_schedule(reset_time=False)
+
     def _configure_validation_schedule(self, reset_time: bool) -> None:
         assert self.fit_loop.epoch_loop is not None
         max_batches: int | None = self.fit_loop.epoch_loop._resolve_limit_batches(
             self._total_train_batches
         )
-        validation_enabled: bool = self.val_dataloader is not None
-        if validation_enabled:
-            if self.limit_val_batches == 0:
-                validation_enabled = False
-            else:
-                validation_enabled = (
-                    self.validate_loop._resolve_limit_batches(self._total_val_batches) != 0
-                )
+        module: Module | None = self.module
+        datamodule: DataModule | None = self.datamodule
+        validation_enabled: bool = (
+            self.limit_val_batches != 0
+            and module is not None
+            and datamodule is not None
+            and is_overridden("validation_step", module, Module)
+            and is_overridden("val_dataloader", datamodule, DataModule)
+        )
+        if validation_enabled and self.val_dataloader is not None:
+            validation_enabled = (
+                self.validate_loop._resolve_limit_batches(self._total_val_batches) != 0
+            )
         self._validation_schedule.configure(
             max_batches,
             validation_enabled,
@@ -2174,16 +2250,19 @@ class Trainer:
         # a finally block, and every trace of the sanity pass (epoch metrics,
         # the module's logging buffer, callback metrics) is discarded so
         # sanity results cannot influence monitoring or checkpointing.
-        self._call_callback_hooks(module, "on_sanity_check_start")
-
         self.state.set_running_stage("sanity_checking")
         module._running_stage = "sanity_checking"
         self._sanity_checking: bool = True
 
         try:
+            self._ensure_val_dataloader()
+            self._call_callback_hooks(module, "on_sanity_check_start")
             self.validate_loop.run()
         finally:
             self._sanity_checking: bool = False
+
+        if not self._validation_schedule.is_epoch_eligible(self.current_epoch):
+            self._last_val_dataloader_reload_epoch = None
 
         self._validation_schedule.mark_validation_end()
 
@@ -2200,7 +2279,9 @@ class Trainer:
         self,
         path: Path,
         module: Module,
-        weights_only: bool | None = None
+        weights_only: bool | None = None,
+        checkpoint: CheckpointDict | None = None,
+        restore_datamodule_state: bool = True
     ) -> None:
         # Restores a full checkpoint onto the live objects: model, optimizer,
         # and scheduler state through CheckpointState, the progress counters
@@ -2208,25 +2289,27 @@ class Trainer:
         # markers (completed batches and epoch-start random state) into the
         # training epoch loop. The module and callback load hooks fire last so
         # they observe the fully restored payload.
-        checkpoint: CheckpointDict = self.strategy.load_checkpoint(
-            path,
-            weights_only
+        loaded_checkpoint: CheckpointDict = (
+            self.strategy.load_checkpoint(path, weights_only)
+            if checkpoint is None
+            else checkpoint
         )
-        self.precision_plugin.on_load_checkpoint(checkpoint)
+        self.precision_plugin.on_load_checkpoint(loaded_checkpoint)
         epoch: int
         global_step: int
         completed_batches: int
         total_batch_idx: int
         epoch_rng_state: CheckpointDict | None
         epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state = CheckpointState.restore(
-            checkpoint=checkpoint,
+            checkpoint=loaded_checkpoint,
             model=module,
             optimizers=(self.optimizers if self.state.stage == "fit" else []),
             scheduler=(self.scheduler if self.state.stage == "fit" else None),
             schedulers=(self.schedulers if self.state.stage == "fit" else []),
             callbacks=self.callbacks,
             datamodule=self.datamodule,
-            precision_plugin=self.precision_plugin
+            precision_plugin=self.precision_plugin,
+            restore_datamodule_state=restore_datamodule_state
         )
         self.state.load_state_dict({"current_epoch": epoch, "global_step": global_step})
         module._current_epoch = epoch
@@ -2238,7 +2321,7 @@ class Trainer:
                 self.fit_loop.epoch_loop._total_batches_processed = total_batch_idx + 1
             if epoch_rng_state is not None:
                 self.fit_loop.epoch_loop._resume_rng_state = epoch_rng_state
-            checkpoint_rng_state: object | None = checkpoint.get("rng_state")
+            checkpoint_rng_state: object | None = loaded_checkpoint.get("rng_state")
             if completed_batches > 0 and isinstance(checkpoint_rng_state, dict):
                 self.fit_loop.epoch_loop._resume_checkpoint_rng_state = cast(
                     CheckpointDict,
@@ -2249,9 +2332,9 @@ class Trainer:
                 module,
                 "on_load_checkpoint",
                 module.on_load_checkpoint,
-                checkpoint
+                loaded_checkpoint
             )
-        self._call_callback_hooks(module, "on_load_checkpoint", checkpoint)
+        self._call_callback_hooks(module, "on_load_checkpoint", loaded_checkpoint)
 
     def _select_checkpoint_path(
         self,

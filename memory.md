@@ -239,3 +239,14 @@
     6. Cluster environments are runtime topology authorities. Local launch may set rank and world size, while externally managed execution must retain its supplied ranks and rendezvous values and be checked against the configured device and node topology.
     7. The standard map-location contract includes callable and mapping forms in addition to device and string values. Narrowing this parameter would silently break custom checkpoint consumers even when ordinary CPU restoration passes.
     8. Default remote protocol support and concrete scheduler environments are separate integrations above the core extension contract and must remain explicit gaps until executable behavior exists.
+
+| Memory | Dataloader Reload and Resume Semantics | Date: 19 August 2026 | Time: 06:04 PM | Name: Ghost |
+
+    1. Reload cadence must be measured from the epoch in which a loader was actually requested. Absolute epoch modulo fails after checkpoint continuation and incorrectly couples validation construction to training cadence.
+    2. Training and validation require separate reload coordinates because validation may run less frequently, may run several times within one epoch, and may execute once during sanity checking before real training begins.
+    3. A sanity loader counts as the validation reload anchor only when the current epoch is validation-eligible. Otherwise the first scheduled validation must request a fresh loader even when the sanity loader object still exists.
+    4. Checkpoint progress and datamodule state must be available before `train_dataloader()` executes. Loading the payload once, exposing its progress coordinate early, restoring data state after setup, and completing model and optimizer restoration later avoids duplicate I/O and stale loader construction.
+    5. `DataModule.trainer` is a public extension dependency rather than a convenience attribute. It must be attached before data setup and loader hooks and restored in the multiprocessing parent alongside the module's Trainer reference.
+    6. Every new loader must pass through the same validation, overfit sampling, distributed sampling, worker warning, rank synchronization, and effective-length path. Reloading through a smaller duplicate branch causes sampler and horizon drift.
+    7. Disabled training and validation paths must not request their loaders. Lazy construction prevents unused hooks from raising or performing expensive work and aligns capability detection with overridden step and dataloader methods.
+    8. Real execution matched the pinned infrequent and frequent validation matrices, relative checkpoint cadence, one-read custom checkpoint I/O, dynamic lengths, custom batch samplers, failure teardown, MPS, Gloo, and every supported local launch model.

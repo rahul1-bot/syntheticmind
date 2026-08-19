@@ -176,7 +176,8 @@ class CheckpointState:
         schedulers: list[_SchedulerInstance] | None,
         callbacks: list[Callback],
         datamodule: DataModule | None = None,
-        precision_plugin: Precision | None = None
+        precision_plugin: Precision | None = None,
+        restore_datamodule_state: bool = True
     ) -> tuple[int, int, int, int, CheckpointDict | None]:
         # Rehydrates live objects from the payload and returns the resume
         # coordinates (epoch, global step, completed batches, epoch RNG state).
@@ -242,12 +243,8 @@ class CheckpointState:
             if key in callback_states:
                 callback.load_state_dict(callback_states[key])
 
-        datamodule_state_raw: CheckpointValue | None = checkpoint.get(
-            type(datamodule).__qualname__ if datamodule is not None else "",
-            checkpoint.get("datamodule_state_dict")
-        )
-        if datamodule is not None and isinstance(datamodule_state_raw, dict):
-            datamodule.load_state_dict(cast(StateDict, datamodule_state_raw))
+        if datamodule is not None and restore_datamodule_state:
+            cls.load_datamodule_state(checkpoint, datamodule)
 
         if precision_plugin is not None:
             precision_state_raw: CheckpointValue | None = checkpoint.get(
@@ -271,6 +268,18 @@ class CheckpointState:
             else None
         )
         return epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state
+
+    @staticmethod
+    def load_datamodule_state(
+        checkpoint: CheckpointDict,
+        datamodule: DataModule
+    ) -> None:
+        datamodule_state_raw: CheckpointValue | None = checkpoint.get(
+            type(datamodule).__qualname__,
+            checkpoint.get("datamodule_state_dict")
+        )
+        if isinstance(datamodule_state_raw, dict):
+            datamodule.load_state_dict(cast(StateDict, datamodule_state_raw))
 
     @staticmethod
     def _integer_value(value: CheckpointValue | None, default: int) -> int:

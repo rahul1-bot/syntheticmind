@@ -185,3 +185,11 @@
     3. Checkpoint persistence now crosses one strategy-owned I/O boundary, including asynchronous snapshots and transactional failure handling; distributed rendezvous and ranks cross one cluster-environment boundary; synchronized layers cross one reversible fit-only boundary.
     4. Local, MPS, forked, spawned, subprocess, and externally launched execution verify that plugin composition survives the supported process models rather than merely passing constructor inspection.
     5. Remote default storage and managed scheduler environments remain truthful future work. The next dependency-ordered Trainer boundary is `reload_dataloaders_every_n_epochs`.
+
+| Strategic Note | Dataloader Reload Ownership | Date: 19 August 2026 | Time: 06:04 PM | Name: Ghost |
+
+    1. ✅ Dataloader reload behavior is now an executable lifecycle contract rather than an absolute epoch-modulo shortcut. Training and validation each advance from their own last real loader construction and therefore remain correct under infrequent validation and checkpoint continuation.
+    2. Validation data is lazy during fit and is not rebuilt merely because the training loader changed. Sanity checking, repeated validation inside one epoch, disabled validation, and missing validation overrides retain distinct standard meanings.
+    3. The standard `DataModule.trainer` attachment is available inside data hooks and survives multiprocessing reconciliation, allowing inherited datamodules to inspect epoch, stage, rank, and Trainer configuration through the expected extension surface.
+    4. Loader construction remains SyntheticMind-owned behind one focused internal boundary while preserving established public hook names, return expectations, sampler behavior, batch horizons, and failure semantics.
+    5. CPU, MPS, external Gloo, local fork, spawn, and subprocess evidence establishes the supported execution contract; real CUDA remains unavailable. The next dependency-ordered parameter boundary is `default_root_dir`.

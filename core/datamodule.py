@@ -27,10 +27,14 @@
 # Author: Rahul Sawhney
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
 
 from syntheticmind.utilities.types import Batch, StateDict, TrainerStage
+
+if TYPE_CHECKING:
+    from syntheticmind.core.trainer import Trainer
 
 __all__: list[str] = ["DataModule", "DatasetDataModule"]
 
@@ -76,6 +80,9 @@ class DataModule:
     #         def teardown(self, stage: TrainerStage) -> None:
     #             # Release stage-local resources.
     #             ...
+    def __init__(self) -> None:
+        self.trainer: Trainer | None = None
+
     def prepare_data(self) -> None:
         # Invoked once before dataloaders are requested, for work that must not
         # run in every process, such as downloading or one-time preprocessing.
@@ -219,6 +226,7 @@ class DatasetDataModule(DataModule):
         batch_size: int = 1,
         num_workers: int = 0
     ) -> None:
+        super().__init__()
         # Validates the loader parameters and stores the per-stage datasets;
         # absent datasets simply leave their stages unconfigured.
         if batch_size < 1:

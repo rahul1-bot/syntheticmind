@@ -33,7 +33,7 @@
 from typing import TYPE_CHECKING
 
 import torch
-from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
+from torch.utils.data import DataLoader, DistributedSampler
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpoint import Checkpoint
@@ -112,49 +112,7 @@ class FitLoop(Loop):
             # Optional dataloader reload: rebuild from the datamodule at the
             # configured epoch interval, re-wrap for distributed execution,
             # and refresh the trainer's cached batch totals to match.
-            if trainer.reload_dataloaders_every_n_epochs > 0 and epoch > 0:
-                if epoch % trainer.reload_dataloaders_every_n_epochs == 0:
-                    assert trainer.datamodule is not None
-                    with trainer.profiler.profile("setup_train_dataloader"):
-                        trainer.train_dataloader = trainer._call_datamodule_hook(
-                            trainer.datamodule,
-                            "train_dataloader",
-                            trainer.datamodule.train_dataloader
-                        )
-
-                    if trainer.overfit_batches:
-                        trainer.train_dataloader = trainer._prepare_overfit_dataloader(
-                            trainer.train_dataloader,
-                            "train"
-                        )
-
-                    if trainer.use_distributed_sampler and trainer.strategy.is_distributed:
-                        if not isinstance(trainer.train_dataloader.dataset, IterableDataset):
-                            trainer.train_dataloader = trainer._wrap_with_distributed_sampler(
-                                trainer.train_dataloader,
-                                shuffle=not bool(trainer.overfit_batches)
-                            )
-                    trainer._total_train_batches = trainer._safe_len(trainer.train_dataloader)
-
-                    if trainer.val_dataloader is not None:
-                        with trainer.profiler.profile("setup_val_dataloader"):
-                            trainer.val_dataloader = trainer._call_datamodule_hook(
-                                trainer.datamodule,
-                                "val_dataloader",
-                                trainer.datamodule.val_dataloader
-                            )
-                        if trainer.overfit_batches:
-                            trainer.val_dataloader = trainer._prepare_overfit_dataloader(
-                                trainer.val_dataloader,
-                                "val"
-                            )
-                        if trainer.use_distributed_sampler and trainer.strategy.is_distributed:
-                            if not isinstance(trainer.val_dataloader.dataset, IterableDataset):
-                                trainer.val_dataloader = trainer._wrap_with_distributed_sampler(
-                                    trainer.val_dataloader, shuffle=False
-                                )
-                        trainer._total_val_batches = trainer._safe_len(trainer.val_dataloader)
-                    trainer._configure_validation_schedule(reset_time=False)
+            trainer._ensure_train_dataloader()
 
             # DistributedSampler derives its shuffle permutation from the
             # epoch number; seeding it every epoch prevents repeating the

@@ -88,3 +88,12 @@
     3. ✅ Focused verification covers signature and conflict matrices, local and custom checkpoint I/O, map-location forms, repeated and failed asynchronous execution, save-last links, replacement precision modules, direct strategy configuration, CPU, MPS, fork, spawn, subprocess, and external Gloo execution.
     4. Default remote protocol storage, scheduler-specific cluster environments, and real CUDA synchronized batch normalization remain open capabilities rather than claimed parity.
     5. The next dependency-ordered phase is the standard `reload_dataloaders_every_n_epochs` Trainer contract.
+
+| Progress Complete | Standard Dataloader Reload Capability | Date: 19 August 2026 | Time: 06:04 PM | Name: Ghost |
+
+    1. ✅ The pinned `reload_dataloaders_every_n_epochs` parameter name, position, default, strict value validation, and independent training and validation cadence are implemented.
+    2. ✅ Fit now requests training data only for an enabled training path and validation data only when sanity or scheduled validation executes; repeated validation within one epoch reuses the same loader.
+    3. ✅ Checkpoint continuation exposes the restored epoch and datamodule state before loader construction, loads custom checkpoint I/O once, and schedules later reloads relative to the resumed loader epoch.
+    4. ✅ Centralized loader reconstruction preserves overfit behavior, compatible custom batch samplers, distributed sampling and sampler epochs, effective batch totals, rank barriers, actionable worker warnings, and primary exception identity.
+    5. ✅ `DataModule.trainer` is attached across all public stages and multiprocessing parent restoration. Focused CPU, MPS, external Gloo, fork, spawn, subprocess, repeated-fit, dynamic-length, failure, signature, compilation, and targeted type-checking probes pass without invoking a linter.
+    6. Real CUDA execution remains hardware-bounded. The next dependency-ordered phase is the pinned `default_root_dir` contract and its interaction with logger, checkpoint, profiler, and distributed artifact ownership.

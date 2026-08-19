@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpoint import Checkpoint
@@ -119,6 +119,8 @@ class EvaluationLoop(Loop):
             trainer._reset_progress_bar_metrics(running_stage)
 
         dataloader: DataLoader = self._get_dataloader()  # type: ignore[type-arg]
+        if isinstance(dataloader.sampler, DistributedSampler):
+            dataloader.sampler.set_epoch(state.current_epoch)
         total_batches: int | None = self._safe_len(dataloader)
         max_batches: int | None = self._resolve_limit_batches(total_batches)
         if trainer._sanity_checking and trainer.num_sanity_val_steps != float("inf"):
@@ -477,6 +479,8 @@ class EvaluationLoop(Loop):
         # corresponding dataloader exists before this loop runs.
         trainer: Trainer = self.trainer
         if self.stage == "validate":
+            if trainer.state.stage == "fit":
+                trainer._ensure_val_dataloader()
             assert trainer.val_dataloader is not None
             return trainer.val_dataloader
         assert trainer.test_dataloader is not None

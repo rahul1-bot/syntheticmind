@@ -80,6 +80,7 @@ class _WorkerStateTransfer:
         trainer.module = module
         trainer.datamodule = datamodule
         module._trainer = trainer
+        datamodule.trainer = trainer
         trainer.state.load_state_dict(worker_output.trainer_state_dict)
         if worker_output.trainer_state_dict.get("status") == "interrupted":
             trainer.state.interrupt()
