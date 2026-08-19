@@ -11,8 +11,9 @@
     1. Machine-learning users carry established expectations for terms such as `model`, `max_steps`, `val_check_interval`, `ckpt_path`, `devices`, `precision`, and `global_step`.
     2. Reusing a standard term with different semantics is as dangerous as inventing a replacement term because both create silent operational confusion.
     3. Trainer comparisons must therefore inspect parameter names, accepted values, defaults, validation, lifecycle effects, and checkpoint behavior rather than comparing signatures mechanically.
-    4. Core PyTorch Lightning user capabilities are the target except for explicit exclusions such as Fabric in the current phase. Internal framework baggage, public-product ceremony, documentation machinery, and release infrastructure do not need to be copied merely to achieve functional parity.
+    4. Core PyTorch Lightning user capabilities are the target except for explicit exclusions such as Fabric in the current phase. Lightning-branded names, internal framework baggage, public-product ceremony, documentation machinery, and release infrastructure do not become SyntheticMind requirements merely because the reference contains them.
     5. The generic Python guidelines at `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md` remain the implementation baseline for typing, boundaries, validation, composition, and maintainability.
+    6. Vocabulary has three categories: universal machine-learning or PyTorch terms that should be preserved, descriptive extension contracts that require deliberate adoption, and framework-owned branding that must be renamed or excluded. Reference parity never collapses these categories.
 
 | Memory | Trainer Audit Evidence | Date: 19 August 2026 | Time: 04:48 AM | Name: Ghost |
 
@@ -36,10 +37,10 @@
     7. Inheritance order and method-resolution order are public behavior whenever users subclass the harness. Cooperative initialization, `super()` chains, override discovery, signatures, defaults, and return types must be verified together rather than reviewing method names in isolation.
     8. Industry-standard machine-learning key terms and naming conventions are mandatory at every public boundary. An internal abstraction may be cleaner than Lightning's implementation, but it may not force users to translate an invented vocabulary for an established concept.
 
-| Memory | Callback Extension Contract | Date: 19 August 2026 | Time: 09:32 AM | Name: Ghost |
+| Memory | Callback Extension Contract | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
 
-    1. The SyntheticMind `Callback` method surface now contains every method in the pinned PyTorch Lightning base contract with identical positional parameter names and defaults; the local `__repr__` remains a harmless additional method.
-    2. Every public callback hook uses the standard `pl_module` model parameter. Validation and test epoch-end hooks receive only `trainer` and `pl_module`, and reduced values are read through `trainer.callback_metrics` instead of a project-specific positional mapping.
+    1. The current SyntheticMind `Callback` method surface contains every method in the pinned PyTorch Lightning base contract with matching positional shapes and defaults; this is implementation evidence, not proof that every copied name belongs in SyntheticMind's final public API.
+    2. The current public callback hooks use `pl_module`, which is Lightning-owned branding rather than universal machine-learning terminology. The callback layer requires an ownership audit and should use `module` unless a narrower compatibility requirement justifies an explicit alias.
     3. Evaluation publishes reduced metrics before ordinary epoch-end callbacks, merges metrics logged by the module epoch-end hook, and republishes them before monitoring callbacks. This preserves the standard signature while allowing EarlyStopping and ModelCheckpoint to observe module-contributed values.
     4. Callback state identity follows the qualified-class-name convention, parameterized keys use the standard class-qualified dictionary representation, and `_legacy_state_key` preserves the established compatibility surface.
     5. Python 3.14 callback modules require deferred annotations because `Trainer` is imported only during type checking to avoid circular imports. Without deferred annotations, standard `inspect.signature()` calls evaluate the missing runtime name and fail, obstructing extension discovery and override tooling.
@@ -55,12 +56,21 @@
     6. Package installation is authorized through `python -m pip install --break-system-packages` when a verification dependency is genuinely required. Diagnose the existing package graph first and avoid broad global repairs when a targeted pin or isolated environment answers the engineering question safely.
     7. Ruff and other linters are not part of this program. Guideline compliance is reviewed directly, while behavior is proven through runtime assertions, end-to-end flows, source-backed signature and inheritance inspection, exception probes, and compilation.
 
-| Memory | Optimizer and Scheduler Compatibility | Date: 19 August 2026 | Time: 10:39 AM | Name: Ghost |
+| Memory | Optimizer and Scheduler Compatibility | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
 
     1. Optimizer compatibility is an execution contract rather than a parser contract. Correctness requires the closure to compose training-step execution, gradient clearing, backward, pre-step inspection, clipping, scaler handling, and the raw optimizer step in the expected order.
-    2. `global_step` now advances once for each real manual `LightningOptimizer.step()` invocation and once for each loop-owned automatic optimizer step. It no longer advances merely because a manual-optimization batch completed.
+    2. `global_step` now advances once for each real managed-optimizer `step()` invocation in manual optimization and once for each loop-owned automatic optimizer step. It no longer advances merely because a manual-optimization batch completed.
     3. Step schedulers use the training batch index and configured frequency, while epoch schedulers split non-plateau updates before validation from plateau updates after monitored metrics are available. Scheduler stepping remains overridable through `lr_scheduler_step`.
     4. Python 3.14 evaluates deferred class annotations during runtime signature inspection. A public annotation using bare `float` inside a `torch.nn.Module` subclass can resolve to the inherited `Module.float` method; `builtins.float` is required at that boundary to preserve introspection.
     5. A preconstructed optimizer may already contain CPU state before its model is moved. Recursive state movement must preserve the top-level `step` state while moving tensors such as Adagrad accumulators to the selected device.
-    6. Dynamic optimizer wrapping is required for both standard extension behavior and `isinstance` compatibility. The wrapper must expose the raw optimizer through `optimizer`, delegate ordinary optimizer attributes, and route `step` through Trainer-owned precision and progress handling.
+    6. Dynamic optimizer wrapping is required for managed extension behavior and `isinstance` compatibility. The public wrapper is a SyntheticMind-owned adapter named `SyntheticOptimizer`; it must expose the raw `torch.optim.Optimizer` through `optimizer`, delegate ordinary optimizer attributes, and route `step` through Trainer-owned precision and progress handling.
     7. The distributed unsized-dataloader accumulation tail remains unresolved: a final batch executed under `no_sync()` can still reach the tail optimizer step with rank-local gradients. It must be corrected in the distributed execution phase rather than concealed by optimizer-layer success.
+
+| Memory | Console Experience Audit | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+
+    1. The current human-facing console is a collection of independent `tqdm` bars and Loguru sentences. Training, validation, and testing have bars; prediction has no progress surface, and stage summaries are not presented through one coherent renderer.
+    2. Useful telemetry already exists below the presentation layer: stage and batch duration, dataloader wait and iterator startup, throughput, CPU utilization, CUDA and MPS memory, CUDA utilization and power, optimizer progress, logged metrics, checkpoints, and estimated stepping batches.
+    3. The all-stage smoke exposed terminal collisions between Loguru output and live bars, stale training metrics appearing in validation postfixes, unbounded metric strings destroying narrow layouts, and raw logger metadata overwhelming the information hierarchy.
+    4. `TimerCallback` currently reuses one timestamp for training and validation. Epoch-end validation overwrites the training start timestamp, causing false near-zero epoch training durations; sanity validation is also included in its validation total. Presentation work must not beautify these incorrect measurements.
+    5. Test timing is not printed by `TimerCallback`, prediction has neither a progress bar nor a console duration, and final summaries do not report batch latency, throughput, best metrics, device utilization, checkpoint destination, or termination reason together.
+    6. The next console design must separate structured runtime events from rendering, keep experiment logging independent from terminal presentation, support plain and non-interactive terminals, render only on global rank zero, and degrade cleanly when totals or hardware counters are unavailable.

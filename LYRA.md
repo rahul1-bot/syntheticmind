@@ -17,7 +17,7 @@
 | Strategic Note | Capability Parity and Ordered Hardening | Date: 19 August 2026 | Time: 05:19 AM | Name: Ghost |
 
     1. SyntheticMind's end state is full user-facing capability parity with core PyTorch Lightning, with Fabric, public documentation, release work, and replication of the upstream PyTorch Lightning test suite excluded.
-    2. Established machine-learning variable names, method names, parameter contracts, state meanings, and inherited extension hooks are compatibility requirements rather than cosmetic preferences.
+    2. Established machine-learning and PyTorch variable names, method names, parameter contracts, state meanings, and inherited extension hooks are compatibility requirements rather than cosmetic preferences. Lightning-specific branding is reference ownership, not an industry convention.
     3. SyntheticMind will preserve its own internal architecture and apply the generic Python guidelines while matching the external semantics that machine-learning practitioners already understand.
     4. Exceptions require genuinely different semantics or algorithms and an explicit rationale; private terminology must never disguise an established concept.
     5. Hardening proceeds sequentially from source-backed compatibility contracts through foundational runtime layers. No isolated feature will be inserted into the middle of an unmapped execution path.
@@ -37,10 +37,18 @@
     2. `code-guidelines.md` governs every implementation decision, while PyTorch and PyTorch Lightning conventions govern public concepts that users already understand.
     3. Ruff and other linters are excluded. Verification proceeds through focused executable behavior, signature and inheritance inspection, source comparison, failure-path probes, and compilation.
 
-| Strategic Note | Optimization Foundation | Date: 19 August 2026 | Time: 10:39 AM | Name: Ghost |
+| Strategic Note | Optimization Foundation | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
 
-    1. The optimization boundary now speaks the established PyTorch Lightning vocabulary and preserves the signatures that inherited models override, including optimizer access, scheduler access, manual backward, optimizer stepping, zeroing, clipping, and scheduler stepping.
+    1. The optimization boundary must preserve meaningful optimizer access, scheduler access, manual backward, optimizer stepping, zeroing, clipping, and scheduler stepping contracts without importing Lightning's product identity.
     2. The accepted `configure_optimizers` structures are normalized behind a private parser, allowing SyntheticMind to retain a smaller internal architecture without changing the public machine-learning contract.
     3. Closure execution, manual multi-optimizer behavior, parameter toggling, scheduler cadence, mixed-precision ordering, checkpoint restoration, and optimizer-state device placement are executable capabilities rather than declared placeholders.
-    4. The immediate compliance correction is removal of callback-layer future-annotation imports through runtime-safe Python 3.14 boundaries. Full `Module` surface reconstruction resumes after that defect is closed.
-    5. Existing comments remain untouched, new code comments remain prohibited, and no linter may substitute for direct guideline review and behavioral evidence.
+    4. `LightningOptimizer` is a Lightning-owned managed wrapper rather than an industry optimizer term. SyntheticMind's equivalent public wrapper is `SyntheticOptimizer`, with the actual algorithm remaining a `torch.optim.Optimizer`.
+    5. The immediate correction removes `LightningOptimizer`, `use_pl_optimizer`, `_lightning_optimizers`, and comparable brand leakage before callback future-annotation compliance and full `Module` surface reconstruction resume.
+    6. Existing comments remain untouched, new code comments remain prohibited, and no linter may substitute for direct guideline review and behavioral evidence.
+
+| Strategic Note | Console Experience Boundary | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+
+    1. SyntheticMind's terminal experience should operate as a coherent live run console rather than independent progress bars interrupted by raw logger sentences.
+    2. Visual polish is subordinate to measurement truth. The incorrect shared timer state, sanity-time contamination, stale metric routing, and missing prediction presentation must be corrected before a richer renderer is trusted.
+    3. Existing runtime telemetry should feed the console through structured events so terminal rendering, CSV and TensorBoard persistence, callbacks, and distributed execution remain separate concerns.
+    4. No console implementation change is authorized by the current brainstorming pass. The renderer, information density, refresh behavior, and fallback mode require alignment before code modification begins.
