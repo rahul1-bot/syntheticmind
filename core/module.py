@@ -417,7 +417,20 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, nn.Module):
         #             MetricLoggingConfiguration(progress_bar=True, on_step=True)
         #         )
         #         return {"loss": loss}
-        if self._trainer is None or self._running_stage is None:
+        if self._trainer is None:
+            raise MisconfigurationError(
+                "self.log() can only be called from within a hook or step method "
+                "during trainer.fit(), trainer.validate(), or trainer.test()."
+            )
+        if self._trainer.barebones:
+            if self._trainer.is_global_zero:
+                warnings.warn(
+                    "self.log() is disabled because Trainer(barebones=True) is configured.",
+                    RuntimeWarning,
+                    stacklevel=2
+                )
+            return
+        if self._running_stage is None:
             raise MisconfigurationError(
                 "self.log() can only be called from within a hook or step method "
                 "during trainer.fit(), trainer.validate(), or trainer.test()."

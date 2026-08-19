@@ -169,3 +169,11 @@
     4. Exception and teardown handling preserve the causal runtime failure and close profiler state deterministically, including repeated stages and failures arising after the report has been written.
     5. CPU, MPS, and all supported local Gloo launch paths establish the available runtime contract; CUDA and XLA execution remain bounded by unavailable hardware or optional dependencies rather than being falsely claimed.
     6. The next dependency-ordered phase is the standard `barebones` Trainer mode and its coordinated disabling of nonessential runtime features.
+
+| Strategic Note | Barebones Overhead Isolation | Date: 19 August 2026 | Time: 05:20 PM | Name: Ghost |
+
+    1. ✅ Barebones mode now provides an executable framework-overhead baseline instead of a cosmetic flag, disabling every standard nonessential Trainer service through one validated constructor contract.
+    2. Model logging is suppressed at its public entry point, preventing inherited `log` and `log_dict` calls from rebuilding metric work while preserving an actionable rank-zero warning.
+    3. The mode does not amputate ordinary training semantics: callbacks, optimization, precision, distribution, validation, and wall-clock termination remain available unless their specific service is part of the standard exclusion set.
+    4. Minimal stage announcements retain operational visibility without reviving progress rendering or dense framework chatter, and distributed execution emits the announcement from global rank zero only.
+    5. Artifact isolation, exception propagation, teardown, explicit callback conflicts, CPU, MPS, and Gloo execution are verified. The next dependency-ordered boundary is the standard `plugins` parameter and the extension families it composes with strategies.

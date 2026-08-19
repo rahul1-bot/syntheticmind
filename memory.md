@@ -218,3 +218,13 @@
     5. Artifact ownership follows the first logger only as a directory authority; profiler reports are not terminal progress metrics or experiment-log events. Rank suffixes prevent distributed writers from colliding, and the disabled pass-through path must not create directories.
     6. PyTorch profiler schedules advance on standard step-hook boundaries, module-name recording follows the actual strategy-connected module, and repeated Trainer stages require complete recording and trace reset without discarding the reusable profiler object.
     7. Hardware evidence remains explicit: MPS validates PyTorch operator recording on this MacBook, Gloo validates rank-separated artifacts, and CUDA NVTX plus XLA traces require later execution on the corresponding runtime.
+
+| Memory | Barebones Contract Boundaries | Date: 19 August 2026 | Time: 05:20 PM | Name: Ghost |
+
+    1. Barebones mode means measuring Trainer overhead with nonessential services removed; it does not mean bypassing optimization, lifecycle hooks, precision, distributed coordination, or user callbacks.
+    2. Constructor normalization and runtime suppression are both required. Disabling default loggers is insufficient when `Module.log` can still allocate, reduce, or dispatch metrics inside a batch loop.
+    3. Explicit enablement of a prohibited service must fail rather than be silently discarded because silent normalization conceals a contradictory benchmark configuration.
+    4. User callback ownership remains precise: checkpoint and progress callbacks conflict with their disabled Trainer controls, an explicit model-summary callback remains legal, and a `Timer` introduced by `max_time` remains a termination capability rather than presentation overhead.
+    5. Logging suppression must occur before ordinary hook-context and prediction validation so inherited model code becomes a warning no-operation consistently across every execution context.
+    6. A missing progress bar requires a minimal run signal to distinguish deliberate quiet execution from a hung process. The signal must remain rank-zero, stable in redirected output, and independent of experiment logging.
+    7. The standard plugin boundary is broader than precision alone. Its next audit must distinguish universal extension concepts from framework-owned branding before adding checkpoint-I/O, cluster-environment, or layer-synchronization capabilities.

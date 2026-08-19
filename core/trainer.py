@@ -100,6 +100,7 @@ from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.single_device import SingleDeviceStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.checkpoint import load_checkpoint
+from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
@@ -267,6 +268,7 @@ class Trainer:
         use_distributed_sampler: bool = True,
         profiler: Profiler | str | None = None,
         detect_anomaly: bool = False,
+        barebones: bool = False,
         plugins: Precision | list[Precision] | None = None,
         sync_batchnorm: bool = False,
         reload_dataloaders_every_n_epochs: int = 0,
@@ -419,6 +421,12 @@ class Trainer:
                 "`enable_model_summary` must be a bool or None, got "
                 f"{enable_model_summary!r}."
             )
+        if type(detect_anomaly) is not bool:
+            raise TypeError(
+                f"`detect_anomaly` must be a bool, got {detect_anomaly!r}."
+            )
+        if type(barebones) is not bool:
+            raise TypeError(f"`barebones` must be a bool, got {barebones!r}.")
         if (
             log_every_n_steps is not None
             and (
@@ -429,6 +437,58 @@ class Trainer:
             raise MisconfigurationError(
                 "`log_every_n_steps` must be a non-negative integer or None."
             )
+        if barebones:
+            if enable_checkpointing:
+                raise ValueError(
+                    f"`Trainer(barebones=True, enable_checkpointing={enable_checkpointing!r})` was passed. "
+                    "Checkpointing can impact raw speed and is disabled in barebones mode."
+                )
+            enable_checkpointing = False
+            if logger is not None and logger is not False:
+                raise ValueError(
+                    f"`Trainer(barebones=True, logger={logger!r})` was passed. "
+                    "Logging can impact raw speed and is disabled in barebones mode."
+                )
+            logger = False
+            if enable_progress_bar:
+                raise ValueError(
+                    f"`Trainer(barebones=True, enable_progress_bar={enable_progress_bar!r})` was passed. "
+                    "The progress bar can impact raw speed and is disabled in barebones mode."
+                )
+            enable_progress_bar = False
+            if log_every_n_steps is not None and log_every_n_steps != 0:
+                raise ValueError(
+                    f"`Trainer(barebones=True, log_every_n_steps={log_every_n_steps!r})` was passed. "
+                    "Logging can impact raw speed and is disabled in barebones mode."
+                )
+            log_every_n_steps = 0
+            if enable_model_summary:
+                raise ValueError(
+                    f"`Trainer(barebones=True, enable_model_summary={enable_model_summary!r})` was passed. "
+                    "Model summary can impact raw speed and is disabled in barebones mode."
+                )
+            enable_model_summary = False
+            if num_sanity_val_steps is not None and num_sanity_val_steps != 0:
+                raise ValueError(
+                    f"`Trainer(barebones=True, num_sanity_val_steps={num_sanity_val_steps!r})` was passed. "
+                    "Sanity checking can impact raw speed and is disabled in barebones mode."
+                )
+            num_sanity_val_steps = 0
+            if resolved_fast_dev_run is not False and resolved_fast_dev_run != 0:
+                raise ValueError(
+                    f"`Trainer(barebones=True, fast_dev_run={fast_dev_run!r})` was passed. "
+                    "Development runs are disabled in barebones mode."
+                )
+            if detect_anomaly:
+                raise ValueError(
+                    f"`Trainer(barebones=True, detect_anomaly={detect_anomaly!r})` was passed. "
+                    "Anomaly detection can impact raw speed and is disabled in barebones mode."
+                )
+            if profiler is not None:
+                raise ValueError(
+                    f"`Trainer(barebones=True, profiler={profiler!r})` was passed. "
+                    "Profiling can impact raw speed and is disabled in barebones mode."
+                )
         if callbacks is None:
             resolved_callbacks: list[Callback] = []
         elif isinstance(callbacks, Callback):
@@ -530,6 +590,7 @@ class Trainer:
         self.log_every_n_steps: int = resolved_log_every_n_steps
         self.enable_progress_bar: bool = resolved_enable_progress_bar
         self.enable_model_summary: bool = resolved_enable_model_summary
+        self.barebones: bool = barebones
         self.num_sanity_val_steps: int | float = resolved_num_sanity_val_steps
         self.fast_dev_run: int | bool = resolved_fast_dev_run
         self.overfit_batches: int | float = resolved_overfit_batches
@@ -538,10 +599,6 @@ class Trainer:
         if type(inference_mode) is not bool:
             raise TypeError(
                 f"`inference_mode` must be a bool, got {inference_mode!r}."
-            )
-        if type(detect_anomaly) is not bool:
-            raise TypeError(
-                f"`detect_anomaly` must be a bool, got {detect_anomaly!r}."
             )
         configure_torch_flags(deterministic, benchmark)
 
@@ -853,6 +910,7 @@ class Trainer:
             # barrier so no process enters setup against partially prepared
             # data.
             self.strategy.setup_environment()
+            self._announce_barebones_stage("fit")
             self._setup_profiler("fit", module)
 
             if is_rank_zero():
@@ -1185,6 +1243,7 @@ class Trainer:
         )
         try:
             self.strategy.setup_environment()
+            self._announce_barebones_stage("validate")
             self._setup_profiler("validate", module)
 
             if is_rank_zero():
@@ -1315,6 +1374,7 @@ class Trainer:
         )
         try:
             self.strategy.setup_environment()
+            self._announce_barebones_stage("test")
             self._setup_profiler("test", module)
 
             if is_rank_zero():
@@ -1453,6 +1513,7 @@ class Trainer:
         )
         try:
             self.strategy.setup_environment()
+            self._announce_barebones_stage("predict")
             self._setup_profiler("predict", module)
 
             if is_rank_zero():
@@ -1624,6 +1685,13 @@ class Trainer:
         self.validate_loop.trainer = self
         self.test_loop.trainer = self
         self.predict_loop.trainer = self
+
+    def _announce_barebones_stage(self, stage: TrainerStage) -> None:
+        if not self.barebones or not self.is_global_zero:
+            return
+        ConsoleRenderer().write_permanent(
+            f"syntheticmind · {stage} · barebones"
+        )
 
     def _setup_profiler(self, stage: TrainerStage, module: Module) -> None:
         if self._profiler_is_setup:
