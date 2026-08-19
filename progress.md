@@ -24,4 +24,5 @@
     14. Every completed phase requires focused verification, diff review, a local `dev` commit, a push to `origin/dev`, and confirmation that both branch references match before work advances.
     15. Public inheritance chains, method-resolution order, override names, signatures, parameter names and meanings, defaults, return contracts, and lifecycle behavior are mandatory parity evidence for every foundational class.
     16. Ruff and other linters are excluded. Verification uses focused runtime assertions, end-to-end execution, signature and inheritance inspection, source comparison, exception-path probes, and Python compilation.
-    17. ✅ The current console path was audited through complete callback and logger inspection plus an all-stage runtime smoke. No training UI source was changed; renderer selection remains a design decision.
+    17. ✅ The current console path was audited through complete callback and logger inspection plus an all-stage runtime smoke, and the minimalist status-line presentation contract is approved for implementation.
+    18. The active implementation sequence is framework ownership correction, timer and metric-routing repair, one-line TTY and plain-output rendering, focused all-stage verification, then continuation through the remaining foundational `Module` and Trainer capability surface.

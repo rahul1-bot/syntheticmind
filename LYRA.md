@@ -46,9 +46,10 @@
     5. The immediate correction removes `LightningOptimizer`, `use_pl_optimizer`, `_lightning_optimizers`, and comparable brand leakage before callback future-annotation compliance and full `Module` surface reconstruction resume.
     6. Existing comments remain untouched, new code comments remain prohibited, and no linter may substitute for direct guideline review and behavioral evidence.
 
-| Strategic Note | Console Experience Boundary | Date: 19 August 2026 | Time: 11:10 AM | Name: Ghost |
+| Strategic Note | Console Experience Boundary | Date: 19 August 2026 | Time: 11:28 AM | Name: Ghost |
 
     1. SyntheticMind's terminal experience should operate as a coherent live run console rather than independent progress bars interrupted by raw logger sentences.
     2. Visual polish is subordinate to measurement truth. The incorrect shared timer state, sanity-time contamination, stale metric routing, and missing prediction presentation must be corrected before a richer renderer is trusted.
     3. Existing runtime telemetry should feed the console through structured events so terminal rendering, CSV and TensorBoard persistence, callbacks, and distributed execution remain separate concerns.
-    4. No console implementation change is authorized by the current brainstorming pass. The renderer, information density, refresh behavior, and fallback mode require alignment before code modification begins.
+    4. The approved renderer uses one active TTY line, one completed-epoch line, and one final stage line. It shows only stage, progress, at most two selected metrics, and honest ETA by default; all detailed telemetry stays in structured experiment outputs.
+    5. Non-interactive output remains stable plain text, distributed rendering remains rank-zero only, and unknown dataloader lengths produce counts rather than false percentages or ETA values.
