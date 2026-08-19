@@ -14,6 +14,9 @@
     3. The generic Python engineering rules governing this codebase are stored at `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md`.
     4. Public API terminology follows machine-learning conventions, while internal structure follows the generic Python guidelines. Any conflict must be resolved explicitly rather than allowing accidental architectural drift.
     5. The local PyTorch Lightning checkout under `docs/references/code/pytorch_lightning/pytorch-lightning` is read-only comparative material and is excluded from SyntheticMind's Git history with the complete `docs/` tree.
+    6. Public base classes are extension contracts. Their inheritance order, method-resolution order, cooperative `super()` behavior, overridable method names, parameter names and order, defaults, return contracts, invocation frequency, and lifecycle semantics must remain recognizable to experienced PyTorch and PyTorch Lightning users.
+    7. Industry-standard machine-learning concepts and key terms control the public vocabulary. Cosmetic aliases, renamed hooks, and project-specific substitutes for established concepts are prohibited because downstream users inherit these classes and override methods by name.
+    8. The complete `code-guidelines.md` is mandatory implementation policy rather than optional style guidance. New and modified code must be reviewed directly against it while preserving the stronger public compatibility boundary where inheritance and machine-learning conventions apply.
 
 | Repository Policy | Main and Development Branches | Date: 19 August 2026 | Time: 04:31 AM | Name: Ghost |
 
@@ -53,3 +56,10 @@
     5. A phase is complete only after its code is implemented, relevant behavior is verified, the diff is reviewed, and the commit is pushed so `dev` and `origin/dev` resolve to the same commit.
     6. Persistence does not permit speculative interfaces, copied baggage, or false completion. When evidence exposes a weak assumption, the implementation direction must be corrected and work must continue from the strongest supported design.
     7. Python dependencies may be installed when verification requires them, including global installation through `python -m pip install --break-system-packages`. The existing dependency graph must be inspected first, and targeted or isolated installation is preferred whenever a global change could destabilize unrelated workloads.
+
+| Verification Policy | Executable Evidence Without Linters | Date: 19 August 2026 | Time: 09:03 AM | Name: Ghost |
+
+    1. Ruff and other linting tools are excluded from the active hardening workflow and must not be invoked.
+    2. Compliance with `code-guidelines.md` is established through deliberate source review rather than automated lint output.
+    3. Capability claims require focused runtime assertions, end-to-end execution, exception-path probes, signature and method-resolution inspection, source-backed contract comparison, and Python compilation where relevant.
+    4. Verification must prioritize observable behavior, public compatibility, and inheritance safety. Passing a stylistic tool could never substitute for correct lifecycle semantics, parameter meaning, or override behavior.

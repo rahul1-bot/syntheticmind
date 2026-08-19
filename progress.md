@@ -18,3 +18,5 @@
     8. Subsequent `core/` work proceeds through `optimizer.py`, `datamodule.py`, the remaining `module.py` contracts, `trainer.py`, and package exports only after each preceding contract is understood, implemented, and verified.
     9. Existing source comments remain untouched, and no new source-code comments are introduced during the current phase.
     10. Every completed phase requires focused verification, diff review, a local `dev` commit, a push to `origin/dev`, and confirmation that both branch references match before work advances.
+    11. Public inheritance chains, method-resolution order, override names, signatures, parameter names and meanings, defaults, return contracts, and lifecycle behavior are mandatory parity evidence for every foundational class.
+    12. Ruff and other linters are excluded. Verification uses focused runtime assertions, end-to-end execution, signature and inheritance inspection, source comparison, exception-path probes, and Python compilation.
