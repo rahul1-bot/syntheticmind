@@ -56,11 +56,12 @@ class FitLoop(Loop):
     # epoch budget and attaches the configured TrainingEpochLoop before
     # execution; each run() invocation then iterates epochs until the budget
     # is exhausted or a cooperative stop is raised.
-    def __init__(self, max_epochs: int) -> None:
+    def __init__(self, min_epochs: int, max_epochs: int) -> None:
         # Binds the epoch budget. The epoch-loop slot is populated by the
         # trainer during its own construction, after the epoch loop has been
         # configured from the trainer arguments.
         super().__init__()
+        self.min_epochs: int = min_epochs
         self.max_epochs: int = max_epochs
         self.epoch_loop: TrainingEpochLoop | None = None
 
@@ -85,7 +86,12 @@ class FitLoop(Loop):
         assert self.epoch_loop is not None
         total_train_batches: int | None = trainer._total_train_batches
         max_train_batches: int | None = self.epoch_loop._resolve_limit_batches(total_train_batches)
-        if state.current_epoch >= self.max_epochs or max_train_batches == 0:
+        if (
+            self._max_epochs_reached(state)
+            or self._max_steps_reached(state)
+            or max_train_batches == 0
+            or (trainer.should_stop and self._can_stop_early(state))
+        ):
             return
 
         with module._hook_context("on_train_start"):
@@ -93,9 +99,10 @@ class FitLoop(Loop):
                 callback.on_train_start(trainer, module)
             module.on_train_start()
 
-        for epoch in range(state.current_epoch, self.max_epochs):
-            if self.should_stop:
+        while not self._max_epochs_reached(state) and not self._max_steps_reached(state):
+            if self.should_stop or (trainer.should_stop and self._can_stop_early(state)):
                 break
+            epoch: int = state.current_epoch
 
             # Optional dataloader reload: rebuild from the datamodule at the
             # configured epoch interval, re-wrap for distributed execution,
@@ -184,13 +191,30 @@ class FitLoop(Loop):
             # A stop raised at trainer level (early stopping, strategies)
             # propagates to the loop-local flag, ending the epoch sequence
             # cooperatively at the epoch boundary.
-            if state.should_stop:
+            if trainer.should_stop and self._can_stop_early(state):
                 self.should_stop: bool = True
 
         with module._hook_context("on_train_end"):
             for callback in callbacks:
                 callback.on_train_end(trainer, module)
             module.on_train_end()
+
+    def _max_epochs_reached(self, state: TrainerState) -> bool:
+        return self.max_epochs != -1 and state.current_epoch >= self.max_epochs
+
+    def _max_steps_reached(self, state: TrainerState) -> bool:
+        assert self.epoch_loop is not None
+        return self.epoch_loop.max_steps != -1 and state.global_step >= self.epoch_loop.max_steps
+
+    def _can_stop_early(self, state: TrainerState) -> bool:
+        assert self.epoch_loop is not None
+        return (
+            state.current_epoch >= self.min_epochs
+            and (
+                self.epoch_loop.min_steps is None
+                or state.global_step >= self.epoch_loop.min_steps
+            )
+        )
 
     def _flush_hook_metrics(self, module: Module, trainer: Trainer, state: TrainerState) -> None:
         # Emits metrics logged inside the module's on_train_epoch_end hook.

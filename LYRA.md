@@ -57,3 +57,12 @@
     7. ✅ One renderer now covers fit, validation, testing, and prediction; routine framework information no longer competes with the active line, and completed epochs are deferred across failure-prone hook boundaries before becoming permanent output.
     8. ✅ Trainer cleanup is now one exception-safe transaction. Strategy, datamodule, ordinary callbacks, module, and logger complete their cleanup attempts before the progress callback is permitted to declare a successful stage outcome.
     9. Runtime, setup, interruption, exit, exception-hook, and teardown failures preserve the first causal exception while retaining secondary failures as notes; module setup and teardown are now dispatched for every public stage and all stage markers clear after failure.
+
+| Strategic Note | Standard Training Limits | Date: 19 August 2026 | Time: 12:41 PM | Name: Ghost |
+
+    1. ✅ SyntheticMind now distinguishes finite epoch budgets, finite optimizer-step budgets, and explicit unlimited horizons using the standard `max_epochs` and `max_steps` meanings.
+    2. Minimum epoch and step requirements constrain only cooperative stopping. EarlyStopping may request termination immediately, but the fit continues until both minima are satisfied unless a hard maximum is reached first.
+    3. Automatic optimization, accumulation, manual managed optimizers, LBFGS closures, schedulers, and checkpoint continuation share one authoritative optimizer-step counter and termination boundary.
+    4. `Trainer.should_stop` is the public stop contract; loop state, EarlyStopping, and downstream callbacks no longer require a project-specific state access path.
+    5. Unlimited execution is represented honestly in step estimates and terminal epoch labels, while checkpoint operations remain quiet and atomic-save interruption leaves no temporary artifact.
+    6. The next parameter correction is validation scheduling: replace project-specific scope and end-validation controls with the established `val_check_interval` and `check_val_every_n_epoch` contract before expanding further.

@@ -171,12 +171,6 @@ class CheckpointState:
         if datamodule is not None and isinstance(datamodule_state_raw, dict):
             datamodule.load_state_dict(datamodule_state_raw)
 
-        metadata_raw: CheckpointValue | None = checkpoint.get("metadata")
-        metadata: CheckpointDict = metadata_raw if isinstance(metadata_raw, dict) else {}
-        if metadata:
-            from loguru import logger as log
-            log.info(f"Checkpoint metadata: torch={metadata.get('torch_version')}")
-
         epoch_value: CheckpointValue | None = checkpoint.get("epoch", 0)
         global_step_value: CheckpointValue | None = checkpoint.get("global_step", 0)
         completed_batches_value: CheckpointValue | None = checkpoint.get("completed_batches", 0)

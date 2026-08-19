@@ -95,6 +95,53 @@ __all__: list[str] = ["Trainer"]
 type _TeardownFailure = tuple[str, BaseException]
 
 
+def _resolve_training_limits(
+    max_epochs: int | None,
+    min_epochs: int | None,
+    max_steps: int,
+    min_steps: int | None
+) -> tuple[int, int]:
+    if max_epochs is not None and (
+        isinstance(max_epochs, bool) or not isinstance(max_epochs, int)
+    ):
+        raise TypeError(f"`max_epochs` must be an int or None, got {max_epochs!r}.")
+    if min_epochs is not None and (
+        isinstance(min_epochs, bool) or not isinstance(min_epochs, int)
+    ):
+        raise TypeError(f"`min_epochs` must be an int or None, got {min_epochs!r}.")
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int):
+        raise TypeError(f"`max_steps` must be an int, got {max_steps!r}.")
+    if min_steps is not None and (
+        isinstance(min_steps, bool) or not isinstance(min_steps, int)
+    ):
+        raise TypeError(f"`min_steps` must be an int or None, got {min_steps!r}.")
+    if max_epochs is not None and max_epochs < -1:
+        raise MisconfigurationError(
+            f"`max_epochs` must be a non-negative integer or -1, got {max_epochs}."
+        )
+    if min_epochs is not None and min_epochs < 0:
+        raise MisconfigurationError(
+            f"`min_epochs` must be a non-negative integer or None, got {min_epochs}."
+        )
+    if max_steps < -1:
+        raise MisconfigurationError(
+            f"`max_steps` must be a non-negative integer or -1, got {max_steps}."
+        )
+    if min_steps is not None and min_steps < 0:
+        raise MisconfigurationError(
+            f"`min_steps` must be a non-negative integer or None, got {min_steps}."
+        )
+    if max_epochs is None:
+        resolved_max_epochs: int = 1000 if max_steps == -1 else -1
+    else:
+        resolved_max_epochs: int = max_epochs
+    if min_epochs is None:
+        resolved_min_epochs: int = 1 if min_steps is not None else 0
+    else:
+        resolved_min_epochs: int = min_epochs
+    return resolved_min_epochs, resolved_max_epochs
+
+
 class _UnrepeatedDistributedSampler(DistributedSampler):
     # Distributed sampler that assigns each rank a strided slice of the dataset
     # without padding shards to equal length. The standard DistributedSampler
@@ -156,7 +203,11 @@ class Trainer:
     #     test_metrics: dict[str, float] = trainer.test(model, datamodule)
     def __init__(
         self,
-        max_epochs: int = 100,
+        *,
+        max_epochs: int | None = None,
+        min_epochs: int | None = None,
+        max_steps: int = -1,
+        min_steps: int | None = None,
         accelerator: str | Accelerator = "auto",
         strategy: str | Strategy = "auto",
         devices: int = 1,
@@ -300,6 +351,14 @@ class Trainer:
         #         scope is invalid, the ``"global_step"`` scope receives a
         #         non-integer interval, or log_every_n_steps is below one.
         #     ValueError: If the accelerator or strategy name is unknown.
+        resolved_min_epochs: int
+        resolved_max_epochs: int
+        resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
+            max_epochs,
+            min_epochs,
+            max_steps,
+            min_steps
+        )
         if gradient_clip_val is not None and not isinstance(gradient_clip_val, (int, float)):
             raise TypeError(
                 f"`gradient_clip_val` should be an int or a float. Got {gradient_clip_val}."
@@ -316,7 +375,6 @@ class Trainer:
                 "norm" if normalized_gradient_clip_algorithm == "norm" else "value"
             )
 
-        self.max_epochs: int = max_epochs
         self.devices: int = devices
         self.precision: Precision = precision
         self.gradient_clip_val: int | float | None = gradient_clip_val
@@ -392,8 +450,13 @@ class Trainer:
         self._sanity_checking: bool = False
         self._is_mid_epoch_validation: bool = False
 
-        self.fit_loop: FitLoop = FitLoop(max_epochs=max_epochs)
+        self.fit_loop: FitLoop = FitLoop(
+            min_epochs=resolved_min_epochs,
+            max_epochs=resolved_max_epochs
+        )
         self.fit_loop.epoch_loop: TrainingEpochLoop | None = TrainingEpochLoop(
+            min_steps=min_steps,
+            max_steps=max_steps,
             accumulate_grad_batches=accumulate_grad_batches,
             val_check_interval=val_check_interval,
             val_check_interval_scope=val_check_interval_scope,
@@ -677,6 +740,7 @@ class Trainer:
             if self.logger is not None and is_rank_zero():
                 config_dict: HyperparameterDict = {
                     "max_epochs": self.max_epochs,
+                    "max_steps": self.max_steps,
                     "precision": self.precision,
                     "accelerator": type(self.accelerator).__name__,
                     "strategy": type(self.strategy).__name__
@@ -1467,13 +1531,44 @@ class Trainer:
                 )
             accum: int = self.fit_loop.epoch_loop.accumulate_grad_batches
             stepping_per_epoch: int = max(1, math.ceil(limited_batches / accum))
-            return stepping_per_epoch * self.max_epochs
+            if self.max_epochs == -1:
+                if self.max_steps == -1:
+                    raise MisconfigurationError(
+                        "Cannot determine total training steps without an epoch or step limit."
+                    )
+                return self.max_steps
+            total_steps: int = stepping_per_epoch * self.max_epochs
+            return min(total_steps, self.max_steps) if self.max_steps != -1 else total_steps
+        if self.max_epochs == -1:
+            if self.max_steps == -1:
+                raise MisconfigurationError(
+                    "Cannot determine an epoch scheduler horizon without an epoch or step limit."
+                )
+            return self.max_steps
         return self.max_epochs
 
     @property
     def current_epoch(self) -> int:
         # Zero-based epoch counter mirrored from the trainer state.
         return self.state.current_epoch
+
+    @property
+    def max_epochs(self) -> int:
+        return self.fit_loop.max_epochs
+
+    @property
+    def min_epochs(self) -> int:
+        return self.fit_loop.min_epochs
+
+    @property
+    def max_steps(self) -> int:
+        assert self.fit_loop.epoch_loop is not None
+        return self.fit_loop.epoch_loop.max_steps
+
+    @property
+    def min_steps(self) -> int | None:
+        assert self.fit_loop.epoch_loop is not None
+        return self.fit_loop.epoch_loop.min_steps
 
     @property
     def global_step(self) -> int:
@@ -1512,6 +1607,14 @@ class Trainer:
         return self.state.status == "interrupted"
 
     @property
+    def should_stop(self) -> bool:
+        return self.state.should_stop
+
+    @should_stop.setter
+    def should_stop(self, value: bool) -> None:
+        self.state.should_stop = value
+
+    @property
     def estimated_stepping_batches(self) -> int | float:
         # Estimated total optimizer steps for the configured run, derived from
         # the limited batch count and the accumulation factor. Returns
@@ -1523,16 +1626,20 @@ class Trainer:
             self._total_train_batches
         )
         if limited_batches is None:
-            return float("inf")
+            return float("inf") if self.max_steps == -1 else self.max_steps
         accum: int = self.fit_loop.epoch_loop.accumulate_grad_batches
-        stepping_per_epoch: int = max(1, math.ceil(limited_batches / accum))
-        return stepping_per_epoch * self.max_epochs
+        stepping_per_epoch: int = math.ceil(limited_batches / accum)
+        if self.max_epochs == -1:
+            return float("inf") if self.max_steps == -1 else self.max_steps
+        estimated_steps: int = stepping_per_epoch * self.max_epochs
+        return min(estimated_steps, self.max_steps) if self.max_steps != -1 else estimated_steps
 
     def __repr__(self) -> str:
         # Compact configuration line for logs and interactive debugging.
         return (
             f"Trainer("
             f"max_epochs={self.max_epochs}, "
+            f"max_steps={self.max_steps}, "
             f"accelerator={type(self.accelerator).__name__}, "
             f"strategy={type(self.strategy).__name__}, "
             f"devices={self.devices}, "

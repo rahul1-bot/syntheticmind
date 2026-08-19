@@ -112,7 +112,7 @@ class EarlyStopping(Callback):
             should_stop: bool = trainer.strategy.reduce_boolean_decision(should_stop)
             if should_stop:
                 self.stopped_epoch: int = module.current_epoch
-                trainer.state.should_stop: bool = True
+                trainer.should_stop = True
 
     def _is_improvement(self, current: float) -> bool:
         # Applies the improvement test in the configured direction, requiring

@@ -155,6 +155,8 @@ class TrainingEpochLoop(Loop):
     # keeping enough internal state to support deterministic mid-epoch resume.
     def __init__(
         self,
+        min_steps: int | None = None,
+        max_steps: int = -1,
         accumulate_grad_batches: int = 1,
         val_check_interval: int | float = 1.0,
         val_check_interval_scope: Literal["epoch", "global_step"] = "epoch",
@@ -170,6 +172,8 @@ class TrainingEpochLoop(Loop):
         # inside the current epoch, the flag marking whether the batch loop is
         # active, and the random-number-state slots used by mid-epoch resume.
         super().__init__()
+        self.min_steps: int | None = min_steps
+        self.max_steps: int = max_steps
         self.accumulate_grad_batches: int = accumulate_grad_batches
         self.val_check_interval: int | float = val_check_interval
         self.val_check_interval_scope: Literal["epoch", "global_step"] = val_check_interval_scope
@@ -229,6 +233,9 @@ class TrainingEpochLoop(Loop):
         model: nn.Module | None = strategy.model
         assert model is not None
 
+        if self._max_steps_reached(state):
+            return
+
         if self.precision == "16-mixed" and device.type == "cuda" and self._grad_scaler is None:
             self._grad_scaler: GradScaler | None = GradScaler("cuda")
 
@@ -249,6 +256,10 @@ class TrainingEpochLoop(Loop):
         )
         batch_idx: int = -1
         while True:
+            if self._max_steps_reached(state):
+                break
+            if trainer.should_stop and trainer.fit_loop._can_stop_early(state):
+                break
             dataloader_fetch_start_time: float = time.perf_counter()
             try:
                 batch: Batch = next(train_iterator)
@@ -273,6 +284,8 @@ class TrainingEpochLoop(Loop):
                 hook_response: int | None = module.on_train_batch_start(batch, batch_idx)
             if hook_response == -1:
                 break
+
+            global_step_before_batch: int = state.global_step
 
             dm: DataModule | None = trainer.datamodule
             if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
@@ -348,7 +361,12 @@ class TrainingEpochLoop(Loop):
             if (
                 val_dataloader is not None
                 and max_batches is not None
-                and self._should_validate_mid_epoch(batch_idx, max_batches, state)
+                and self._should_validate_mid_epoch(
+                    batch_idx,
+                    max_batches,
+                    state,
+                    state.global_step > global_step_before_batch
+                )
             ):
                 if module.automatic_optimization and not is_accumulating:
                     trainer._call_on_validation_model_zero_grad(module)
@@ -370,7 +388,9 @@ class TrainingEpochLoop(Loop):
                     update_plateau_schedulers=True
                 )
 
-            if state.should_stop:
+            if self._max_steps_reached(state):
+                break
+            if trainer.should_stop and trainer.fit_loop._can_stop_early(state):
                 break
 
         # Tail flush: when the epoch ends inside an accumulation window, one
@@ -792,7 +812,8 @@ class TrainingEpochLoop(Loop):
         self,
         batch_idx: int,
         total_batches: int,
-        state: TrainerState
+        state: TrainerState,
+        optimizer_step_performed: bool
     ) -> bool:
         # Decides whether validation runs after the current batch. An integer
         # interval counts either optimizer steps (global_step scope) or batches
@@ -802,12 +823,19 @@ class TrainingEpochLoop(Loop):
         # scheduled separately by the fit loop.
         if isinstance(self.val_check_interval, int):
             if self.val_check_interval_scope == "global_step":
-                return state.global_step > 0 and state.global_step % self.val_check_interval == 0
+                return (
+                    optimizer_step_performed
+                    and state.global_step > 0
+                    and state.global_step % self.val_check_interval == 0
+                )
             return (batch_idx + 1) % self.val_check_interval == 0 and (batch_idx + 1) < total_batches
         if self.val_check_interval >= 1.0:
             return False
         check_every: int = max(1, int(total_batches * self.val_check_interval))
         return (batch_idx + 1) % check_every == 0 and (batch_idx + 1) < total_batches
+
+    def _max_steps_reached(self, state: TrainerState) -> bool:
+        return self.max_steps != -1 and state.global_step >= self.max_steps
 
     def _dispatch_step_metrics(
         self,

@@ -174,7 +174,7 @@ class ProgressBarCallback(Callback):
             metrics: dict[str, float] = self._epoch_metrics(trainer)
             duration: float = self._epoch_duration(trainer)
             parts: list[str] = [
-                f"✓ epoch {module.current_epoch + 1}/{trainer.max_epochs}"
+                f"✓ {self._epoch_label(trainer, module)}"
             ]
             parts.extend(self._renderer.metric_parts(metrics))
             parts.append(self._renderer.format_duration(duration))
@@ -332,7 +332,7 @@ class ProgressBarCallback(Callback):
         completed: int = self._batch_counts["training"]
         total: int | None = self._effective_total(trainer, "training")
         parts: list[str] = [
-            f"{self._renderer.next_spinner()} epoch {module.current_epoch + 1}/{trainer.max_epochs}"
+            f"{self._renderer.next_spinner()} {self._epoch_label(trainer, module)}"
         ]
         parts.extend(self._progress_parts(trainer, "training", completed, total))
         parts.extend(self._renderer.metric_parts(self._live_metrics["training"]))
@@ -365,7 +365,7 @@ class ProgressBarCallback(Callback):
         }[running_stage]
         parts: list[str] = [f"{self._renderer.next_spinner()} {label}"]
         if running_stage == "validating" and trainer.state.stage == "fit":
-            parts.append(f"epoch {module.current_epoch + 1}/{trainer.max_epochs}")
+            parts.append(self._epoch_label(trainer, module))
         parts.extend(self._progress_parts(trainer, running_stage, completed, total))
         parts.extend(self._renderer.metric_parts(self._live_metrics[running_stage]))
         self._renderer.write_live(" · ".join(parts), force)
@@ -494,3 +494,7 @@ class ProgressBarCallback(Callback):
             if isinstance(callback, TimerCallback):
                 return callback
         return None
+
+    def _epoch_label(self, trainer: Trainer, module: Module) -> str:
+        epoch: int = module.current_epoch + 1
+        return f"epoch {epoch}" if trainer.max_epochs == -1 else f"epoch {epoch}/{trainer.max_epochs}"

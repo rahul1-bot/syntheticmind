@@ -125,3 +125,15 @@
     5. The progress callback finalizes only after all non-presentation cleanup has succeeded. A teardown failure therefore produces one failed or interrupted outcome and cannot leave a false stage-complete summary.
     6. Trainer and module stage markers are cleared after every outcome, while interrupted status survives finalization. A Trainer remains reusable after a failed cleanup once the failing collaborator is corrected.
     7. Focused verification covers normal setup and teardown across all four entry points, simultaneous cleanup and exception-hook failures, runtime-primary preservation, setup failure, fatal base exceptions, terminal outcome truth, logger finalization, repeated Trainer use, and Python compilation without invoking a linter.
+
+| Architecture Decision | Training Termination Contract | Date: 19 August 2026 | Time: 12:41 PM | Name: Ghost |
+
+    1. `Trainer` construction is keyword-only and now exposes the established `max_epochs`, `min_epochs`, `max_steps`, and `min_steps` parameters with the pinned PyTorch Lightning signature defaults.
+    2. An unspecified epoch maximum resolves to 1000 when no step maximum exists and to an unlimited epoch horizon when `max_steps` is finite. Explicit `max_epochs=-1` means no epoch limit rather than the previous incorrect zero-epoch execution.
+    3. `max_steps` is a hard optimizer-step boundary for automatic optimization, gradient accumulation, manual optimization through `SyntheticOptimizer`, LBFGS closure re-entry, scheduler cadence, and checkpoint resumption. A hard epoch or step maximum terminates even when a configured minimum is larger.
+    4. `min_epochs` and `min_steps` gate only cooperative stop requests such as EarlyStopping. A stop request remains visible while training continues until both configured minima are satisfied.
+    5. `Trainer.should_stop` is the standard public stop surface and is backed by the authoritative Trainer state. EarlyStopping and loop control now use that contract instead of reaching through `trainer.state`.
+    6. `estimated_stepping_batches` respects zero-batch runs, finite step caps, finite epoch caps, accumulation, and unlimited horizons. The terminal renders unlimited runs as `epoch N` without a false negative denominator.
+    7. Global-step validation checks now require a real optimizer-step transition, preventing repeated validation on accumulation microbatches that leave `global_step` unchanged.
+    8. Checkpoint save and restore no longer emit routine Loguru chatter. Atomic-save temporary files are removed for every `BaseException`, including interruption, while the original exception is preserved.
+    9. Focused verification covers signature shape and validation, automatic and manual optimization, accumulation, zero limits, unlimited epochs, minimum-gated cooperative stopping, hard-limit precedence, LBFGS, step schedulers, real EarlyStopping, checkpoint resume at and below the limit, quiet checkpoint I/O, interruption cleanup, console labels, and Python compilation without invoking a linter.

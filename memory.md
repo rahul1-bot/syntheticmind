@@ -18,9 +18,9 @@
 | Memory | Trainer Audit Evidence | Date: 19 August 2026 | Time: 04:48 AM | Name: Ghost |
 
     1. The controlling Lightning comparison revision is `fcef404516264798b6c582ef556eaa17e5c29bfb`; comparison claims must not be attributed to another checkout or release.
-    2. SyntheticMind currently defines `global_step` as an optimizer-step count in state documentation but increments it once per manual training batch, irrespective of how many optimizer steps actually execute.
+    2. `global_step` is now an optimizer-step count in both automatic and manual optimization. Manual steps advance only through managed `SyntheticOptimizer.step()` execution rather than once per completed training batch.
     3. Mid-fit and epoch-end validation must restore both Trainer and Module running-stage state to training before subsequent training hooks execute; the hook-dispatch layer now enforces this paired transition.
-    4. Global-step validation cadence can trigger repeatedly on accumulation microbatches because the validation predicate does not prove that a new optimizer step occurred.
+    4. Global-step validation now proves that the current batch advanced optimizer progress before checking the interval, so accumulation microbatches cannot retrigger validation at an unchanged step.
     5. Unsized iterable datasets can finish inside a distributed `no_sync()` accumulation window; the subsequent tail optimizer step uses rank-local gradients and produces divergent model parameters.
     6. The distributed dataloader reconstruction path does not preserve custom batch samplers, loader subclasses, or every current PyTorch DataLoader constructor field.
     7. Several parameter names collide with established Lightning terminology while implementing different values or edge-case semantics. Hardening must correct existing semantics before adding more parameters.
@@ -90,3 +90,14 @@
     5. Presentation cleanup must execute after all resource cleanup because a stage summary is a transactional claim. The terminal may report completion only when strategy, datamodule, ordinary callback, module, and logger teardown have all succeeded.
     6. Standard module `setup(stage)` and `teardown(stage)` hooks are now real runtime extension points for fit, validation, test, and prediction rather than inherited methods that were present but never dispatched.
     7. Stage markers must clear after cleanup irrespective of outcome, while interrupted status must survive that clearing. This distinction permits postmortem truth and later Trainer reuse without leaving a live stage attached.
+
+| Memory | Training Limits and Cooperative Stop Semantics | Date: 19 August 2026 | Time: 12:41 PM | Name: Ghost |
+
+    1. Epoch limits and optimizer-step limits are independent hard boundaries. `-1` disables the corresponding hard limit, while zero performs no training and still completes the surrounding fit lifecycle cleanly.
+    2. When `max_epochs` is unspecified, a finite `max_steps` must remove the epoch ceiling; otherwise a derived epoch default could terminate iteration-based training before its explicit optimizer-step budget is reached.
+    3. Minimum epochs and steps do not weaken hard maxima. They delay only cooperative stop signals, and both minimum conditions must be satisfied before EarlyStopping or another collaborator can end the fit.
+    4. The public `Trainer.should_stop` value must share storage with loop state. Separate flags would let callbacks and loops observe different stop decisions and create non-deterministic termination.
+    5. A max-step check belongs before batch fetch and after completed batch processing. The first prevents consuming work after a restored checkpoint has already reached its limit; the second preserves hooks and metrics for the step that reaches the boundary.
+    6. A closure may execute `training_step` several times while one optimizer invocation still represents one global step. LBFGS verification must therefore assert optimizer progress independently from closure-call count.
+    7. Unlimited training requires honest presentation and estimation. A negative epoch denominator is not a user-facing horizon, and an unknown horizon remains infinity unless a finite step cap supplies the bound.
+    8. Checkpoint persistence is part of termination safety. Interruption during atomic save must remove the temporary file, and normal save or restore must remain silent unless an actionable problem occurs.

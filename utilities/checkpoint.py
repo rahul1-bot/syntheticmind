@@ -24,7 +24,6 @@ import tempfile
 from pathlib import Path
 
 import torch
-from loguru import logger as log
 
 from syntheticmind.utilities.types import CheckpointDict
 
@@ -47,11 +46,10 @@ def save_checkpoint(checkpoint: CheckpointDict, filepath: Path) -> None:
     try:
         torch.save(checkpoint, tmp_path)
         tmp_path.replace(filepath)
-    except Exception:
+    except BaseException:
         if tmp_path.exists():
             tmp_path.unlink()
         raise
-    log.debug(f"Checkpoint saved: {filepath}")
 
 
 def load_checkpoint(filepath: Path, map_location: str | torch.device = "cpu") -> CheckpointDict:
@@ -62,5 +60,4 @@ def load_checkpoint(filepath: Path, map_location: str | torch.device = "cpu") ->
     if not filepath.exists():
         raise FileNotFoundError(f"Checkpoint not found: {filepath}")
     checkpoint: CheckpointDict = torch.load(filepath, map_location=map_location, weights_only=False)
-    log.debug(f"Checkpoint loaded: {filepath}")
     return checkpoint
