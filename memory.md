@@ -149,3 +149,12 @@
     4. A source-grounded test double can prove wrapper control flow, argument forwarding, exception restoration, and artifact routing, but it cannot prove TensorRT engine construction, numerical correctness, performance, or reload on a CUDA runtime.
     5. Current upstream source and platform support must be separated from the pinned Lightning contract. The current Torch-TensorRT source supports CUDA platforms but not Darwin, while its PyTorch 2.9 tests exclude TorchScript IR because that path may crash.
     6. Optional accelerator capability remains incomplete until its actual hardware and vendor runtime execute successfully; the environmental boundary must remain visible in progress state rather than converted into a false completion claim.
+
+| Memory | Scope Control and Guideline Enforcement | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
+
+    1. A recursive objective does not authorize uninterrupted broad mutation. Every implementation phase still requires a small accepted boundary, direct review of the affected existing code, and an explicit reason for each new abstraction or public contract.
+    2. PyTorch Lightning is capability and terminology evidence only. Its decomposition, compatibility imports, helper layout, and internal state boundaries must never enter SyntheticMind without independent justification under `code-guidelines.md`.
+    3. Generic helper names and wide base-class expansion hide ownership rather than clarify it when their exact invariant and caller set have not been agreed first.
+    4. Fast progress is measured by accepted, verified capability slices rather than elapsed autonomous activity or the volume of changed files.
+    5. Interrupted work must be labeled unverified and preserved as a review snapshot, never promoted into the verified architecture state merely because it compiles or resembles the reference.
+    6. Rahul-directed checkpoints are now mandatory before resuming the model-parallel diff or opening another capability phase.

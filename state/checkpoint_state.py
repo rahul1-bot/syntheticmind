@@ -70,39 +70,46 @@ class CheckpointState:
         strategy_name: str = "SingleDeviceStrategy",
         world_size: int = 1,
         precision_plugin: Precision | None = None,
-        weights_only: bool = False
+        weights_only: bool = False,
+        model_state_dict: CheckpointValue | None = None,
+        optimizer_states: list[CheckpointValue] | None = None
     ) -> CheckpointDict:
         # Assembles the payload from live objects. Progress counters and model
         # weights always travel; optimizer state travels in list form plus the
         # legacy first-entry key; RNG streams are captured at call time so a
         # restored run continues the same random sequences.
-        model_state_dict: CheckpointValue = cast(
-            CheckpointValue,
-            model.state_dict()
+        resolved_model_state_dict: CheckpointValue = (
+            cast(CheckpointValue, model.state_dict())
+            if model_state_dict is None
+            else model_state_dict
         )
         checkpoint: CheckpointDict = {
             "epoch": epoch,
             "global_step": global_step,
-            "state_dict": model_state_dict,
-            "model_state_dict": model_state_dict,
+            "state_dict": resolved_model_state_dict,
+            "model_state_dict": resolved_model_state_dict,
         }
         if isinstance(model, HyperparametersMixin):
             cls._store_hyperparameters(checkpoint, model)
 
         if not weights_only:
             checkpoint["rng_state"] = cls._collect_rng_states()
-            optimizer_states: CheckpointValue = cast(
-                CheckpointValue,
-                [optimizer.state_dict() for optimizer in optimizers]
+            resolved_optimizer_states: list[CheckpointValue] = (
+                [
+                    cast(CheckpointValue, optimizer.state_dict())
+                    for optimizer in optimizers
+                ]
+                if optimizer_states is None
+                else optimizer_states
             )
-            checkpoint["optimizer_states"] = optimizer_states
+            checkpoint["optimizer_states"] = resolved_optimizer_states
             if optimizers:
                 checkpoint["optimizer_state_dict"] = cast(
                     CheckpointValue,
-                    optimizers[0].state_dict()
+                    resolved_optimizer_states[0]
                 )
-                checkpoint["optimizer_states"] = optimizer_states
-                checkpoint["optimizer_state_dicts"] = optimizer_states
+                checkpoint["optimizer_states"] = resolved_optimizer_states
+                checkpoint["optimizer_state_dicts"] = resolved_optimizer_states
 
         if completed_batches > 0:
             checkpoint["completed_batches"] = completed_batches
@@ -237,58 +244,62 @@ class CheckpointState:
         datamodule: DataModule | None = None,
         precision_plugin: Precision | None = None,
         restore_datamodule_state: bool = True,
-        strict: bool = True
+        strict: bool = True,
+        restore_model: bool = True,
+        restore_optimizers: bool = True
     ) -> tuple[int, int, int, int, CheckpointDict | None]:
         # Rehydrates live objects from the payload and returns the resume
         # coordinates (epoch, global step, completed batches, epoch RNG state).
         # The list-form optimizer and scheduler keys are preferred; the legacy
         # singular keys are the fallback for older checkpoints.
-        model_state_dict_raw: CheckpointValue | None = checkpoint.get(
-            "state_dict",
-            checkpoint.get("model_state_dict")
-        )
-        if not isinstance(model_state_dict_raw, dict):
-            raise KeyError("Checkpoint is missing a model `state_dict`.")
-        incompatible_keys: object = model.load_state_dict(
-            model_state_dict_raw,
-            strict=strict
-        )  # type: ignore[arg-type]
-        if not strict:
-            missing_keys: object = getattr(incompatible_keys, "missing_keys", [])
-            unexpected_keys: object = getattr(
-                incompatible_keys,
-                "unexpected_keys",
-                []
+        if restore_model:
+            model_state_dict_raw: CheckpointValue | None = checkpoint.get(
+                "state_dict",
+                checkpoint.get("model_state_dict")
             )
-            if missing_keys:
-                warnings.warn(
-                    "Found keys that are in the model state dict but not in the "
-                    f"checkpoint: {missing_keys}",
-                    UserWarning,
-                    stacklevel=3
+            if not isinstance(model_state_dict_raw, dict):
+                raise KeyError("Checkpoint is missing a model `state_dict`.")
+            incompatible_keys: object = model.load_state_dict(
+                model_state_dict_raw,
+                strict=strict
+            )  # type: ignore[arg-type]
+            if not strict:
+                missing_keys: object = getattr(incompatible_keys, "missing_keys", [])
+                unexpected_keys: object = getattr(
+                    incompatible_keys,
+                    "unexpected_keys",
+                    []
                 )
-            if unexpected_keys:
-                warnings.warn(
-                    "Found keys that are not in the model state dict but in the "
-                    f"checkpoint: {unexpected_keys}",
-                    UserWarning,
-                    stacklevel=3
-                )
-        optimizer_state_dicts_raw: CheckpointValue | None = checkpoint.get(
-            "optimizer_states",
-            checkpoint.get("optimizer_state_dicts")
-        )
-        if isinstance(optimizer_state_dicts_raw, list):
-            for optimizer, optimizer_state_dict in zip(optimizers, optimizer_state_dicts_raw, strict=False):
-                optimizer.load_state_dict(optimizer_state_dict)  # type: ignore[arg-type]
-        elif "optimizer_state_dict" in checkpoint and optimizers:
-            optimizers[0].load_state_dict(checkpoint["optimizer_state_dict"])  # type: ignore[arg-type]
-        elif optimizers:
-            from loguru import logger as restore_log
-            restore_log.warning(
-                "Checkpoint missing optimizer_state_dict (partial/exception checkpoint); "
-                "optimizer will start fresh."
+                if missing_keys:
+                    warnings.warn(
+                        "Found keys that are in the model state dict but not in the "
+                        f"checkpoint: {missing_keys}",
+                        UserWarning,
+                        stacklevel=3
+                    )
+                if unexpected_keys:
+                    warnings.warn(
+                        "Found keys that are not in the model state dict but in the "
+                        f"checkpoint: {unexpected_keys}",
+                        UserWarning,
+                        stacklevel=3
+                    )
+        if restore_optimizers:
+            optimizer_state_dicts_raw: CheckpointValue | None = checkpoint.get(
+                "optimizer_states",
+                checkpoint.get("optimizer_state_dicts")
             )
+            if isinstance(optimizer_state_dicts_raw, list):
+                for optimizer, optimizer_state_dict in zip(optimizers, optimizer_state_dicts_raw, strict=False):
+                    optimizer.load_state_dict(optimizer_state_dict)  # type: ignore[arg-type]
+            elif "optimizer_state_dict" in checkpoint and optimizers:
+                optimizers[0].load_state_dict(checkpoint["optimizer_state_dict"])  # type: ignore[arg-type]
+            elif optimizers:
+                from loguru import logger as restore_log
+                restore_log.warning(
+                    "Checkpoint missing optimizer_state_dict (partial/exception checkpoint); "
+                    "optimizer will start fresh."
+                )
 
         scheduler_state_dicts_raw: CheckpointValue | None = checkpoint.get(
             "lr_schedulers",

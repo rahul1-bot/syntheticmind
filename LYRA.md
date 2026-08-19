@@ -76,8 +76,11 @@
     4. Real TensorRT engine construction is not verified or claimed because the current Apple-silicon host and installed PyTorch runtime have no CUDA support.
     5. Direct source and guideline review, Python compilation, signatures, inheritance, exception probes, export regressions, and diff validation establish the locally reachable contract without linters or static type checkers.
 
-| Strategic Note | Immediate Direction | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
+| Strategic Hold | Controlled Restart Requirement | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
 
-    1. Recompute the remaining pinned model surface and audit model-parallel ownership before treating `device_mesh` as an implementable capability.
-    2. A property without a Strategy-created mesh would be decorative parity and remains prohibited.
-    3. Preserve the private scope, excluded work, terminology discipline, direct `code-guidelines.md` review, executable evidence, no-comment rule, no-linter rule, and `dev` synchronization requirements.
+    1. Rahul stopped the recursive hardening run because the model-parallel implementation expanded too broadly and departed from the required `code-guidelines.md` discipline.
+    2. The current code is preserved only as an interrupted review snapshot. It is not accepted model-parallel architecture and carries no completed-capability claim.
+    3. The added future-annotations import, helper boundaries, generic Strategy methods, Trainer wiring, checkpoint decomposition, names, and inheritance effects must be challenged individually before reuse.
+    4. A restart requires one Rahul-aligned slice at a time, full reading of the directly affected runtime path, minimal code movement, and focused executable verification before the next slice begins.
+    5. Lightning remains a behavioral and terminology reference, while SyntheticMind architecture remains independently governed by `code-guidelines.md`.
+    6. No implementation or parity work remains active until Rahul explicitly resumes it.

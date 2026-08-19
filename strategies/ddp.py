@@ -35,12 +35,14 @@ from __future__ import annotations
 import atexit
 import os
 from collections.abc import Callable
+from datetime import timedelta
 from typing import TYPE_CHECKING, cast, override
 
 import torch
 import torch.distributed as dist
 from torch import nn
 from torch.distributed.nn.functional import all_gather as distributed_all_gather
+from torch.distributed.constants import default_pg_timeout
 from torch.nn.parallel import DistributedDataParallel
 
 from syntheticmind.core.module import Module
@@ -71,6 +73,7 @@ class DDPStrategy(Strategy):
         checkpoint_io: CheckpointIO | None = None,
         precision_plugin: Precision | None = None,
         process_group_backend: str | None = None,
+        timeout: timedelta | None = default_pg_timeout,
         start_method: ProcessStartMethod = "popen",
         layer_sync: LayerSync | None = None
     ) -> None:
@@ -97,6 +100,11 @@ class DDPStrategy(Strategy):
             if process_group_backend is not None
             else None
         )
+        if timeout is not None and not isinstance(timeout, timedelta):
+            raise TypeError("`timeout` must be a datetime.timedelta or None.")
+        if timeout is not None and timeout.total_seconds() < 0:
+            raise ValueError("`timeout` must be non-negative.")
+        self._timeout: timedelta | None = timeout
         self._launcher: _ProcessLauncher = _ProcessLauncher(self, start_method)
         self._local_rank: int = 0
         self._process_group_cleanup_registered: bool = False
@@ -187,7 +195,8 @@ class DDPStrategy(Strategy):
         dist.init_process_group(
             backend=backend,
             rank=global_rank,
-            world_size=launched_world_size
+            world_size=launched_world_size,
+            timeout=self._timeout
         )
         self._register_process_group_cleanup()
 

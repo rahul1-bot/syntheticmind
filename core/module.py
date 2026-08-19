@@ -75,6 +75,7 @@ from syntheticmind.utilities.types import (
 )
 
 if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
     from torchmetrics import Metric, MetricCollection
 
     from syntheticmind.core.trainer import Trainer
@@ -160,6 +161,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         "trainer",
         "strict_loading",
         "device",
+        "device_mesh",
         "dtype",
         "logged_metrics"
     ] + HyperparametersMixin.__jit_unused_properties__
@@ -267,6 +269,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         self._logging_warning_keys: set[str] = set()
         self._running_stage: str | None = None
         self._device: torch.device = torch.device("cpu")
+        self._device_mesh: DeviceMesh | None = None
         self._dtype: torch.dtype = torch.float32
         self._current_fx_name: str | None = None
         self._current_dataloader_idx: int | None = None
@@ -1371,6 +1374,10 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         if buf is not None:
             return buf.device
         return self._device
+
+    @property
+    def device_mesh(self) -> DeviceMesh | None:
+        return self._device_mesh
 
     @property
     def dtype(self) -> torch.dtype:

@@ -67,9 +67,11 @@
     4. ✅ TensorRT orchestration, TorchScript, ONNX and ONNX Runtime, runtime access, checkpoint reconstruction, Python compilation, signatures, inheritance, source inspection, and diff validation pass without a linter or static type checker.
     5. Real CUDA engine construction and reload remain unverified because the current Darwin Apple-silicon machine, installed PyTorch build, and available hardware do not provide CUDA or TensorRT; no broader capability is claimed.
 
-| Progress Todo | Model-Parallel Ownership Audit | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
+| Progress Hold | Interrupted Model-Parallel Snapshot | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
 
-    1. Recompute the remaining pinned model extension surface and trace `device_mesh` through the pinned Strategy implementations, Trainer attachment, launchers, model state, and teardown.
-    2. Determine the minimum real model-parallel Strategy capability required before exposing a `device_mesh` property; reject surface-only compatibility or unused state.
-    3. Implement only after ownership, initialization, transport, override, and failure contracts are mapped and executable on an available backend.
-    4. Preserve exact local and remote `dev` synchronization after every subsequent phase and continue sequentially without static-analysis tools.
+    1. The recursive hardening goal is stopped at Rahul's direction.
+    2. The current model-parallel diff is an unverified work-in-progress snapshot and does not satisfy the acceptance criteria for `device_mesh`, tensor parallelism, FSDP2, or distributed checkpointing.
+    3. Before implementation resumes, the snapshot requires line-by-line review against `code-guidelines.md`, with particular attention to unnecessary imports, vague helper functions, base-class expansion, file boundaries, names, and inheritance effects.
+    4. The immediate technical remainder is to decide which interrupted changes are retained, rewritten, or removed, then complete one narrowly scoped model-parallel contract and verify it end to end.
+    5. After that phase is accepted, the remaining core Lightning parity surface must be recomputed before selecting the next folder or capability.
+    6. No further work is active until Rahul explicitly chooses the next bounded action.

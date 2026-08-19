@@ -117,9 +117,11 @@
     7. The contract was compared with the pinned Lightning source and current Torch-TensorRT source revision `da868ec8fcc6ec56fbb63fd3dba944ca7f072304`; current upstream tests also exclude TorchScript IR on PyTorch 2.9 because that combination can crash.
     8. TensorRT, TorchScript, ONNX Runtime, runtime-state, checkpoint, compilation, signature, inheritance, source, and diff regressions pass without invoking any linter or static type checker.
 
-| Active Next Step | Model-Parallel Ownership Audit | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
+| Active Hold | Model-Parallel Work and Recursive Execution | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
 
-    1. Recompute the remaining pinned `Module` surface after TensorRT and confirm whether `device_mesh` is the only unresolved model-level contract.
-    2. Trace the complete SyntheticMind Strategy ownership chain and the pinned model-parallel implementations before adding any property, state, or initialization path.
-    3. Do not expose an empty `device_mesh` compatibility surface; implementation requires a real model-parallel Strategy that constructs, transports, and tears down the mesh correctly.
-    4. Continue in dependency order with direct `code-guidelines.md` review, executable verification, failure probes, and no linter or static type checker.
+    1. Rahul stopped the recursive hardening run after the model-parallel phase expanded into broad cross-cutting changes without an accepted narrow design checkpoint.
+    2. The current `dev` snapshot contains interrupted model-parallel work across Module, Trainer, Strategy, checkpoint state, DDP timeout handling, package exports, and three new strategy modules.
+    3. This snapshot is unverified, unaccepted, and not a completed capability. Its commit preserves the exact review state only and must not be interpreted as architectural approval.
+    4. The current additions, including the new future-annotations import, vague helper boundaries, and expanded generic Strategy surface, require line-by-line review against `code-guidelines.md` before any continuation.
+    5. Future implementation must proceed through Rahul-aligned, narrowly bounded slices with the relevant existing files and runtime path reviewed before mutation.
+    6. The recursive goal is stopped. No further code changes, verification expansion, or parity work may continue until Rahul explicitly selects the next bounded action.

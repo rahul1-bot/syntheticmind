@@ -110,7 +110,6 @@ from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.utilities.filesystem import (
     basename,
-    is_file,
     list_directory,
     modified_time,
     normalize_path,
@@ -122,6 +121,7 @@ from syntheticmind.utilities.signal_connector import _SignalConnector
 from syntheticmind.utilities.torch_flags import configure_torch_flags
 from syntheticmind.utilities.types import (
     CheckpointDict,
+    CheckpointValue,
     ClipAlgorithm,
     HyperparameterDict,
     ModelOutput,
@@ -741,6 +741,7 @@ class Trainer:
             self.strategy.configured_precision_plugin
         )
         self.strategy._attach_precision_plugin(self._precision_plugin)
+        self.strategy.validate_configuration()
 
         self.callbacks: list[Callback] = resolved_callbacks
         configured_checkpoint_callbacks: list[Checkpoint] = [
@@ -1059,7 +1060,7 @@ class Trainer:
 
             preloaded_checkpoint: CheckpointDict | None = None
             if resume_path is not None:
-                preloaded_checkpoint = self.strategy.load_checkpoint(
+                preloaded_checkpoint = self.strategy.load_checkpoint_metadata(
                     resume_path,
                     weights_only
                 )
@@ -1225,7 +1226,11 @@ class Trainer:
                     resume_path,
                     module,
                     weights_only=weights_only,
-                    checkpoint=preloaded_checkpoint,
+                    checkpoint=(
+                        None
+                        if self.strategy.restore_checkpoint_after_setup
+                        else preloaded_checkpoint
+                    ),
                     restore_datamodule_state=False
                 )
             _optimizers_to_device(self.optimizers, device)
@@ -1714,6 +1719,7 @@ class Trainer:
         self.module = module
         self.datamodule = datamodule
         module.trainer = self
+        self.strategy.connect(module)
         if datamodule is not None:
             datamodule.trainer = self
 
@@ -1726,6 +1732,7 @@ class Trainer:
         try:
             self.module = module
             module.trainer = self
+            self.strategy.connect(module)
             active_configuration = self._model_callback_configuration
             if (
                 active_configuration is not None
@@ -2345,6 +2352,7 @@ class Trainer:
             self._layer_sync_model = resolved_module
         resolved_module.trainer = self
         self.module = resolved_module
+        self.strategy.connect(resolved_module)
         self.profiler._attach_module(resolved_module)
         self._call_strategy_hook(
             "setup",
@@ -2377,8 +2385,9 @@ class Trainer:
         if not isinstance(connected_model, torch.nn.Module):
             raise TypeError(
                 f"Precision.connect must return torch.nn.Module, got {type(connected_model).__name__}."
-            )
+        )
         self.strategy.model = connected_model
+        self.strategy.optimizers = connected_optimizers
         return module, connected_optimizers, connected_lr_schedulers
 
     def _call_on_validation_model_zero_grad(self, module: Module) -> None:
@@ -2801,6 +2810,12 @@ class Trainer:
         )
         self._call_callback_hooks(module, "on_load_checkpoint", loaded_checkpoint)
         self.precision_plugin.on_load_checkpoint(loaded_checkpoint)
+        self.strategy.load_model_state_dict(
+            loaded_checkpoint,
+            strict=module.strict_loading
+        )
+        if self.state.stage == "fit":
+            self.strategy.load_optimizer_state_dict(loaded_checkpoint)
         epoch: int
         global_step: int
         completed_batches: int
@@ -2816,7 +2831,9 @@ class Trainer:
             datamodule=self.datamodule,
             precision_plugin=self.precision_plugin,
             restore_datamodule_state=restore_datamodule_state,
-            strict=module.strict_loading
+            strict=module.strict_loading,
+            restore_model=False,
+            restore_optimizers=False
         )
         combined_loader_states: list[dict[str, object]] = (
             CheckpointState.combined_loader_states(loaded_checkpoint)
@@ -2929,7 +2946,7 @@ class Trainer:
                     continue
                 if callback.last_model_path:
                     last_model_path: str = callback.last_model_path
-                    if is_file(last_model_path):
+                    if self.strategy.is_checkpoint_path(last_model_path):
                         candidates.append(last_model_path)
                 directory: str = callback._resolve_dirpath(self)
                 for candidate in list_directory(directory):
@@ -2937,7 +2954,7 @@ class Trainer:
                     if (
                         candidate_name.startswith("last")
                         and candidate_name.endswith(".ckpt")
-                        and is_file(candidate)
+                        and self.strategy.is_checkpoint_path(candidate)
                     ):
                         candidates.append(candidate)
             unique_candidates: set[str] = set(candidates)
@@ -2963,7 +2980,7 @@ class Trainer:
                 f"`ckpt_path={ckpt_path!r}` is unavailable without its corresponding integration."
             )
         path: str = normalize_path(ckpt_path)
-        if not is_file(path):
+        if not self.strategy.is_checkpoint_path(path):
             raise FileNotFoundError(f"Checkpoint not found: {path}")
         self._ckpt_path = path
         return path
@@ -3062,7 +3079,22 @@ class Trainer:
             strategy_name=type(self.strategy).__name__,
             world_size=self.world_size,
             precision_plugin=self.precision_plugin,
-            weights_only=weights_only
+            weights_only=weights_only,
+            model_state_dict=cast(
+                CheckpointValue,
+                self.strategy.model_state_dict()
+            ),
+            optimizer_states=(
+                [
+                    cast(
+                        CheckpointValue,
+                        self.strategy.optimizer_state(optimizer)
+                    )
+                    for optimizer in self.optimizers
+                ]
+                if not weights_only
+                else []
+            )
         )
         if not weights_only:
             self.precision_plugin.on_save_checkpoint(checkpoint)
@@ -3200,7 +3232,7 @@ class Trainer:
         self._attempt_teardown("strategy.teardown", self.strategy.teardown, failures)
         self._attempt_teardown(
             "checkpoint_io.teardown",
-            self.strategy.checkpoint_io.teardown,
+            self.strategy.teardown_checkpoint_io,
             failures
         )
         self._attempt_teardown(

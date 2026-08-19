@@ -23,7 +23,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+import warnings
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal, TypeVar, cast
 
@@ -75,6 +76,7 @@ class Strategy(ABC):
         # device until setup binds the real placement.
         self._model: nn.Module | None = None
         self._module: nn.Module | None = None
+        self._optimizers: list[torch.optim.Optimizer] = []
         self._accelerator: Accelerator | None = accelerator
         self._parallel_devices: list[torch.device] = list(parallel_devices or [])
         self._num_nodes: int = num_nodes
@@ -125,6 +127,17 @@ class Strategy(ABC):
             + self._cluster_environment.local_rank()
         )
 
+    def connect(self, model: nn.Module) -> None:
+        if not isinstance(model, nn.Module):
+            raise TypeError(
+                f"`model` must be a torch.nn.Module, got {type(model).__name__}."
+            )
+        self._module = model
+        self._model = model
+
+    def validate_configuration(self) -> None:
+        pass
+
     def save_checkpoint(
         self,
         checkpoint: CheckpointDict,
@@ -147,6 +160,95 @@ class Strategy(ABC):
             checkpoint_path,
             weights_only=weights_only
         )
+
+    def load_checkpoint_metadata(
+        self,
+        checkpoint_path: CheckpointPath,
+        weights_only: bool | None = None
+    ) -> CheckpointDict:
+        return self.load_checkpoint(checkpoint_path, weights_only)
+
+    def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool:
+        from syntheticmind.utilities.filesystem import is_file
+
+        return is_file(checkpoint_path)
+
+    def model_state_dict(self) -> dict[str, object]:
+        if self._module is None:
+            raise RuntimeError("Strategy has no connected model.")
+        return cast(dict[str, object], self._module.state_dict())
+
+    def optimizer_state(
+        self,
+        optimizer: torch.optim.Optimizer
+    ) -> dict[str, object]:
+        return cast(dict[str, object], optimizer.state_dict())
+
+    def load_model_state_dict(
+        self,
+        checkpoint: Mapping[str, object],
+        strict: bool = True
+    ) -> None:
+        if self._module is None:
+            raise RuntimeError("Strategy has no connected model.")
+        state_dict: object | None = checkpoint.get(
+            "state_dict",
+            checkpoint.get("model_state_dict")
+        )
+        if not isinstance(state_dict, Mapping):
+            raise KeyError("Checkpoint is missing a model `state_dict`.")
+        incompatible_keys: object = self._module.load_state_dict(
+            cast(Mapping[str, object], state_dict),
+            strict=strict
+        )
+        if strict:
+            return
+        missing_keys: object = getattr(incompatible_keys, "missing_keys", [])
+        unexpected_keys: object = getattr(incompatible_keys, "unexpected_keys", [])
+        if missing_keys:
+            warnings.warn(
+                "Found keys that are in the model state dict but not in the "
+                f"checkpoint: {missing_keys}",
+                UserWarning,
+                stacklevel=3
+            )
+        if unexpected_keys:
+            warnings.warn(
+                "Found keys that are not in the model state dict but in the "
+                f"checkpoint: {unexpected_keys}",
+                UserWarning,
+                stacklevel=3
+            )
+
+    def load_optimizer_state_dict(
+        self,
+        checkpoint: Mapping[str, object]
+    ) -> None:
+        optimizer_states: object | None = checkpoint.get(
+            "optimizer_states",
+            checkpoint.get("optimizer_state_dicts")
+        )
+        if isinstance(optimizer_states, list):
+            for optimizer, optimizer_state in zip(
+                self.optimizers,
+                optimizer_states,
+                strict=False
+            ):
+                if not isinstance(optimizer_state, dict):
+                    raise TypeError("Optimizer checkpoint state must be a dictionary.")
+                optimizer.load_state_dict(optimizer_state)
+            return
+        optimizer_state: object | None = checkpoint.get("optimizer_state_dict")
+        if isinstance(optimizer_state, dict) and self.optimizers:
+            self.optimizers[0].load_state_dict(optimizer_state)
+            return
+        if self.optimizers:
+            from loguru import logger as restore_log
+
+            restore_log.warning(
+                "Checkpoint missing optimizer_state_dict (partial/exception checkpoint); "
+                "optimizer will start fresh."
+            )
 
     def remove_checkpoint(self, filepath: CheckpointPath) -> None:
         if self.is_global_zero:
@@ -232,6 +334,10 @@ class Strategy(ABC):
     def teardown(self) -> None:
         # Releases strategy-owned resources after a run; default is a no-op.
         pass
+
+    def teardown_checkpoint_io(self) -> None:
+        if self._checkpoint_io is not None:
+            self._checkpoint_io.teardown()
 
     def on_exception(self, exception: BaseException) -> None:
         # Hook for exception-time cleanup (such as tearing down process
@@ -371,6 +477,10 @@ class Strategy(ABC):
         return False
 
     @property
+    def restore_checkpoint_after_setup(self) -> bool:
+        return False
+
+    @property
     def distributed_sampler_kwargs(self) -> dict[str, int] | None:
         return None
 
@@ -491,6 +601,19 @@ class Strategy(ABC):
     @property
     def configured_layer_sync(self) -> LayerSync | None:
         return self._configured_layer_sync
+
+    @property
+    def optimizers(self) -> list[torch.optim.Optimizer]:
+        return self._optimizers
+
+    @optimizers.setter
+    def optimizers(self, optimizers: list[torch.optim.Optimizer]) -> None:
+        if not isinstance(optimizers, list) or not all(
+            isinstance(optimizer, torch.optim.Optimizer)
+            for optimizer in optimizers
+        ):
+            raise TypeError("`optimizers` must be a list of torch.optim.Optimizer instances.")
+        self._optimizers = list(optimizers)
 
     @property
     def parallel_devices(self) -> list[torch.device]:
