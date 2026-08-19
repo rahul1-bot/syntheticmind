@@ -59,9 +59,17 @@
     4. ✅ ONNX checking and ONNX Runtime numerical inference pass for modern, legacy, dynamic-shape, dynamic-axis, CPU, MPS, local, buffer, remote, and external-data paths.
     5. ✅ Python compilation, signatures, inheritance, import orders, direct source and guideline review, failure probes, diff validation, TorchScript, and checkpoint regressions pass without static-analysis tools.
 
-| Progress Todo | TensorRT Capability Audit | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
+| Progress Complete | Standard TensorRT Compilation Surface | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
 
-    1. Audit the pinned public method and current Torch-TensorRT input, engine, precision, return, persistence, dependency, operating-system, and CUDA contracts.
-    2. Inspect primary source through the pinned checkout, installed metadata, official source, or an ignored external clone without inventing an unverified compatibility surface.
-    3. Implement and verify locally reachable dependency and validation behavior, then record any CUDA-only execution boundary explicitly rather than fabricating successful compilation.
-    4. Commit on `dev`, push `origin/dev`, verify exact synchronization, and continue sequentially.
+    1. ✅ The standard `to_tensorrt` signature now preserves input precedence, IR selection, output format, retracing, default CUDA placement, forwarded compile options, return objects, and optional persistence.
+    2. ✅ Input copying and transfer, positional and named dispatch, dependency and configuration failures, exact nested mode restoration, device restoration, scripting-state restoration, and compile or save failures are executable.
+    3. ✅ TorchScript and Dynamo persistence routes support local paths, `Path`, byte buffers, and remote filesystems through SyntheticMind-owned destination handling.
+    4. ✅ TensorRT orchestration, TorchScript, ONNX and ONNX Runtime, runtime access, checkpoint reconstruction, Python compilation, signatures, inheritance, source inspection, and diff validation pass without a linter or static type checker.
+    5. Real CUDA engine construction and reload remain unverified because the current Darwin Apple-silicon machine, installed PyTorch build, and available hardware do not provide CUDA or TensorRT; no broader capability is claimed.
+
+| Progress Todo | Model-Parallel Ownership Audit | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
+
+    1. Recompute the remaining pinned model extension surface and trace `device_mesh` through the pinned Strategy implementations, Trainer attachment, launchers, model state, and teardown.
+    2. Determine the minimum real model-parallel Strategy capability required before exposing a `device_mesh` property; reject surface-only compatibility or unused state.
+    3. Implement only after ownership, initialization, transport, override, and failure contracts are mapped and executable on an available backend.
+    4. Preserve exact local and remote `dev` synchronization after every subsequent phase and continue sequentially without static-analysis tools.

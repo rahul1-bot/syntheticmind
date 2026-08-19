@@ -68,9 +68,16 @@
     3. `ONNXProgram`, local files, byte buffers, remote files, and external-data siblings persist through one SyntheticMind-owned boundary while PyTorch owns graph conversion.
     4. ONNX checking and ONNX Runtime inference on CPU and MPS-originated models establish usable artifacts rather than serialization-only claims.
 
-| Strategic Note | Immediate Direction | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
+| Strategic Note | Model TensorRT Compilation Contract | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
 
-    1. TensorRT requires a source and environment audit before implementation because the current machine is Apple silicon without CUDA.
-    2. Dependency-guard behavior may be implemented and verified locally, but successful engine compilation cannot be claimed without a supported CUDA and TensorRT runtime.
-    3. `device_mesh` remains deferred until a model-parallel Strategy can create and own a real mesh rather than exposing an empty compatibility property.
-    4. Preserve the private scope, excluded work, terminology discipline, direct guideline review, executable evidence, and `dev` synchronization requirements.
+    1. ✅ SyntheticMind now exposes the pinned `to_tensorrt` inheritance surface without importing Lightning product identity or copying its internal architecture.
+    2. Torch-TensorRT owns CUDA engine lowering; SyntheticMind owns dependency guards, CUDA target validation, input and transfer semantics, exact model restoration, IR dispatch, and destination handling.
+    3. Local orchestration evidence covers dependency, validation, positional and named inputs, model and datamodule hooks, compile and persistence calls, local, buffer, and remote destinations, and restoration failures.
+    4. Real TensorRT engine construction is not verified or claimed because the current Apple-silicon host and installed PyTorch runtime have no CUDA support.
+    5. Direct source and guideline review, Python compilation, signatures, inheritance, exception probes, export regressions, and diff validation establish the locally reachable contract without linters or static type checkers.
+
+| Strategic Note | Immediate Direction | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
+
+    1. Recompute the remaining pinned model surface and audit model-parallel ownership before treating `device_mesh` as an implementable capability.
+    2. A property without a Strategy-created mesh would be decorative parity and remains prohibited.
+    3. Preserve the private scope, excluded work, terminology discipline, direct `code-guidelines.md` review, executable evidence, no-comment rule, no-linter rule, and `dev` synchronization requirements.

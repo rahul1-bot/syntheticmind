@@ -140,3 +140,12 @@
     3. Exporters can mutate model training flags, especially on legacy failures. Exact named-submodule capture and unconditional restoration are therefore required around conversion and serialization.
     4. Modern ONNX external-data output may create sibling artifacts even for a single requested path; remote persistence must transfer the complete generated sibling set rather than only the primary protobuf.
     5. A parseable ONNX file is insufficient evidence. Model checking, ONNX Runtime execution, numerical comparison, dynamic-shape execution, accelerator-origin export, and failure restoration establish usable capability.
+
+| Memory | TensorRT Compilation Boundaries | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
+
+    1. TensorRT compilation is a CUDA engine capability rather than a generic accelerator export path; MPS placement cannot establish engine compatibility and must fail before compilation when no CUDA target exists.
+    2. Torch-TensorRT owns engine lowering and format serialization, while SyntheticMind owns optional-dependency diagnostics, input precedence, transfer hooks, exact model restoration, destination handling, and public method compatibility.
+    3. Positional, named, and mixed inputs require distinct `inputs` and `kwarg_inputs` routing. TorchScript IR does not accept named sample inputs through this surface and uses `torch.jit.save` rather than the Dynamo persistence path.
+    4. A source-grounded test double can prove wrapper control flow, argument forwarding, exception restoration, and artifact routing, but it cannot prove TensorRT engine construction, numerical correctness, performance, or reload on a CUDA runtime.
+    5. Current upstream source and platform support must be separated from the pinned Lightning contract. The current Torch-TensorRT source supports CUDA platforms but not Darwin, while its PyTorch 2.9 tests exclude TorchScript IR because that path may crash.
+    6. Optional accelerator capability remains incomplete until its actual hardware and vendor runtime execute successfully; the environmental boundary must remain visible in progress state rather than converted into a false completion claim.

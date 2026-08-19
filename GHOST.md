@@ -106,10 +106,20 @@
     5. Local paths, `Path`, `BytesIO`, remote filesystems, and external-data sidecars use one artifact boundary, with parent creation and remote sibling preservation handled independently of ONNX graph conversion.
     6. ONNX model checking and real ONNX Runtime inference pass for modern, legacy, dynamic-shape, dynamic-axis, positional, keyword, CPU, and MPS exports; compilation, signatures, inheritance, imports, source, diff, TorchScript, and checkpoint regressions also pass without static-analysis tools.
 
-| Active Next Step | TensorRT Capability Audit | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
+| Architecture Decision | Standard TensorRT Compilation Surface | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
 
-    1. Audit the pinned `to_tensorrt` surface, installed optional packages, supported operating systems, CUDA requirements, input specifications, return objects, and serialization behavior before adding any API.
-    2. Use current Torch-TensorRT primary source or an ignored external checkout if the local runtime cannot expose the contract directly.
-    3. Do not claim executable TensorRT capability on the Apple-silicon MPS host when the required CUDA runtime is absent; separate implementable dependency guards from hardware-verified compilation.
-    4. Keep `device_mesh` deferred until an actual model-parallel Strategy owns and initializes that state.
-    5. Preserve all scope, terminology, guideline, evidence, and branch-synchronization policies.
+    1. ✅ `Module.to_tensorrt(file_path=None, input_sample=None, ir="default", output_format="exported_program", retrace=False, default_device="cuda", **compile_kwargs)` now preserves the pinned public name, parameter order, defaults, accepted IR choices, persistence controls, and framework-neutral ownership.
+    2. Explicit input samples precede `example_input_array`, are copied before transfer, follow model-or-datamodule transfer ownership, and retain positional, named, and mixed forward-call meanings supported by the selected Torch-TensorRT IR.
+    3. Compilation requires the real `torch_tensorrt` package and a CUDA target; configuration, duplicate input ownership, unsupported output formats, missing samples, and unavailable CUDA fail before engine construction with explicit diagnostics.
+    4. Exact nested model modes and original device placement restore after input preparation, compilation, and failure; TorchScript compilation also restores the recursive scripting guard.
+    5. TorchScript artifacts use PyTorch serialization, while Dynamo and default IR artifacts use Torch-TensorRT serialization with input, output-format, and retrace state preserved across local, byte-buffer, and remote destinations.
+    6. The local Apple-silicon host cannot execute a real TensorRT engine build because Torch-TensorRT supports CUDA platforms and the installed PyTorch runtime has no CUDA. Dependency, validation, transfer, restoration, dispatch, and persistence orchestration pass against a source-grounded test double, but CUDA engine compilation and reload remain explicitly unverified.
+    7. The contract was compared with the pinned Lightning source and current Torch-TensorRT source revision `da868ec8fcc6ec56fbb63fd3dba944ca7f072304`; current upstream tests also exclude TorchScript IR on PyTorch 2.9 because that combination can crash.
+    8. TensorRT, TorchScript, ONNX Runtime, runtime-state, checkpoint, compilation, signature, inheritance, source, and diff regressions pass without invoking any linter or static type checker.
+
+| Active Next Step | Model-Parallel Ownership Audit | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
+
+    1. Recompute the remaining pinned `Module` surface after TensorRT and confirm whether `device_mesh` is the only unresolved model-level contract.
+    2. Trace the complete SyntheticMind Strategy ownership chain and the pinned model-parallel implementations before adding any property, state, or initialization path.
+    3. Do not expose an empty `device_mesh` compatibility surface; implementation requires a real model-parallel Strategy that constructs, transports, and tears down the mesh correctly.
+    4. Continue in dependency order with direct `code-guidelines.md` review, executable verification, failure probes, and no linter or static type checker.

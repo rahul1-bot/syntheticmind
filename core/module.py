@@ -317,6 +317,30 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         exporter: ModelONNXExporter = ModelONNXExporter(self)
         return exporter.export(file_path, input_sample, kwargs)
 
+    @torch.no_grad()
+    def to_tensorrt(
+        self,
+        file_path: str | Path | BytesIO | None = None,
+        input_sample: object | None = None,
+        ir: Literal["default", "dynamo", "ts"] = "default",
+        output_format: Literal["exported_program", "torchscript"] = "exported_program",
+        retrace: bool = False,
+        default_device: str | torch.device = "cuda",
+        **compile_kwargs: object
+    ) -> torch.jit.ScriptModule | torch.fx.GraphModule:
+        from syntheticmind.core.model_tensorrt import ModelTensorRTCompiler
+
+        compiler: ModelTensorRTCompiler = ModelTensorRTCompiler(self)
+        return compiler.compile(
+            file_path,
+            input_sample,
+            ir,
+            output_format,
+            retrace,
+            default_device,
+            compile_kwargs
+        )
+
     @contextmanager
     def _hook_context(self, hook_name: str) -> Iterator[None]:
         previous_hook_name: str | None = self._current_fx_name
