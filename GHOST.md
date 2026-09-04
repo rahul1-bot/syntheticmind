@@ -169,45 +169,14 @@
     4. Public class identities and Trainer configuration meanings remain unchanged, but obsolete import paths were removed without compatibility façades. Precision now explicitly inherits the checkpoint-hook contract and marks its checkpoint hook implementations as overrides.
     5. Full, half, mixed, and Transformer Engine precision execution, asynchronous checkpoint I/O, local optimizer execution, spawned DDP runtime state, subprocess DDP forward and consensus behavior, and sharded two-rank model parallelism pass through the new canonical paths.
 
-| Architecture Decision | Utility Ownership Evacuation | Date: 04 September 2026 | Time: 11:14 AM | Name: Ghost |
+| Architecture Decision | Cross-Cutting Ownership Reconstruction | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
 
-    1. Trainer randomness moved to `trainer/seed.py` because run seeding, accelerator random state, and dataloader-worker initialization are Trainer lifecycle responsibilities rather than generic helpers.
-    2. Rank-safe lifecycle rendering moved to `trainer/console.py`, while metric accumulation moved to the logger connector package because weighted reduction and distributed scalar synchronization exist exclusively to implement the logging lifecycle.
-    3. Empty initialization, parameter materialization, and reset interception moved to `strategies/model_initialization.py` because execution topology determines when and where model parameters may be allocated and initialized.
-    4. The unused compilation utility module was deleted. No current production consumer invoked either its compile or channels-last façade, so retaining it would preserve dead duplicate entrypoints over native PyTorch operations.
-    5. Local metric views, optimizer execution, spawned two-rank TorchMetrics reduction, and two-rank model-parallel materialization pass after relocation, proving that the concepts remain importable and serializable under their new owners.
-
-| Architecture Decision | Core Tensor Transfer Ownership | Date: 04 September 2026 | Time: 11:18 AM | Name: Ghost |
-
-    1. Recursive batch placement moved to `core/data_transfer.py` because it implements the default data-transfer hook contract and prediction output transfer rather than a generic application utility.
-    2. The separate tensor-collection transformation module was removed because `Module.all_gather` was its only consumer. Tensor conversion, nested-structure preservation, and gather application now form one private Module operation beside the public collective entrypoint.
-    3. No wrapper class, public alias, or compatibility module was introduced. Named tuples, mappings, lists, tuples, NumPy arrays, scalar conversion, devices, process groups, and differentiable gather semantics remain preserved.
-    4. Local CPU and MPS placement, local prediction output collection, nested local gather, spawned two-rank gather, subgroup gather, and spawned multi-stage data transfer pass after the ownership change.
-
-| Architecture Decision | Loop Context and Torch Flag Ownership | Date: 04 September 2026 | Time: 11:19 AM | Name: Ghost |
-
-    1. Evaluation and prediction gradient context selection moved onto the shared `Loop` base because inference mode, no-gradient fallback, and Gloo compatibility are execution-loop semantics used by both non-training stages.
-    2. Deterministic-algorithm mode, warning mode, cuDNN benchmarking, and the required cuBLAS workspace setting moved into Trainer construction because they configure the complete run rather than expose a reusable utility operation.
-    3. The two former one-function utility modules were deleted without wrappers or aliases. Local validation, prediction, deterministic configuration, and spawned two-rank TorchMetrics evaluation pass through the new owners.
-
-| Architecture Decision | Checkpoint Serialization Ownership | Date: 04 September 2026 | Time: 11:22 AM | Name: Ghost |
-
-    1. `TorchCheckpointIO` now owns local atomic serialization, remote transactional upload, explicit device mapping, weights-only selection, payload validation, and missing-path diagnostics directly.
-    2. Model-parallel full checkpoints and sharded metadata compose `TorchCheckpointIO` instead of importing duplicate free save and load operations. Distributed shard persistence remains owned by the sharded store and PyTorch distributed checkpoint API.
-    3. The former checkpoint utility module was deleted without a façade. Canonical model hydration, asynchronous snapshot isolation, full and sharded model-parallel persistence, and injected metadata or publication failure recovery pass through the checkpoint owners.
-
-| Architecture Decision | Filesystem Storage Boundary | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
-
-    1. Filesystem protocol resolution, local and remote path semantics, resource opening, artifact staging, metadata queries, copying, and removal moved to `storage/filesystem.py` because they form an external storage boundary shared by persistence owners.
-    2. Checkpoints, loggers, profilers, callbacks, and Trainer artifacts now depend on the explicit storage package without a utility compatibility path. Local and in-memory remote checkpoint transport, model hydration, and metric lifecycle verification pass after relocation.
-
-| Architecture Decision | Cross-Subsystem Contract Placement | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
-
-    1. The framework exception vocabulary and recursive domain type contracts moved from `utilities/` to `syntheticmind.exceptions` and `syntheticmind.types` because they define dependency direction across every semantic subsystem rather than executable helper behavior.
-    2. All production and ignored verification imports now use the canonical package-root contract paths; no compatibility module or legacy import surface remains.
-    3. The relocation changes ownership only. Exception identities, serialized state domains, batch shapes, optimizer declarations, precision inputs, checkpoint maps, and public Trainer stage values remain unchanged.
-    4. Package compilation, local model checkpoint hydration, optimizer execution, metric-view isolation, two-rank DDP execution, and two-rank TorchMetrics reduction pass through the relocated contracts.
-    5. Obsolete exporter and interrupted-hold ledger entries were pruned during mandatory ledger consolidation because deployment exporters were later removed from the active training-harness scope and Git retains their exact chronology.
+    1. Trainer owns run seeding, worker randomness, terminal rendering, deterministic algorithms, benchmark flags, and complete-run configuration; Loop owns evaluation gradient context.
+    2. Core data transfer owns recursive batch placement, Module owns its one-consumer gather traversal, Strategy owns topology-sensitive initialization, and the logger connector owns metric accumulation.
+    3. `TorchCheckpointIO` owns atomic local and remote serialization, model-parallel checkpointing owns distributed shards, and the explicit storage package owns protocol-aware paths shared by artifact producers.
+    4. Framework exception and recursive domain type contracts live at the package root so semantic subsystems depend inward without a utility layer or circular ownership.
+    5. Dead compilation, channels-last, context, torch-flag, checkpoint, tensor-traversal, and helper façades were deleted without compatibility aliases.
+    6. Local, MPS, spawned DDP, nested collective, TorchMetrics, checkpoint, remote storage, asynchronous I/O, failure-atomic model-parallel, and model-hydration paths pass through the assigned owners.
 
 | Architecture Decision | Training Data Composition Ownership | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
 
@@ -294,3 +263,12 @@
     3. `DeviceStatsMonitor` observes the selected accelerator across training, validation, test, and prediction, validates optional backend keys, follows optimizer-step or evaluation-batch cadence, and requires a logger.
     4. Callback metrics remain device-resident and logger persistence remains rank-zero-owned, while custom accelerators must satisfy the same explicit statistics contract.
     5. CPU and live MPS adapters, source-shaped CUDA behavior, filters, invalid configuration, train and validation stages, MPS Trainer execution, and spawned DDP persistence pass.
+
+| Architecture Decision | Distributed Early Stopping State Machine | Date: 04 September 2026 | Time: 01:03 PM | Name: Ghost |
+
+    1. EarlyStopping now validates monitor identity, finite non-negative delta, non-negative patience, boolean switches, mode, and finite target or divergence thresholds before a run begins.
+    2. Global rank zero broadcasts the scalar monitor before every decision, so rank-zero-only metrics, missing values, patience, and stop reasons remain identical across workers.
+    3. The state machine distinguishes improvement, patience exhaustion, target attainment, divergence, and non-finite monitoring; every stop decision is synchronized through Strategy and recorded with a stable reason and message.
+    4. Best score, validation-check wait count, stopped epoch, and reason persist through the callback-state channel with strict scalar restoration and configuration-qualified identity.
+    5. Patience counts validation checks rather than epochs, sanity and fast-development passes remain excluded, and missing metrics either fail on every rank or warn once on global rank zero.
+    6. Local patience, target, divergence, non-finite, missing-monitor, invalid-state, and exact-resume paths plus spawned DDP rank-zero-only monitoring pass.

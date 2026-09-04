@@ -237,7 +237,7 @@
 
 | Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. EarlyStopping, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, or persisted-state defects.
+    1. Timer and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, or persisted-state defects.
     2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose distributed quantities or persisted state remain semantically wrong.
     3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
 
@@ -278,3 +278,11 @@
     2. ✅ DeviceStatsMonitor supports train, validation, test, and prediction cadence through the selected accelerator without direct CUDA globals.
     3. ✅ Optional filter keys validate against the live backend, callback metrics remain device-resident, and logger persistence remains rank-zero-owned.
     4. ✅ CPU, mocked CUDA, live MPS, invalid filters and configuration, local Trainer stages, MPS training, and spawned DDP persistence pass.
+
+| Progress Complete | Distributed Early Stopping State Machine | Date: 04 September 2026 | Time: 01:03 PM | Name: Ghost |
+
+    1. ✅ EarlyStopping validates all configuration and threshold domains before execution.
+    2. ✅ Global rank zero broadcasts the scalar monitor and Strategy synchronizes every stop decision, including rank-zero-only metrics.
+    3. ✅ Improvement, patience, target, divergence, and non-finite transitions retain explicit persisted reasons and strict scalar state.
+    4. ✅ Sanity and fast-development checks remain excluded, and missing monitor behavior is consistent under strict and non-strict modes.
+    5. ✅ Local state-machine, exact checkpoint resume, invalid configuration and state, and spawned DDP rank-zero metric probes pass.

@@ -193,3 +193,9 @@
     1. Device-stat meaning now belongs to the selected Accelerator, while the callback owns only lifecycle cadence, filtering, metric routing, and rank-zero persistence.
     2. CPU, CUDA, and MPS expose distinct native counter families without pretending that CUDA globals represent every accelerator.
     3. Live MPS, source-shaped CUDA, CPU, filter, stage, and spawned DDP evidence establish the current monitoring boundary.
+
+| Strategic Note | Early Stopping Consensus | Date: 04 September 2026 | Time: 01:03 PM | Name: Ghost |
+
+    1. Early stopping now evaluates one broadcast scalar and one synchronized decision across every worker.
+    2. Patience, target, divergence, and non-finite transitions retain explicit reasons and strict resumable state.
+    3. Rank-zero-only monitor values, missing metrics, validation frequency, and checkpoint continuation no longer permit worker disagreement.

@@ -1,186 +1,262 @@
-# This module:
-# 1. Terminates training when a monitored validation metric stops improving for
-#    a configured number of consecutive validation passes
-# 2. Persists its patience counter and best score into checkpoints so a resumed
-#    run continues the plateau measurement instead of restarting it
-#
-# Design decisions:
-# - Sanity-check validation passes are excluded entirely, so a bounded sanity
-#   run can neither consume patience nor establish a misleading best score
-# - min_delta defines the smallest change that counts as improvement, so noise
-#   within the metric's natural spread cannot reset the patience counter
-# - strict=True turns a missing monitor key into an immediate configuration
-#   error listing the available metric names, which catches monitor-name typos
-#   that would otherwise disable early stopping silently
-# - The stop decision passes through the strategy's boolean-decision reduction,
-#   so under distributed execution every rank agrees to stop and no rank
-#   continues training alone
-# - The stop is requested cooperatively through the trainer state's stop flag;
-#   the fit loop honors it at the epoch boundary
-# - The state key is qualified by monitor and mode, so two instances watching
-#   different metrics checkpoint their state independently
-#
-# Author: Rahul Sawhney
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, override
+import math
+from typing import Literal, override
 
+import syntheticmind
 import torch
 from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import StateDict
-
-if TYPE_CHECKING:
-    from syntheticmind.trainer.trainer import Trainer
+from syntheticmind.types import StateDict, StateValue
 
 __all__: list[str] = ["EarlyStopping"]
 
+type StoppingReason = Literal[
+    "stopping_threshold",
+    "divergence_threshold",
+    "patience_exhausted",
+    "non_finite_metric"
+]
+
 
 class EarlyStopping(Callback):
-    # Patience-based training termination on validation plateau. Tracks the
-    # best monitored value seen so far and counts consecutive validation
-    # passes without an improvement of at least min_delta; when the count
-    # reaches patience, the trainer's cooperative stop flag is raised.
     def __init__(
         self,
         monitor: str = "val_loss",
-        patience: int = 10,
-        mode: Literal["min", "max"] = "min",
         min_delta: float = 0.0,
-        strict: bool = True
+        patience: int = 3,
+        verbose: bool = False,
+        mode: Literal["min", "max"] = "min",
+        strict: bool = True,
+        check_finite: bool = True,
+        stopping_threshold: float | None = None,
+        divergence_threshold: float | None = None
     ) -> None:
-        # Binds the stopping criterion: the metric to watch, the plateau
-        # length that triggers the stop, the improvement direction, the
-        # minimum change that counts as improvement, and whether a missing
-        # monitor is an error. The best score starts at the identity element
-        # for the chosen direction so the first observation always improves.
-        #
-        # Args:
-        #     monitor: Metric key watched in the trainer's callback metrics
-        #         after each validation pass. Default: ``"val_loss"``.
-        #     patience: Number of consecutive monitored evaluations without
-        #         improvement tolerated before the stop is requested.
-        #         Default: ``10``.
-        #     mode: Improvement direction, ``"min"`` or ``"max"``.
-        #         Default: ``"min"``.
-        #     min_delta: Minimum absolute change over the best score that
-        #         counts as improvement. Default: ``0.0``.
-        #     strict: Whether a missing monitored metric raises a
-        #         configuration error listing the available keys instead of
-        #         being skipped silently. Default: ``True``.
         super().__init__()
+        if not isinstance(monitor, str) or not monitor.strip():
+            raise ValueError("`monitor` must be a non-empty string.")
+        if (
+            type(min_delta) not in (int, float)
+            or not math.isfinite(float(min_delta))
+            or min_delta < 0
+        ):
+            raise ValueError("`min_delta` must be a non-negative number.")
+        if type(patience) is not int or patience < 0:
+            raise ValueError("`patience` must be a non-negative integer.")
+        if type(verbose) is not bool:
+            raise TypeError("`verbose` must be a bool.")
+        if mode not in ("min", "max"):
+            raise ValueError("`mode` must be 'min' or 'max'.")
+        if type(strict) is not bool:
+            raise TypeError("`strict` must be a bool.")
+        if type(check_finite) is not bool:
+            raise TypeError("`check_finite` must be a bool.")
+        self._validate_threshold("stopping_threshold", stopping_threshold)
+        self._validate_threshold("divergence_threshold", divergence_threshold)
         self.monitor: str = monitor
+        self.min_delta: float = float(min_delta)
         self.patience: int = patience
+        self.verbose: bool = verbose
         self.mode: Literal["min", "max"] = mode
-        self.min_delta: float = min_delta
         self.strict: bool = strict
-
+        self.check_finite: bool = check_finite
+        self.stopping_threshold: float | None = (
+            None if stopping_threshold is None else float(stopping_threshold)
+        )
+        self.divergence_threshold: float | None = (
+            None if divergence_threshold is None else float(divergence_threshold)
+        )
         self.wait_count: int = 0
         self.best_score: torch.Tensor = torch.tensor(
             float("inf") if mode == "min" else float("-inf")
         )
         self.stopped_epoch: int = 0
-
-    @override
-    def on_validation_epoch_end(self, trainer: Trainer, module: Module) -> None:
-        # Core stopping logic, executed after every real validation pass.
-        # Reads the monitored value from the reduced epoch metrics, resets the
-        # patience counter on improvement, and otherwise advances it; when the
-        # counter reaches patience, the decision is synchronized across ranks
-        # and the trainer's stop flag is raised with the outcome logged.
-        if trainer.fast_dev_run or trainer.sanity_checking:
-            return
-        metrics: dict[str, torch.Tensor] = trainer.callback_metrics
-        current_score: torch.Tensor | None = metrics.get(self.monitor)
-        if current_score is None:
-            if self.strict:
-                available: list[str] = list(metrics.keys())
-                raise MisconfigurationError(
-                    f"EarlyStopping monitor '{self.monitor}' not found in validation metrics. "
-                    f"Available: {available}. Set strict=False to suppress this error."
-                )
-            log.warning(f"EarlyStopping: metric '{self.monitor}' not found in metrics")
-            return
-
-        if self._is_improvement(current_score):
-            self.best_score = current_score.detach().clone()
-            self.wait_count: int = 0
-        else:
-            self.wait_count += 1
-            should_stop: bool = self.wait_count >= self.patience
-            should_stop: bool = trainer.strategy.reduce_boolean_decision(should_stop)
-            if should_stop:
-                self.stopped_epoch: int = module.current_epoch
-                trainer.should_stop = True
-
-    def _is_improvement(self, current: torch.Tensor) -> bool:
-        # Applies the improvement test in the configured direction, requiring
-        # the current value to beat the best score by more than min_delta.
-        best_score: torch.Tensor = self.best_score.to(current.device)
-        if self.mode == "min":
-            return bool(current < best_score - self.min_delta)
-        return bool(current > best_score + self.min_delta)
+        self.stopping_reason: StoppingReason | None = None
+        self.stopping_reason_message: str | None = None
 
     @property
+    @override
     def state_key(self) -> str:
-        # Qualifies the checkpoint identity with monitor and mode so multiple
-        # instances watching different metrics persist independently.
-        return self._generate_state_key(monitor=self.monitor, mode=self.mode)
+        return self._generate_state_key(
+            monitor=self.monitor,
+            min_delta=self.min_delta,
+            patience=self.patience,
+            mode=self.mode,
+            check_finite=self.check_finite,
+            stopping_threshold=self.stopping_threshold,
+            divergence_threshold=self.divergence_threshold
+        )
+
+    @override
+    def on_validation_epoch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        if trainer.fast_dev_run or trainer.sanity_checking:
+            return
+        local_score: torch.Tensor | None = trainer.callback_metrics.get(self.monitor)
+        broadcast_score: torch.Tensor | None = trainer.strategy.broadcast(
+            local_score if trainer.is_global_zero else None
+        )
+        if broadcast_score is None:
+            message: str = (
+                f"EarlyStopping monitor {self.monitor!r} is unavailable. "
+                f"Available metrics: {sorted(trainer.callback_metrics)}."
+            )
+            if self.strict:
+                raise MisconfigurationError(message)
+            if trainer.is_global_zero:
+                log.warning(message)
+            return
+        if broadcast_score.numel() != 1:
+            raise MisconfigurationError(
+                f"EarlyStopping monitor {self.monitor!r} must be scalar, "
+                f"got shape {tuple(broadcast_score.shape)}."
+            )
+        current_score: torch.Tensor = broadcast_score.detach().cpu().squeeze()
+        should_stop: bool
+        reason: StoppingReason | None
+        message: str | None
+        should_stop, reason, message = self._evaluate(current_score)
+        synchronized_stop: bool = trainer.strategy.reduce_boolean_decision(
+            should_stop,
+            all=False
+        )
+        trainer.should_stop = trainer.should_stop or synchronized_stop
+        if not synchronized_stop:
+            return
+        self.stopped_epoch: int = module.current_epoch
+        self.stopping_reason: StoppingReason | None = reason
+        self.stopping_reason_message: str | None = message
+        if self.verbose and trainer.is_global_zero and message is not None:
+            log.info(message)
 
     @override
     def state_dict(self) -> StateDict:
-        # Persists the patience counter, best score, and the epoch at which a
-        # stop triggered, so resumption continues the plateau measurement.
-        state_dict: StateDict = {
+        return {
             "wait_count": self.wait_count,
-            "best_score": self.best_score,
-            "stopped_epoch": self.stopped_epoch
+            "best_score": self.best_score.detach().cpu().clone(),
+            "stopped_epoch": self.stopped_epoch,
+            "stopping_reason": self.stopping_reason,
+            "stopping_reason_message": self.stopping_reason_message
         }
-        return state_dict
 
     @override
     def load_state_dict(self, state_dict: StateDict) -> None:
-        # Restores the persisted counters with None-guarded coercion; missing
-        # entries fall back to the freshly initialized values.
-        wait_count: object = state_dict.get("wait_count", 0)
-        best_score: object = state_dict.get("best_score", self.best_score)
-        stopped_epoch: object = state_dict.get("stopped_epoch", 0)
-        scalar_types: tuple[type[bool], type[int], type[float], type[str]] = (
-            bool,
-            int,
-            float,
-            str
-        )
-        if wait_count is not None and not isinstance(wait_count, scalar_types):
-            raise TypeError("EarlyStopping wait_count checkpoint state must be scalar.")
-        if best_score is not None and not isinstance(
-            best_score,
-            (*scalar_types, torch.Tensor)
+        wait_value: StateValue | None = state_dict.get("wait_count")
+        score_value: StateValue | None = state_dict.get("best_score")
+        epoch_value: StateValue | None = state_dict.get("stopped_epoch")
+        reason_value: StateValue | None = state_dict.get("stopping_reason")
+        message_value: StateValue | None = state_dict.get("stopping_reason_message")
+        if type(wait_value) is not int or wait_value < 0:
+            raise TypeError("EarlyStopping wait_count must be a non-negative integer.")
+        if type(epoch_value) is not int or epoch_value < 0:
+            raise TypeError("EarlyStopping stopped_epoch must be a non-negative integer.")
+        if reason_value not in (
+            None,
+            "stopping_threshold",
+            "divergence_threshold",
+            "patience_exhausted",
+            "non_finite_metric"
         ):
-            raise TypeError("EarlyStopping best_score checkpoint state must be scalar.")
-        if stopped_epoch is not None and not isinstance(stopped_epoch, scalar_types):
-            raise TypeError("EarlyStopping stopped_epoch checkpoint state must be scalar.")
-        self.wait_count: int = int(wait_count if wait_count is not None else 0)
-        if isinstance(best_score, torch.Tensor):
-            if best_score.numel() != 1:
-                raise TypeError("EarlyStopping best_score checkpoint state must be scalar.")
-            self.best_score = best_score.detach().clone().squeeze()
-        elif best_score is not None:
-            self.best_score = torch.tensor(float(best_score))
-        self.stopped_epoch: int = int(stopped_epoch if stopped_epoch is not None else 0)
+            raise TypeError("EarlyStopping stopping_reason is invalid.")
+        if message_value is not None and not isinstance(message_value, str):
+            raise TypeError("EarlyStopping stopping_reason_message must be a string or None.")
+        if isinstance(score_value, torch.Tensor):
+            if score_value.numel() != 1:
+                raise TypeError("EarlyStopping best_score must be scalar.")
+            best_score: torch.Tensor = score_value.detach().cpu().clone().squeeze()
+        elif type(score_value) is int or type(score_value) is float:
+            best_score = torch.tensor(float(score_value))
+        else:
+            raise TypeError("EarlyStopping best_score must be a scalar tensor or number.")
+        self.wait_count: int = wait_value
+        self.best_score: torch.Tensor = best_score
+        self.stopped_epoch: int = epoch_value
+        self.stopping_reason: StoppingReason | None = reason_value
+        self.stopping_reason_message: str | None = message_value
+
+    def _evaluate(
+        self,
+        current_score: torch.Tensor
+    ) -> tuple[bool, StoppingReason | None, str | None]:
+        current_value: float = float(current_score.item())
+        if self.check_finite and not bool(torch.isfinite(current_score)):
+            return (
+                True,
+                "non_finite_metric",
+                f"Early stopping because {self.monitor}={current_value} is non-finite."
+            )
+        if self._reached_stopping_threshold(current_value):
+            return (
+                True,
+                "stopping_threshold",
+                f"Early stopping because {self.monitor}={current_value} reached "
+                f"the target {self.stopping_threshold}."
+            )
+        if self._reached_divergence_threshold(current_value):
+            return (
+                True,
+                "divergence_threshold",
+                f"Early stopping because {self.monitor}={current_value} crossed "
+                f"the divergence limit {self.divergence_threshold}."
+            )
+        if self._is_improvement(current_value):
+            self.best_score: torch.Tensor = torch.tensor(current_value)
+            self.wait_count: int = 0
+            self.stopping_reason: StoppingReason | None = None
+            self.stopping_reason_message: str | None = None
+            return False, None, None
+        self.wait_count += 1
+        if self.wait_count < self.patience:
+            return False, None, None
+        return (
+            True,
+            "patience_exhausted",
+            f"Early stopping because {self.monitor} did not improve for "
+            f"{self.wait_count} validation checks. Best={float(self.best_score)}."
+        )
+
+    def _is_improvement(self, current_value: float) -> bool:
+        best_value: float = float(self.best_score)
+        if self.mode == "min":
+            return current_value < best_value - self.min_delta
+        return current_value > best_value + self.min_delta
+
+    def _reached_stopping_threshold(self, current_value: float) -> bool:
+        if self.stopping_threshold is None:
+            return False
+        if self.mode == "min":
+            return current_value <= self.stopping_threshold
+        return current_value >= self.stopping_threshold
+
+    def _reached_divergence_threshold(self, current_value: float) -> bool:
+        if self.divergence_threshold is None:
+            return False
+        if self.mode == "min":
+            return current_value >= self.divergence_threshold
+        return current_value <= self.divergence_threshold
+
+    @staticmethod
+    def _validate_threshold(name: str, value: float | None) -> None:
+        if value is None:
+            return
+        if type(value) not in (int, float):
+            raise TypeError(f"`{name}` must be a finite number or None.")
+        if not math.isfinite(float(value)):
+            raise ValueError(f"`{name}` must be a finite number or None.")
 
     @override
     def __repr__(self) -> str:
-        # Compact configuration line for logs and interactive debugging.
         return (
-            f"EarlyStopping("
-            f"monitor={self.monitor!r}, "
-            f"patience={self.patience}, "
-            f"mode={self.mode!r}, "
-            f"min_delta={self.min_delta}, "
-            f"strict={self.strict})"
+            f"EarlyStopping(monitor={self.monitor!r}, min_delta={self.min_delta}, "
+            f"patience={self.patience}, verbose={self.verbose}, "
+            f"mode={self.mode!r}, strict={self.strict}, "
+            f"check_finite={self.check_finite}, "
+            f"stopping_threshold={self.stopping_threshold}, "
+            f"divergence_threshold={self.divergence_threshold})"
         )

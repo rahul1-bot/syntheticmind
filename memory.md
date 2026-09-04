@@ -177,13 +177,6 @@
     5. Strategy and precision jointly own the actual optimizer step because wrapping, sharding, scaling, unscaling, and overflow behavior depend on execution topology and numerical policy.
     6. Scheduler cadence belongs to the training epoch lifecycle, while `Module.lr_scheduler_step` remains the explicit extension hook for schedulers outside the standard PyTorch API.
 
-| Memory | Canonical Import Paths Express Ownership | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
-
-    1. Moving a class without removing its former import path preserves ambiguous ownership. A ground-up private framework should update consumers directly and leave exactly one canonical implementation path.
-    2. Trainer state is not a general state-domain package; its status, stage, counters, interruption, and stop flag change with Trainer lifecycle and therefore belong beside Trainer.
-    3. Connector extraction should precede canonical Trainer relocation when it materially shrinks the orchestration module and establishes the package's conceptual contents before imports move.
-    4. Subprocess and multiprocessing launchers are mandatory relocation tests because serialized module paths and conditional annotations can remain stale after local imports appear successful.
-
 | Memory | Hook Contracts Are Machine-Learning Concepts | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
 
     1. Hook families are not arbitrary mixins created to shorten a file. They are the stable extension vocabulary through which research models and data modules participate in deterministic Trainer and loop boundaries.
@@ -292,3 +285,11 @@
     2. CUDA allocator state, Apple MPS memory state, and CPU process or load state are different domains; forcing them through CUDA globals misreports the selected runtime.
     3. Filter validation must occur against the live backend's available keys so misspellings fail before silently producing an empty metric stream.
     4. Device statistics are per-rank observations; the current single experiment logger records global rank zero, while callback values remain on the selected device.
+
+| Memory | Early Stopping Requires One Distributed Score | Date: 04 September 2026 | Time: 01:03 PM | Name: Ghost |
+
+    1. Early stopping patience counts monitor checks, not epochs; validation frequency therefore changes the minimum training horizon without changing callback patience.
+    2. Rank-zero-only metrics require a rank-zero broadcast before evaluation, otherwise some workers stop while others raise a missing-monitor error or continue into unmatched collectives.
+    3. Target attainment, divergence, non-finite values, patience exhaustion, and improvement are distinct state transitions and should retain explicit reasons rather than one opaque boolean.
+    4. Configuration identity and persisted best score, wait count, epoch, and reason must align so several stopping policies can coexist and resume without stealing one another's state.
+    5. Missing monitors must fail consistently on every rank under strict mode or produce one rank-zero warning without mutating patience under non-strict mode.
