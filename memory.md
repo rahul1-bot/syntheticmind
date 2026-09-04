@@ -185,13 +185,6 @@
     4. Hook dispatch belongs to Trainer and loops, hook implementations belong to modules, data modules, and callbacks, and hook-name logging policy belongs with the hook vocabulary. A separate rule-model family adds no independent state, boundary, or lifecycle.
     5. Serialized checkpoint field strings are durable schema values, while Python identifiers naming those fields are implementation details. Renaming the identifiers to lower snake case removes style debt without migrating the checkpoint format.
 
-| Memory | Plugin Categories and Process Launch Placement | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
-
-    1. Precision is an interchangeable numerical-execution plugin even though its behavior reaches deeply into module initialization, forward contexts, backward execution, optimizer stepping, gradient scaling, and checkpoint state.
-    2. A package name must describe the concepts actually implemented rather than copy the breadth of an upstream framework. `checkpoint_io.py` is correct while checkpoint transport is the only I/O plugin family; `io/` becomes justified only if distinct plugin I/O concepts actually appear.
-    3. Launcher policy and launcher mechanisms form one distributed-systems concept. Keeping the policy module beside Strategy while its subprocess and multiprocessing implementations live in `launchers/` makes ownership harder to infer and creates an artificial package boundary.
-    4. Relocation verification must include importable spawned workers, subprocess workers, Strategy serialization, optional precision adapters, and checkpoint wrappers because local construction cannot expose stale serialized module paths.
-
 | Memory | Utility Evacuation Ownership Test | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
 
     1. A generic helper must move to the narrowest existing owner whose lifecycle, state, or external boundary gives the behavior meaning; one-consumer traversals remain private methods and dead native-operation façades are deleted.
@@ -293,3 +286,11 @@
     3. Target attainment, divergence, non-finite values, patience exhaustion, and improvement are distinct state transitions and should retain explicit reasons rather than one opaque boolean.
     4. Configuration identity and persisted best score, wait count, epoch, and reason must align so several stopping policies can coexist and resume without stealing one another's state.
     5. Missing monitors must fail consistently on every rank under strict mode or produce one rank-zero warning without mutating patience under non-strict mode.
+
+| Memory | Timer Separates Budget and Presentation Clocks | Date: 04 September 2026 | Time: 01:10 PM | Name: Ghost |
+
+    1. The resumable training budget is continuous wall time from train start through validation and callback work, while active epoch-training time pauses around validation so progress rates remain honest.
+    2. Latest validation, test, and prediction durations are stage observations, not additional offsets in the training budget; duplicate dictionaries for cumulative and latest state create contradictory authorities.
+    3. A distributed time limit must be decided by one rank and broadcast because independent wall clocks cross the boundary at different instants.
+    4. Restored elapsed time must be checked before the next training batch, and the reached flag must cross launcher state so the dormant parent reports the worker outcome.
+    5. Duration strings and mappings are boundary input and require strict field ranges, unit names, integer values, and a positive finite resolved interval.

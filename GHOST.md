@@ -272,3 +272,13 @@
     4. Best score, validation-check wait count, stopped epoch, and reason persist through the callback-state channel with strict scalar restoration and configuration-qualified identity.
     5. Patience counts validation checks rather than epochs, sanity and fast-development passes remain excluded, and missing metrics either fail on every rank or warn once on global rank zero.
     6. Local patience, target, divergence, non-finite, missing-monitor, invalid-state, and exact-resume paths plus spawned DDP rank-zero-only monitoring pass.
+
+| Architecture Decision | Resumable Wall-Clock Timer | Date: 04 September 2026 | Time: 01:10 PM | Name: Ghost |
+
+    1. Timer now has one continuous resumable training budget clock, one active epoch-training clock paused during validation, and one latest-pass clock for fit, validation, test, and prediction.
+    2. Step and epoch interruption cadence remains explicit, while validation completion checks a step-level or epoch-boundary limit so long validation cannot hide an exhausted budget.
+    3. Global rank zero evaluates the wall-clock boundary and broadcasts the decision, avoiding drift-dependent all-rank consensus.
+    4. Elapsed training time and the reached flag persist with strict finite state; a depleted checkpoint stops before another batch and spawned workers reconcile the outcome to their parent.
+    5. Duration strings enforce clock-field ranges, mappings enforce supported non-negative integer units, and every duration resolves to a positive finite interval.
+    6. Stage-clock isolation, validation pause, step stopping, depleted restore, invalid duration and state, progress rendering, and spawned DDP consensus pass.
+    7. The cohesive 464-line module and 443-line class exceed generic structural limits under the concept-first authority; fake clock-store, duration-factory, or stop-manager classes are rejected.

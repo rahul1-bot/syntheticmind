@@ -237,7 +237,7 @@
 
 | Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. Timer and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, or persisted-state defects.
+    1. ModelCheckpoint remains the final accepted callback concept with unresolved validation, lifecycle, retention, and persisted-state defects.
     2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose distributed quantities or persisted state remain semantically wrong.
     3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
 
@@ -286,3 +286,11 @@
     3. ✅ Improvement, patience, target, divergence, and non-finite transitions retain explicit persisted reasons and strict scalar state.
     4. ✅ Sanity and fast-development checks remain excluded, and missing monitor behavior is consistent under strict and non-strict modes.
     5. ✅ Local state-machine, exact checkpoint resume, invalid configuration and state, and spawned DDP rank-zero metric probes pass.
+
+| Progress Complete | Resumable Wall-Clock Timer | Date: 04 September 2026 | Time: 01:10 PM | Name: Ghost |
+
+    1. ✅ Timer uses one resumable continuous training budget, an active epoch-training clock paused around validation, and isolated latest-stage clocks.
+    2. ✅ Step and epoch cadence, post-validation checks, rank-zero broadcast consensus, and pre-batch depleted-state stopping execute through one state machine.
+    3. ✅ Elapsed and reached state restore strictly and reconcile from spawned workers to the parent.
+    4. ✅ String, mapping, timedelta, interval, verbosity, and checkpoint state boundaries reject invalid or non-positive values.
+    5. ✅ Deterministic stage-clock, live wall-time, validation-pause, restored-limit, progress, and spawned DDP probes pass.
