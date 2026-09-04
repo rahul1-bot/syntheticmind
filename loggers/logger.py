@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from syntheticmind.storage.filesystem import join_path, normalize_path
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import HyperparameterDict, HyperparameterValue
 
 __all__: list[str] = ["Logger"]
@@ -36,7 +36,7 @@ class Logger:
             raise ValueError(f"Integer logger versions must be non-negative, got {version}.")
         if isinstance(version, str):
             self._validate_path_segment(version, "version")
-        self._save_dir: str = normalize_path(save_dir)
+        self._save_dir: str = StoragePath(save_dir).normalized
         self._name: str = name
         self._version: int | str | None = version
 
@@ -69,7 +69,7 @@ class Logger:
 
     def _log_directory(self) -> str:
         directory: str = (
-            join_path(self._save_dir, self._name)
+            StoragePath(self._save_dir).join(self._name)
             if self._name
             else self._save_dir
         )
@@ -80,7 +80,7 @@ class Logger:
             if isinstance(self._version, int)
             else self._version
         )
-        return join_path(directory, version_segment)
+        return StoragePath(directory).join(version_segment)
 
     def _validated_metrics(
         self,

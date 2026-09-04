@@ -6,14 +6,7 @@ import syntheticmind
 import torch
 
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.storage.filesystem import (
-    exists,
-    is_local_path,
-    is_path_within,
-    join_path,
-    normalize_path,
-    same_path
-)
+from syntheticmind.storage.filesystem import StoragePath
 
 __all__: list[str] = []
 
@@ -43,7 +36,7 @@ class _CheckpointPaths:
                 if trainer.loggers and not trainer.fast_dev_run
                 else trainer.default_root_dir
             )
-            self.dirpath: str | None = join_path(root, "checkpoints")
+            self.dirpath: str | None = StoragePath(root).join("checkpoints")
         return self.dirpath
 
     def format_checkpoint_name(
@@ -68,14 +61,14 @@ class _CheckpointPaths:
                 f"Checkpoint filename escapes its directory: {relative_path}."
             )
         filepath: str = (
-            join_path(self.dirpath, str(relative_path))
+            StoragePath(self.dirpath).join(str(relative_path))
             if self.dirpath is not None
             else str(relative_path)
         )
         if (
             self.dirpath is not None
-            and is_local_path(self.dirpath)
-            and not is_path_within(filepath, self.dirpath)
+            and StoragePath(self.dirpath).is_local
+            and not StoragePath(filepath).is_within(self.dirpath)
         ):
             raise MisconfigurationError(
                 f"Checkpoint path {filepath!r} escapes directory {self.dirpath!r}."
@@ -126,16 +119,20 @@ class _CheckpointPaths:
     ) -> bool:
         if previous == current:
             return False
-        if not is_local_path(previous):
+        if not StoragePath(previous).is_local:
             return True
         resume_path: str | Path | None = (
             trainer.ckpt_path
             if trainer.ckpt_path is not None
             else trainer.resume_from_checkpoint
         )
-        if resume_path is not None and same_path(previous, str(resume_path)):
+        if resume_path is not None and StoragePath(previous).same_as(
+            str(resume_path)
+        ):
             return False
-        return self.dirpath is not None and is_path_within(previous, self.dirpath)
+        return self.dirpath is not None and StoragePath(previous).is_within(
+            self.dirpath
+        )
 
     def link_checkpoint(
         self,
@@ -144,10 +141,10 @@ class _CheckpointPaths:
         linkpath: str | Path,
         synchronize: bool = True
     ) -> None:
-        if not is_local_path(filepath) or not is_local_path(linkpath):
+        if not StoragePath(filepath).is_local or not StoragePath(linkpath).is_local:
             raise ValueError("Checkpoint links require local paths.")
-        source_path: Path = Path(normalize_path(filepath))
-        target_path: Path = Path(normalize_path(linkpath))
+        source_path: Path = Path(StoragePath(filepath).normalized)
+        target_path: Path = Path(StoragePath(linkpath).normalized)
         if not trainer.is_global_zero:
             if synchronize:
                 trainer.strategy.barrier()
@@ -215,14 +212,16 @@ class _CheckpointPaths:
         trainer: syntheticmind.Trainer | None
     ) -> bool:
         if trainer is None:
-            return exists(filepath)
-        path_exists: bool = exists(filepath) if trainer.is_global_zero else False
+            return StoragePath(filepath).exists()
+        path_exists: bool = (
+            StoragePath(filepath).exists() if trainer.is_global_zero else False
+        )
         return trainer.strategy.broadcast(path_exists)
 
     def _normalize_directory(self, dirpath: str | Path | None) -> str | None:
         if dirpath is None:
             return None
-        normalized_path: str = normalize_path(dirpath)
-        if is_local_path(normalized_path):
+        normalized_path: str = StoragePath(dirpath).normalized
+        if StoragePath(normalized_path).is_local:
             return str(Path(normalized_path).expanduser().resolve())
         return normalized_path

@@ -69,12 +69,7 @@ from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.trainer.hook_dispatcher import _HookDispatcher
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
-from syntheticmind.storage.filesystem import (
-    basename,
-    list_directory,
-    modified_time,
-    normalize_path
-)
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     Batch,
     CheckpointDict,
@@ -267,7 +262,7 @@ class Trainer:
         self.inference_mode: bool = configuration.inference_mode
         self._detect_anomaly: bool = configuration.detect_anomaly
         self.resume_from_checkpoint: str | Path | None = (
-            normalize_path(resume_from_checkpoint)
+            StoragePath(resume_from_checkpoint).normalized
             if resume_from_checkpoint is not None
             else None
         )
@@ -2404,7 +2399,7 @@ class Trainer:
 
     @property
     def default_root_dir(self) -> str:
-        return normalize_path(self._default_root_dir)
+        return StoragePath(self._default_root_dir).normalized
 
     @property
     def log_dir(self) -> str:

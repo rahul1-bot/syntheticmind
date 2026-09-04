@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Protocol, override
 
 from syntheticmind.loggers.logger import Logger, _JsonValue
-from syntheticmind.storage.filesystem import is_local_path
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import HyperparameterDict
 
 __all__: list[str] = ["TensorBoardLogger"]
@@ -42,7 +42,7 @@ class TensorBoardLogger(Logger):
         version: int | str | None = None
     ) -> None:
         super().__init__(save_dir=save_dir, name=name, version=version)
-        if not is_local_path(self.log_dir):
+        if not StoragePath(self.log_dir).is_local:
             raise ValueError("TensorBoardLogger requires a local filesystem directory.")
         self._writer: _TensorBoardWriter | None = None
 

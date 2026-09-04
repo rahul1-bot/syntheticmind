@@ -12,7 +12,7 @@ from syntheticmind.plugins.checkpoint_io import (
     TorchCheckpointIO,
     _WrappingCheckpointIO
 )
-from syntheticmind.storage.filesystem import is_file, normalize_path
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
@@ -123,7 +123,7 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
-        normalized_path: str = normalize_path(checkpoint_path)
+        normalized_path: str = StoragePath(checkpoint_path).normalized
         checkpoint: CheckpointDict | None = (
             self._preloaded_checkpoint
             if self._preloaded_path == normalized_path
@@ -142,13 +142,13 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         weights_only: bool | None
     ) -> CheckpointDict:
         checkpoint: CheckpointDict = self._read(checkpoint_path, weights_only)
-        self._preloaded_path: str | None = normalize_path(checkpoint_path)
+        self._preloaded_path: str | None = StoragePath(checkpoint_path).normalized
         self._preloaded_checkpoint: CheckpointDict | None = checkpoint
         return checkpoint
 
     @override
     def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool:
-        return is_file(checkpoint_path)
+        return StoragePath(checkpoint_path).is_file()
 
     @override
     def model_state_dict(self) -> ModelState:

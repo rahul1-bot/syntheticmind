@@ -1,4 +1,5 @@
 import warnings
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -20,12 +21,7 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
 from syntheticmind.trainer.configuration import _TrainerConfigurationSnapshot
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.storage.filesystem import (
-    basename,
-    list_directory,
-    modified_time,
-    normalize_path
-)
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
@@ -98,7 +94,7 @@ class _CheckpointConnector:
             raise MisconfigurationError(
                 f"ckpt_path={selected_path!r} is unavailable without its integration."
             )
-        normalized_path: str = normalize_path(selected_path)
+        normalized_path: str = StoragePath(selected_path).normalized
         if not self._strategy.checkpoint.is_checkpoint_path(normalized_path):
             raise FileNotFoundError(f"Checkpoint not found: {normalized_path}")
         self._path: str | Path | None = normalized_path
@@ -595,8 +591,8 @@ class _CheckpointConnector:
                 candidates.append(callback.last_model_path)
             if callback.dirpath:
                 candidate: str
-                for candidate in list_directory(callback.dirpath):
-                    candidate_name: str = basename(candidate)
+                for candidate in StoragePath(callback.dirpath).list_directory():
+                    candidate_name: str = StoragePath(candidate).name
                     if (
                         candidate_name.startswith("last")
                         and candidate_name.endswith(".ckpt")
@@ -613,7 +609,14 @@ class _CheckpointConnector:
                     stacklevel=3
                 )
             return None
-        selected_path: str = max(unique_candidates, key=modified_time)
+        candidate_iterator: Iterator[str] = iter(unique_candidates)
+        selected_path: str = next(candidate_iterator)
+        selected_modified_time: float = StoragePath(selected_path).modified_time
+        for candidate in candidate_iterator:
+            candidate_modified_time: float = StoragePath(candidate).modified_time
+            if candidate_modified_time > selected_modified_time:
+                selected_path: str = candidate
+                selected_modified_time: float = candidate_modified_time
         self._path: str | Path | None = selected_path
         return selected_path
 

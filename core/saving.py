@@ -10,7 +10,7 @@ import torch
 import yaml
 from torch import nn
 
-from syntheticmind.storage.filesystem import basename, exists, open_binary, open_text
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
@@ -99,9 +99,9 @@ class _CheckpointLoader:
             cls._default_map_location if map_location is None else map_location
         )
         if isinstance(checkpoint_path, str | Path):
-            if not exists(checkpoint_path):
+            if not StoragePath(checkpoint_path).exists():
                 raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-            with open_binary(checkpoint_path, "rb") as checkpoint_file:
+            with StoragePath(checkpoint_path).open_binary("rb") as checkpoint_file:
                 checkpoint_value: CheckpointValue = cast(
                     CheckpointValue,
                     torch.load(
@@ -196,11 +196,14 @@ class _CheckpointLoader:
         cls,
         hparams_file: str | Path
     ) -> HyperparameterDict:
-        if not exists(hparams_file):
+        if not StoragePath(hparams_file).exists():
             raise FileNotFoundError(f"Hyperparameter file not found: {hparams_file}")
-        suffix: str = Path(basename(hparams_file)).suffix.lower()
+        suffix: str = Path(StoragePath(hparams_file).name).suffix.lower()
         if suffix == ".csv":
-            with open_text(hparams_file, "r", newline="") as source_file:
+            with StoragePath(hparams_file).open_text(
+                "r",
+                newline=""
+            ) as source_file:
                 rows: list[list[str]] = list(csv.reader(source_file))
             loaded: HyperparameterDict = {}
             row: list[str]
@@ -212,7 +215,7 @@ class _CheckpointLoader:
                 loaded[row[0]]: HyperparameterValue = cls._parse_scalar(row[1])
             return loaded
         if suffix in {".yaml", ".yml"}:
-            with open_text(hparams_file, "r") as source_file:
+            with StoragePath(hparams_file).open_text("r") as source_file:
                 loaded_yaml: HyperparameterValue = cast(
                     HyperparameterValue,
                     yaml.safe_load(source_file)
@@ -318,7 +321,9 @@ class _CheckpointLoader:
     @classmethod
     def _validate_schema(cls, checkpoint: CheckpointDict) -> None:
         schema_version: CheckpointValue | None = checkpoint.get("schema_version")
-        if schema_version != 1:
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+            raise TypeError("Checkpoint schema_version must be an integer.")
+        if schema_version != 2:
             raise ValueError(
                 f"Unsupported SyntheticMind checkpoint schema {schema_version!r}."
             )

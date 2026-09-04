@@ -15,7 +15,7 @@ from syntheticmind.callbacks.checkpointing.ranking import _CheckpointRanking
 from syntheticmind.callbacks.checkpointing.schedule import _CheckpointSchedule
 from syntheticmind.callbacks.checkpointing.transaction import _CheckpointTransaction
 from syntheticmind.core.module import Module
-from syntheticmind.storage.filesystem import exists, is_local_path, join_path, make_directory, write_text
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import Batch, StateDict, StepOutput, TrainerStage
 
 __all__: list[str] = ["ModelCheckpoint"]
@@ -161,10 +161,10 @@ class ModelCheckpoint(Checkpoint):
     ) -> None:
         del module
         directory: str = self._paths.resolve_directory(trainer)
-        if self.save_last == "link" and not is_local_path(directory):
+        if self.save_last == "link" and not StoragePath(directory).is_local:
             raise ValueError("`save_last='link'` requires a local checkpoint directory.")
         if stage == "fit" and not trainer.fast_dev_run and trainer.is_global_zero:
-            make_directory(directory)
+            StoragePath(directory).make_directory()
 
     @override
     def on_train_start(
@@ -334,7 +334,9 @@ class ModelCheckpoint(Checkpoint):
         filepath: str | Path,
         trainer: syntheticmind.Trainer
     ) -> bool:
-        path_exists: bool = exists(filepath) if trainer.is_global_zero else False
+        path_exists: bool = (
+            StoragePath(filepath).exists() if trainer.is_global_zero else False
+        )
         return trainer.strategy.broadcast(path_exists)
 
     def to_yaml(self, filepath: str | Path | None = None) -> None:
@@ -342,8 +344,7 @@ class ModelCheckpoint(Checkpoint):
         if filepath is None:
             if self.dirpath is None:
                 raise RuntimeError("ModelCheckpoint directory is unresolved before setup.")
-            destination: str | Path = join_path(
-                self.dirpath,
+            destination: str | Path = StoragePath(self.dirpath).join(
                 "best_k_models.yaml"
             )
         else:
@@ -351,7 +352,9 @@ class ModelCheckpoint(Checkpoint):
         values: dict[str, float] = {
             path: float(score) for path, score in self.best_k_models.items()
         }
-        write_text(destination, json.dumps(values, indent=2, sort_keys=True))
+        StoragePath(destination).write_text(
+            json.dumps(values, indent=2, sort_keys=True)
+        )
 
     @override
     def on_exception(

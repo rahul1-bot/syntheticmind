@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import override
 
 from syntheticmind.profilers.profiler import Profiler
-from syntheticmind.storage.filesystem import join_path, local_artifact_path
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import TrainerStage
 
 __all__: list[str] = ["AdvancedProfiler"]
@@ -125,11 +125,10 @@ class AdvancedProfiler(Profiler):
             raise RuntimeError(
                 "AdvancedProfiler requires a directory to dump raw statistics."
             )
-        destination: str = join_path(
-            self.dirpath,
+        destination: str = StoragePath(self.dirpath).join(
             self._prepare_filename(action_name, ".prof")
         )
-        with local_artifact_path(destination) as local_path:
+        with StoragePath(destination).local_artifact() as local_path:
             profile.dump_stats(str(local_path))
 
     @override

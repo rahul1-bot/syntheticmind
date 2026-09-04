@@ -3,15 +3,14 @@ import os
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, cast
+from typing import Annotated, ClassVar, Literal
 from uuid import uuid7
 
 from fsspec.spec import AbstractFileSystem
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from syntheticmind.exceptions import CheckpointError
-from syntheticmind.storage.filesystem import get_filesystem, is_file, is_local_path
-from syntheticmind.storage.filesystem import join_path, normalize_path
+from syntheticmind.storage.filesystem import StoragePath
 
 __all__: list[str] = []
 
@@ -51,7 +50,7 @@ class _CheckpointGenerationIndex:
         self._pointer_filename: str = "active_generation"
 
     def exists(self, checkpoint_path: str | Path) -> bool:
-        return is_file(self._pointer_path(checkpoint_path))
+        return StoragePath(self._pointer_path(checkpoint_path)).is_file()
 
     def create_generation_id(
         self,
@@ -72,13 +71,9 @@ class _CheckpointGenerationIndex:
         checkpoint_path: str | Path
     ) -> _CheckpointGenerationPointer | None:
         pointer_path: str = self._pointer_path(checkpoint_path)
-        if not is_file(pointer_path):
+        if not StoragePath(pointer_path).is_file():
             return None
-        with get_filesystem(pointer_path).open(
-            os.fspath(pointer_path),
-            "r",
-            encoding="utf-8"
-        ) as pointer_file:
+        with StoragePath(pointer_path).open_text("r") as pointer_file:
             pointer_payload: str = pointer_file.read()
         try:
             return _CheckpointGenerationPointer.model_validate_json(pointer_payload)
@@ -107,7 +102,7 @@ class _CheckpointGenerationIndex:
         return pointer
 
     def _pointer_path(self, checkpoint_path: str | Path) -> str:
-        return join_path(checkpoint_path, self._pointer_filename)
+        return StoragePath(checkpoint_path).join(self._pointer_filename)
 
     def _write(
         self,
@@ -115,21 +110,14 @@ class _CheckpointGenerationIndex:
         pointer: _CheckpointGenerationPointer
     ) -> None:
         pointer_payload: str = pointer.model_dump_json()
-        if not is_local_path(pointer_path):
-            filesystem: AbstractFileSystem = get_filesystem(pointer_path)
+        storage_path: StoragePath = StoragePath(pointer_path)
+        if not storage_path.is_local:
+            filesystem: AbstractFileSystem = storage_path.filesystem
             with filesystem.transaction:
-                opened_file: io.TextIOBase = cast(
-                    io.TextIOBase,
-                    filesystem.open(
-                        os.fspath(pointer_path),
-                        "w",
-                        encoding="utf-8"
-                    )
-                )
-                with opened_file:
+                with storage_path.open_text("w") as opened_file:
                     opened_file.write(pointer_payload)
             return
-        local_pointer_path: Path = Path(normalize_path(pointer_path))
+        local_pointer_path: Path = Path(storage_path.normalized)
         local_pointer_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_file: tuple[int, str] = tempfile.mkstemp(
             dir=str(local_pointer_path.parent),

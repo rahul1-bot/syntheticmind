@@ -10,12 +10,7 @@ from syntheticmind.loggers.csv_logger import CSVLogger
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loggers.tensorboard import TensorBoardLogger
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.storage.filesystem import (
-    basename,
-    is_directory,
-    join_path,
-    list_directory
-)
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     HyperparameterDict,
     HyperparameterValue,
@@ -283,7 +278,9 @@ class _LoggerConnector:
 
     def _default_logger(self) -> Logger:
         name: str = "syntheticmind_logs"
-        version: int = self._next_version(join_path(self._default_root_dir, name))
+        version: int = self._next_version(
+            StoragePath(self._default_root_dir).join(name)
+        )
         if find_spec("tensorboard") is not None:
             return TensorBoardLogger(
                 save_dir=self._default_root_dir,
@@ -299,9 +296,10 @@ class _LoggerConnector:
     def _next_version(self, root_dir: str | Path) -> int:
         versions: list[int] = []
         path: str
-        for path in list_directory(root_dir):
-            name: str = basename(path)
-            if not is_directory(path) or not name.startswith("version_"):
+        for path in StoragePath(root_dir).list_directory():
+            storage_path: StoragePath = StoragePath(path)
+            name: str = storage_path.name
+            if not storage_path.is_directory() or not name.startswith("version_"):
                 continue
             suffix: str = name.removeprefix("version_")
             if suffix.isdigit():

@@ -18,7 +18,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.generation import Che
 from syntheticmind.strategies.model_parallel_checkpointing.sharded_store import (
     _ShardedCheckpointStore
 )
-from syntheticmind.storage.filesystem import is_directory, is_file, remove_path
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
@@ -41,7 +41,7 @@ class _ModelParallelCheckpointIO:
         self._sharded_store: _ShardedCheckpointStore = _ShardedCheckpointStore()
 
     def is_checkpoint(self, path: str | Path) -> bool:
-        return is_file(path) or self._sharded_store.is_checkpoint(path)
+        return StoragePath(path).is_file() or self._sharded_store.is_checkpoint(path)
 
     def load_metadata(
         self,
@@ -50,7 +50,7 @@ class _ModelParallelCheckpointIO:
     ) -> CheckpointDict:
         if self._sharded_store.is_checkpoint(path):
             return self._sharded_store.load_metadata(path, weights_only)
-        if is_file(path):
+        if StoragePath(path).is_file():
             return self._checkpoint_io.load_checkpoint(path, weights_only=weights_only)
         raise ValueError(
             f"The path {str(path)!r} does not point to a full or sharded checkpoint."
@@ -92,7 +92,7 @@ class _ModelParallelCheckpointIO:
                 strict,
                 weights_only
             )
-        if not is_file(path):
+        if not StoragePath(path).is_file():
             raise ValueError(
                 f"The path {str(path)!r} does not point to a full or sharded checkpoint."
             )
@@ -125,7 +125,7 @@ class _ModelParallelCheckpointIO:
         )
 
     def remove(self, path: str | Path) -> None:
-        remove_path(path, recursive=True)
+        StoragePath(path).remove(recursive=True)
 
     def _save_sharded(
         self,
@@ -155,7 +155,7 @@ class _ModelParallelCheckpointIO:
         path: str | Path,
         global_rank: int
     ) -> None:
-        if is_directory(path):
+        if StoragePath(path).is_directory():
             if self._sharded_store.is_checkpoint(path):
                 raise FileExistsError(
                     "A sharded checkpoint already owns this path. Save the full "

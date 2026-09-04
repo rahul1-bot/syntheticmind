@@ -16,10 +16,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.generation import (
     _CheckpointGenerationPointer
 )
 from syntheticmind.exceptions import CheckpointError
-from syntheticmind.storage.filesystem import (
-    basename, is_directory, is_file, is_local_path, join_path,
-    list_directory, make_directory, normalize_path, remove_path
-)
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import CheckpointDict, DistributedCheckpointState
 
 __all__: list[str] = []
@@ -35,7 +32,7 @@ class _ShardedCheckpointStore:
         self._metadata_filename: str = "meta.pt"
 
     def is_checkpoint(self, path: str | Path) -> bool:
-        if not is_directory(path):
+        if not StoragePath(path).is_directory():
             return False
         return self._generation_index.exists(path) or self._is_complete_generation(path)
 
@@ -46,7 +43,7 @@ class _ShardedCheckpointStore:
     ) -> CheckpointDict:
         generation_path: str = self._active_generation_path(path)
         return self._checkpoint_io.load_checkpoint(
-            join_path(generation_path, self._metadata_filename),
+            StoragePath(generation_path).join(self._metadata_filename),
             weights_only=weights_only
         )
 
@@ -86,7 +83,7 @@ class _ShardedCheckpointStore:
         metadata_write: Callable[[], None] = partial(
             self._checkpoint_io.save_checkpoint,
             metadata,
-            join_path(generation_path, self._metadata_filename)
+            StoragePath(generation_path).join(self._metadata_filename)
         )
         self._run_rank_zero_operation(
             metadata_write,
@@ -115,18 +112,18 @@ class _ShardedCheckpointStore:
         distributed_checkpoint.load(state, storage_reader=reader)
 
     def remove(self, path: str | Path) -> None:
-        remove_path(path, recursive=True)
+        StoragePath(path).remove(recursive=True)
 
     def _prepare_generation(
         self,
         checkpoint_path: str | Path,
         generation_path: str | Path
     ) -> None:
-        if is_file(checkpoint_path):
+        if StoragePath(checkpoint_path).is_file():
             raise FileExistsError(
                 f"A full checkpoint file already exists at {checkpoint_path}."
             )
-        make_directory(generation_path)
+        StoragePath(generation_path).make_directory()
 
     def _publish_generation(
         self,
@@ -181,7 +178,7 @@ class _ShardedCheckpointStore:
         pointer: _CheckpointGenerationPointer | None = self._generation_index.read(path)
         if pointer is None:
             if self._is_complete_generation(path):
-                return normalize_path(path)
+                return StoragePath(path).normalized
             raise CheckpointError(
                 f"Sharded checkpoint has no published generation: {path}"
             )
@@ -198,16 +195,21 @@ class _ShardedCheckpointStore:
         checkpoint_path: str | Path,
         generation_name: str
     ) -> str:
-        return join_path(
-            checkpoint_path,
+        return StoragePath(checkpoint_path).join(
             self._generations_directory_name,
             generation_name
         )
 
     def _is_complete_generation(self, path: str | Path) -> bool:
-        return is_file(join_path(path, self._distributed_metadata_filename)) and is_file(
-            join_path(path, self._metadata_filename)
+        distributed_metadata_path: str = StoragePath(path).join(
+            self._distributed_metadata_filename
         )
+        trainer_metadata_path: str = StoragePath(path).join(
+            self._metadata_filename
+        )
+        return StoragePath(distributed_metadata_path).is_file() and StoragePath(
+            trainer_metadata_path
+        ).is_file()
 
     def _prune_generations(
         self,
@@ -220,17 +222,17 @@ class _ShardedCheckpointStore:
             if pointer is None:
                 return
             retained_generation_names: frozenset[str] = pointer.retained_generation_ids
-            generations_path: str = join_path(
-                checkpoint_path,
+            generations_path: str = StoragePath(checkpoint_path).join(
                 self._generations_directory_name
             )
             generation_path: str
-            for generation_path in list_directory(generations_path):
-                if not is_directory(generation_path):
+            for generation_path in StoragePath(generations_path).list_directory():
+                generation_storage_path: StoragePath = StoragePath(generation_path)
+                if not generation_storage_path.is_directory():
                     continue
-                if basename(generation_path) in retained_generation_names:
+                if generation_storage_path.name in retained_generation_names:
                     continue
-                remove_path(generation_path, recursive=True)
+                generation_storage_path.remove(recursive=True)
         except BaseException as exception:
             warnings.warn(
                 f"Published checkpoint but could not prune stale generations: {exception}",
@@ -239,11 +241,13 @@ class _ShardedCheckpointStore:
             )
 
     def _storage_writer(self, path: str | Path) -> StorageWriter:
-        if is_local_path(path):
-            return FileSystemWriter(normalize_path(path))
+        storage_path: StoragePath = StoragePath(path)
+        if storage_path.is_local:
+            return FileSystemWriter(storage_path.normalized)
         return FsspecWriter(path)
 
     def _storage_reader(self, path: str | Path) -> StorageReader:
-        if is_local_path(path):
-            return FileSystemReader(normalize_path(path))
+        storage_path: StoragePath = StoragePath(path)
+        if storage_path.is_local:
+            return FileSystemReader(storage_path.normalized)
         return FsspecReader(path)

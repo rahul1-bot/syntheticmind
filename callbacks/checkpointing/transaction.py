@@ -17,7 +17,7 @@ from syntheticmind.callbacks.checkpointing.schedule import (
     _ScheduleSnapshot
 )
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.storage.filesystem import file_size, is_file, make_directory
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import StateDict, StateValue
 
 __all__: list[str] = []
@@ -126,7 +126,7 @@ class _CheckpointTransaction:
         self._schedule.mark_saved(trainer.global_step, time.monotonic())
         self.last_checkpoint_saved: str = filepath
         try:
-            make_directory(self._paths.resolve_directory(trainer))
+            StoragePath(self._paths.resolve_directory(trainer)).make_directory()
             self._persist_checkpoint(trainer, filepath, False)
             self._save_last_checkpoint(
                 trainer,
@@ -261,7 +261,10 @@ class _CheckpointTransaction:
             self.restore_snapshot(snapshot)
             raise
         if self._verbose and trainer.is_global_zero:
-            log.info(f"Checkpoint saved at epoch={trainer.current_epoch}, step={trainer.global_step}: {filepath}")
+            log.info(
+                f"Checkpoint saved at epoch={trainer.current_epoch}, "
+                f"step={trainer.global_step}: {filepath}"
+            )
         self._remove_after_save(trainer, delete_path, filepath)
         return filepath
 
@@ -347,13 +350,14 @@ class _CheckpointTransaction:
             None,
             synchronize
         )
-        if trainer.is_global_zero and is_file(filepath) and trainer.loggers:
+        checkpoint_path: StoragePath = StoragePath(filepath)
+        if trainer.is_global_zero and checkpoint_path.is_file() and trainer.loggers:
             trainer._log_metrics(
                 {
                     "runtime/checkpoint_save_time_ms": (
                         time.perf_counter() - started_at
                     ) * 1000.0,
-                    "runtime/checkpoint_size_mb": file_size(filepath) / 1048576.0
+                    "runtime/checkpoint_size_mb": checkpoint_path.size / 1048576.0
                 },
                 step=trainer.global_step
             )

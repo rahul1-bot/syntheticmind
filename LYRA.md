@@ -259,3 +259,10 @@
     3. Mid-epoch continuation retains completed-batch coordinates and epoch-start randomness even when an ordinary dataloader exposes no state dictionary.
     4. Resolved configuration provenance permits a larger run ceiling while rejecting trajectory-changing accumulation, data, validation, clipping, determinism, sampler, synchronization, reload, or precision drift.
     5. Strict corruption, stochastic CPU and MPS resume, subprocess, spawn, DDP, and full or sharded model-parallel evidence controls schema acceptance.
+
+| Strategic Note | Path-Bound Storage Contract | Date: 04 September 2026 | Time: 05:20 PM | Name: Ghost |
+
+    1. StoragePath represents one protocol-aware location and retains its resolved fsspec backend, giving filesystem behavior real resource identity rather than hiding free functions inside a utility namespace.
+    2. Normalization, joining, containment, metadata, resources, traversal, mutation, copying, and local staging execute through that owner while public ML APIs continue accepting ordinary paths.
+    3. CheckpointIO, model-parallel shards, loggers, profilers, callbacks, model hydration, and Trainer remain artifact-semantic owners and consume StoragePath without surrendering their lifecycle decisions.
+    4. Local, file URL, memory remote, transactional CSV, profiler, full and sharded checkpoint, schema-v2 hydration, DDP, and failure-recovery probes pass without a compatibility function façade.

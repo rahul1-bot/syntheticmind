@@ -2,14 +2,13 @@ import io
 import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from functools import partial
 from pathlib import Path
 from typing import override
 
 from loguru import logger as log
 from torch import nn
 
-from syntheticmind.storage.filesystem import append_text, is_local_path, join_path, open_text
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import TrainerStage
 
 __all__: list[str] = ["PassThroughProfiler", "Profiler"]
@@ -134,12 +133,15 @@ class Profiler:
         if self._write_stream is not None:
             return
         if self.filename and self.dirpath is not None:
-            path: str = join_path(self.dirpath, self._prepare_filename())
-            if is_local_path(path):
-                self._output_file: io.TextIOBase | None = open_text(path, "a")
+            path: str = StoragePath(self.dirpath).join(self._prepare_filename())
+            storage_path: StoragePath = StoragePath(path)
+            if storage_path.is_local:
+                self._output_file: io.TextIOBase | None = storage_path.open_text(
+                    "a"
+                )
                 self._write_stream: _WriteStream | None = self._output_file.write
             else:
-                self._write_stream: _WriteStream | None = partial(append_text, path)
+                self._write_stream: _WriteStream | None = storage_path.append_text
             return
         self._write_stream: _WriteStream | None = self._write_to_log
 

@@ -16,7 +16,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.checkpoint_io import 
 )
 from syntheticmind.strategies.model_parallel_checkpointing.generation import CheckpointBroadcast
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.storage.filesystem import is_file, normalize_path
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
@@ -103,7 +103,7 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
             )
         self._pending_path: str | None = path
         self._pending_checkpoint: CheckpointDict | None = (
-            checkpoint if is_file(path) else None
+            checkpoint if StoragePath(path).is_file() else None
         )
         self._pending_weights_only: bool | None = weights_only
         return checkpoint
@@ -193,7 +193,10 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         return None
 
     def _synchronize_path(self, checkpoint_path: CheckpointPath) -> str:
-        path: str | None = self._broadcast(normalize_path(checkpoint_path), 0)
+        path: str | None = self._broadcast(
+            StoragePath(checkpoint_path).normalized,
+            0
+        )
         if not isinstance(path, str):
             raise TypeError("Checkpoint path broadcast must return a string.")
         return path

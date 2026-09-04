@@ -13,7 +13,7 @@
 | `callbacks/` | The lifecycle callbacks: checkpointing, early stopping, exponential moving averages, model inspection, monitoring, and numerical guards. |
 | `loggers/` | The metric-logger interface with CSV and TensorBoard implementations. |
 | `profilers/` | Runtime action measurement and trace export. |
-| `storage/` | Local and remote filesystem boundaries shared by checkpoints, loggers, profilers, and run artifacts. |
+| `storage/` | Path-bound local and remote filesystem resources shared by checkpoints, loggers, profilers, and run artifacts. |
 | `randomness.py` | Process-wide seeding plus immutable Python, NumPy, torch CPU, CUDA, and MPS random-state snapshots shared by checkpoint and launcher boundaries. |
 
 ## Contracts

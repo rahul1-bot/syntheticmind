@@ -175,12 +175,12 @@
     1. ✅ Evaluation context selection moved to Loop and process-wide deterministic or benchmark configuration moved to Trainer; both one-function utility modules were removed.
     2. ✅ Local stage execution, deterministic flag transitions, and spawned distributed evaluation pass after the ownership change.
 
-| Progress Complete | Checkpoint Transport and Filesystem Ownership | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
+| Progress Complete | Checkpoint Transport and StoragePath Ownership | Date: 04 September 2026 | Time: 05:20 PM | Name: Ghost |
 
     1. ✅ Local and remote torch serialization moved onto `TorchCheckpointIO`, model-parallel metadata composes that owner, and the free checkpoint utility module was removed.
     2. ✅ Model hydration, asynchronous snapshot isolation, sharded two-rank persistence, and injected distributed failure atomicity pass after consolidation.
-    3. ✅ Filesystem and artifact operations moved from utilities to the explicit storage boundary with every production and verification import updated.
-    4. ✅ Local and remote checkpoint transport, model hydration, profiler artifacts, and metric lifecycle execution pass through the canonical storage path.
+    3. ✅ One 214-line path-bound StoragePath replaced twenty-three free functions and owns resolved backend, local or remote semantics, resources, metadata, traversal, containment, mutation, copying, and staging without broad `object` returns.
+    4. ✅ Every production consumer migrated without a compatibility façade; local, file URL, memory remote, CSV, profiler, full checkpoint, remote callback, schema-v2 hydration, DDP, and sharded failure-recovery paths pass.
 
 | Progress Complete | Cross-Subsystem Contract Placement | Date: 04 September 2026 | Time: 05:07 PM | Name: Ghost |
 

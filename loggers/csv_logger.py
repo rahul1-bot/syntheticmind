@@ -5,22 +5,11 @@ import tempfile
 import warnings
 from io import StringIO, TextIOBase
 from pathlib import Path
-from typing import cast, override
+from typing import override
 
 from fsspec.spec import AbstractFileSystem
 from syntheticmind.loggers.logger import Logger, _JsonValue
-from syntheticmind.storage.filesystem import (
-    dirname,
-    exists,
-    file_size,
-    get_filesystem,
-    is_local_path,
-    join_path,
-    make_directory,
-    normalize_path,
-    open_text,
-    read_text
-)
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import HyperparameterDict
 
 __all__: list[str] = ["CSVLogger"]
@@ -34,8 +23,10 @@ class CSVLogger(Logger):
         version: int | str | None = None
     ) -> None:
         super().__init__(save_dir=save_dir, name=name, version=version)
-        self._metrics_path: str = join_path(self.log_dir, "metrics.csv")
-        self._hyperparameters_path: str = join_path(self.log_dir, "hparams.json")
+        self._metrics_path: str = StoragePath(self.log_dir).join("metrics.csv")
+        self._hyperparameters_path: str = StoragePath(self.log_dir).join(
+            "hparams.json"
+        )
         self._writer: csv.DictWriter | None = None
         self._file_handle: TextIOBase | None = None
         self._fieldnames: list[str] = self._read_existing_fieldnames()
@@ -59,7 +50,7 @@ class CSVLogger(Logger):
                 self._fieldnames: list[str] = previous_fieldnames
                 raise
         row: dict[str, int | float] = {"step": step, **validated_metrics}
-        if not is_local_path(self._metrics_path):
+        if not StoragePath(self._metrics_path).is_local:
             self._append_remote_row(row)
             return
         if self._writer is None:
@@ -96,10 +87,11 @@ class CSVLogger(Logger):
             file_handle.close()
 
     def _read_existing_fieldnames(self) -> list[str]:
-        if not exists(self._metrics_path) or file_size(self._metrics_path) == 0:
+        metrics_path: StoragePath = StoragePath(self._metrics_path)
+        if not metrics_path.exists() or metrics_path.size == 0:
             return ["step"]
         reader: csv.DictReader = csv.DictReader(
-            StringIO(read_text(self._metrics_path))
+            StringIO(metrics_path.read_text())
         )
         fieldnames: list[str] | None = reader.fieldnames
         if fieldnames is None or not fieldnames:
@@ -115,10 +107,11 @@ class CSVLogger(Logger):
         return list(fieldnames)
 
     def _read_existing_rows(self) -> list[_CSVRow]:
-        if not exists(self._metrics_path) or file_size(self._metrics_path) == 0:
+        metrics_path: StoragePath = StoragePath(self._metrics_path)
+        if not metrics_path.exists() or metrics_path.size == 0:
             return []
         reader: csv.DictReader = csv.DictReader(
-            StringIO(read_text(self._metrics_path))
+            StringIO(metrics_path.read_text())
         )
         rows: list[_CSVRow] = []
         row: _CSVRow
@@ -151,11 +144,11 @@ class CSVLogger(Logger):
         self._replace_text(self._metrics_path, stream.getvalue())
 
     def _open_writer(self) -> None:
-        file_exists: bool = exists(self._metrics_path)
-        file_is_empty: bool = not file_exists or file_size(self._metrics_path) == 0
+        metrics_path: StoragePath = StoragePath(self._metrics_path)
+        file_exists: bool = metrics_path.exists()
+        file_is_empty: bool = not file_exists or metrics_path.size == 0
         mode: str = "a" if file_exists else "w"
-        file_handle: TextIOBase = open_text(
-            self._metrics_path,
+        file_handle: TextIOBase = metrics_path.open_text(
             mode,
             newline=""
         )
@@ -176,12 +169,13 @@ class CSVLogger(Logger):
             fieldnames=self._fieldnames,
             extrasaction="raise"
         )
-        if not exists(self._metrics_path) or file_size(self._metrics_path) == 0:
+        metrics_path: StoragePath = StoragePath(self._metrics_path)
+        if not metrics_path.exists() or metrics_path.size == 0:
             writer.writeheader()
         writer.writerow(row)
         existing_content: str = (
-            read_text(self._metrics_path)
-            if exists(self._metrics_path)
+            metrics_path.read_text()
+            if metrics_path.exists()
             else ""
         )
         self._replace_text(
@@ -190,19 +184,16 @@ class CSVLogger(Logger):
         )
 
     def _replace_text(self, path: str, content: str) -> None:
-        if not is_local_path(path):
-            make_directory(dirname(path))
-            filesystem: AbstractFileSystem = get_filesystem(path)
+        storage_path: StoragePath = StoragePath(path)
+        if not storage_path.is_local:
+            StoragePath(storage_path.parent).make_directory()
+            filesystem: AbstractFileSystem = storage_path.filesystem
             with filesystem.transaction:
-                opened_file: TextIOBase = cast(
-                    TextIOBase,
-                    filesystem.open(path, "w", encoding="utf-8", newline="")
-                )
-                with opened_file:
+                with storage_path.open_text("w", newline="") as opened_file:
                     opened_file.write(content)
             return
-        local_path: Path = Path(normalize_path(path))
-        make_directory(local_path.parent)
+        local_path: Path = Path(storage_path.normalized)
+        StoragePath(local_path.parent).make_directory()
         temporary_file: tuple[int, str] = tempfile.mkstemp(
             dir=str(local_path.parent),
             prefix=f".{local_path.name}-"

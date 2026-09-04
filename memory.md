@@ -188,12 +188,12 @@
     4. Hook dispatch belongs to Trainer and loops, hook implementations belong to modules, data modules, and callbacks, and hook-name logging policy belongs with the hook vocabulary. A separate rule-model family adds no independent state, boundary, or lifecycle.
     5. Serialized checkpoint field strings are durable schema values, while Python identifiers naming those fields are implementation details. Renaming the identifiers to lower snake case removes style debt without migrating the checkpoint format.
 
-| Memory | Utility Evacuation Ownership Test | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
+| Memory | Utility Evacuation and Storage Ownership | Date: 04 September 2026 | Time: 05:20 PM | Name: Ghost |
 
     1. A generic helper must move to the narrowest existing owner whose lifecycle, state, or external boundary gives the behavior meaning; one-consumer traversals remain private methods and dead native-operation façades are deleted.
     2. Run configuration belongs to Trainer, loop execution contexts belong to Loop, topology-sensitive materialization belongs to Strategy, metric routing belongs to the logger connector, and recursive batch placement belongs to the data-transfer hook boundary.
-    3. Checkpoint serialization and atomic transport belong to `CheckpointIO`, distributed shards belong to model-parallel checkpointing, and protocol-aware paths shared by several artifact owners justify the explicit storage infrastructure package.
-    4. Compilation and local behavior cannot prove relocation across a process boundary; spawned workers, distributed strategies, persistence reload, and failure recovery are selected according to the moved concept.
+    3. Checkpoint serialization belongs to CheckpointIO and distributed shards to model parallelism; a path-bound object earns existence because it retains a resolved backend and applies one local or remote identity across metadata, resources, mutation, staging, and containment.
+    4. Storage relocation requires local, file-URL, remote, transaction, staging, checkpoint, logger, profiler, model-hydration, distributed, and failure-recovery evidence; successful path joining alone proves almost nothing.
 
 | Memory | Dependency-Neutral Framework Contracts | Date: 04 September 2026 | Time: 05:07 PM | Name: Ghost |
 

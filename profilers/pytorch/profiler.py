@@ -12,7 +12,7 @@ from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.profilers.pytorch.module_recording import _ModuleRecordFunctions
 from syntheticmind.profilers.pytorch.schedule import _ProfilerSchedule, _ProfilerScheduleFunction
-from syntheticmind.storage.filesystem import join_path, local_artifact_path
+from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import TrainerStage
 
 __all__: list[str] = ["PyTorchProfiler"]
@@ -321,20 +321,21 @@ class PyTorchProfiler(Profiler):
         trace_index: int = self._trace_index
         self._trace_index: int = self._trace_index + 1
         if self._export_to_chrome:
-            trace_path: str = join_path(
-                self.dirpath,
+            trace_path: str = StoragePath(self.dirpath).join(
                 self._prepare_filename(f"{action_name}-{trace_index}", ".json")
             )
-            with local_artifact_path(trace_path) as local_trace_path:
+            with StoragePath(trace_path).local_artifact() as local_trace_path:
                 profiler.export_chrome_trace(str(local_trace_path))
         if self._export_to_flame_graph:
             if not any(bool(event.stack) for event in profiler.events()):
-                raise RuntimeError("The active PyTorch profiler captured no stack frames for flame-graph export.")
-            stack_path: str = join_path(
-                self.dirpath,
+                raise RuntimeError(
+                    "The active PyTorch profiler captured no stack frames for "
+                    "flame-graph export."
+                )
+            stack_path: str = StoragePath(self.dirpath).join(
                 self._prepare_filename(f"{action_name}-{trace_index}", ".stack")
             )
-            with local_artifact_path(stack_path) as local_stack_path:
+            with StoragePath(stack_path).local_artifact() as local_stack_path:
                 profiler.export_stacks(
                     str(local_stack_path),
                     metric=self._metric
@@ -381,7 +382,10 @@ class PyTorchProfiler(Profiler):
         )
         unknown_options: set[str] = set(options) - valid_option_names
         if unknown_options:
-            raise MisconfigurationError(f"Unsupported torch.profiler.profile options: {sorted(unknown_options)}.")
+            raise MisconfigurationError(
+                "Unsupported torch.profiler.profile options: "
+                f"{sorted(unknown_options)}."
+            )
         option_name: str
         for option_name in self._boolean_options:
             if option_name in options and type(options[option_name]) is not bool:
@@ -440,7 +444,9 @@ class PyTorchProfiler(Profiler):
             filters: list[str]
             for activity_kind, filters in activity.items():
                 if not isinstance(activity_kind, ProfilerActivity):
-                    raise TypeError("Profiler activity filter keys must be ProfilerActivity values.")
+                    raise TypeError(
+                        "Profiler activity filter keys must be ProfilerActivity values."
+                    )
                 if not isinstance(filters, list) or not all(
                     isinstance(name, str) for name in filters
                 ):
