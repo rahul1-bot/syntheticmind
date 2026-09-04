@@ -151,9 +151,9 @@
     5. Scalar run-policy validation belongs to one immutable Trainer configuration boundary; ordered private Trainer phases apply the resolved policy and compose accelerator, connectors, loops, and live state, while DataConnector alone applies limits because only it knows loader cardinality and composition.
     6. DataModule checkpoint reconstruction shares payload and hyperparameter parsing with model reconstruction but requires a distinct loader transition because it restores DataModule state without model strictness, configure hooks, parameter application, or device placement.
 
-| Memory | Metric Production, Observation, Weighting, and Routing | Date: 04 September 2026 | Time: 05:39 PM | Name: Ghost |
+| Memory | Metric Production, Observation, Weighting, and Routing | Date: 04 September 2026 | Time: 06:45 PM | Name: Ghost |
 
-    1. Module creates metric observations, LoggedMetric owns each observation's identity and step or epoch semantics, loops own cadence, MetricAccumulator owns windows and weighting, the connector owns views and rank routing, and concrete loggers own persistence.
+    1. Module creates observations through the sole public logging API, LoggedMetric owns their identity and step or epoch semantics only in the metric module, loops own cadence, MetricAccumulator owns windows and weighting, the connector owns views and rank routing, and loggers own persistence.
     2. Batch-size inference is part of mean-reduction semantics rather than a loop utility; nested tensors with contradictory leading dimensions must fail and request explicit `batch_size` instead of silently selecting the first candidate.
     3. Sanity validation must clear every observable metric view after execution so early diagnostic batches cannot alter checkpoint ranking, early stopping, progress output, or experiment records.
     4. Global-rank persistence belongs in the connector rather than every callback and loop call site; callbacks may retain rank-local observations while one central gate prevents duplicate durable writes.

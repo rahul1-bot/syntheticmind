@@ -46,7 +46,7 @@ from syntheticmind.types import (
     TrainingStepOutput
 )
 
-__all__: list[str] = ["LoggedMetric", "Module"]
+__all__: list[str] = ["Module"]
 
 type _MetricCandidate = nn.Module | ModelOutput
 type _LoggedValue = numbers.Number | torch.Tensor | Metric

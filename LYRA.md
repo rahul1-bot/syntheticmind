@@ -127,10 +127,10 @@
     3. Callback and persistence gates use Trainer rank state instead of ambient process globals, while collective participation remains symmetric before rank-specific output decisions.
     4. The distributed utility namespace and aliases were removed; the remaining utility evacuation concerns hook inspection, module-mode restoration, and model-summary ownership.
 
-| Strategic Note | Hook, Module, DataModule, and Metric Ownership | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
+| Strategic Note | Hook, Module, DataModule, and Metric Ownership | Date: 04 September 2026 | Time: 06:45 PM | Name: Ghost |
 
     1. Exact nested training modes now belong to Module and remain restorable both by normal loop completion and by Trainer failure cleanup.
-    2. Hook signature knowledge and metric production belong to Module, HookDispatcher owns general override discovery, and LoggedMetric owns one observation's name, cadence, reduction, graph, scalar or TorchMetrics value, and computed views.
+    2. Hook signature knowledge and metric production belong to Module, HookDispatcher owns override discovery, and LoggedMetric remains internal to its semantic module rather than leaking through a historical Module compatibility export.
     3. Module.log now exposes one unchanged public contract over bounded private validation, context, reduction, value, registration, and warning transitions without a configuration-model or manager explosion.
     4. DataModule reconstructs hyperparameters and state from local, file-like, or remote schema-v2 checkpoints; stage `ckpt_path` and `trainer.ckpt_path` replace the unused constructor resume alias, and distributed evidence passes.
 
