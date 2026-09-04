@@ -20,7 +20,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.checkpoint import (
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_overridden
-from syntheticmind.utilities.model_initialization import _ModuleInitializer
+from syntheticmind.strategies.model_initialization import _ModuleInitializer
 
 __all__: list[str] = ["ModelParallelStrategy"]
 

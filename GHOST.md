@@ -271,3 +271,11 @@
     3. The process launcher moved from `strategies/launcher.py` into `strategies/launchers/launcher.py`, placing start-method selection, process launch delegation, state transfer, environment reconstruction, child observation, and termination under one distributed-launch concept.
     4. Public class identities and Trainer configuration meanings remain unchanged, but obsolete import paths were removed without compatibility façades. Precision now explicitly inherits the checkpoint-hook contract and marks its checkpoint hook implementations as overrides.
     5. Full, half, mixed, and Transformer Engine precision execution, asynchronous checkpoint I/O, local optimizer execution, spawned DDP runtime state, subprocess DDP forward and consensus behavior, and sharded two-rank model parallelism pass through the new canonical paths.
+
+| Architecture Decision | Utility Ownership Evacuation | Date: 04 September 2026 | Time: 11:14 AM | Name: Ghost |
+
+    1. Trainer randomness moved to `trainer/seed.py` because run seeding, accelerator random state, and dataloader-worker initialization are Trainer lifecycle responsibilities rather than generic helpers.
+    2. Rank-safe lifecycle rendering moved to `trainer/console.py`, while metric accumulation moved to the logger connector package because weighted reduction and distributed scalar synchronization exist exclusively to implement the logging lifecycle.
+    3. Empty initialization, parameter materialization, and reset interception moved to `strategies/model_initialization.py` because execution topology determines when and where model parameters may be allocated and initialized.
+    4. The unused compilation utility module was deleted. No current production consumer invoked either its compile or channels-last façade, so retaining it would preserve dead duplicate entrypoints over native PyTorch operations.
+    5. Local metric views, optimizer execution, spawned two-rank TorchMetrics reduction, and two-rank model-parallel materialization pass after relocation, proving that the concepts remain importable and serializable under their new owners.

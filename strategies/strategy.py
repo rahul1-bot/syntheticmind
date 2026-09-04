@@ -14,7 +14,7 @@ from syntheticmind.strategies.checkpoint import (
     _SingleFileCheckpoint
 )
 from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
-from syntheticmind.utilities.model_initialization import _ModuleInitializer
+from syntheticmind.strategies.model_initialization import _ModuleInitializer
 from syntheticmind.utilities.types import (
     BackwardInputs,
     Batch,

@@ -31,7 +31,7 @@ import torch
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.console import ConsoleRenderer
+from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.types import (
     Batch,

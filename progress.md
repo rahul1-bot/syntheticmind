@@ -267,3 +267,9 @@
     1. ✅ Precision implementations moved under `plugins/precision/`, checkpoint storage moved to `plugins/checkpoint_io.py`, and process launcher policy moved under `strategies/launchers/` without compatibility modules.
     2. ✅ All production and verification imports use the canonical semantic paths, and the plugin surface now exposes Precision alongside checkpoint I/O, cluster-environment, and layer-synchronization contracts.
     3. ✅ Compilation, canonical imports, numerical policies, optional Transformer Engine adaptation, asynchronous checkpoint persistence, spawned and subprocess DDP, optimizer execution, and sharded model parallelism pass after relocation.
+
+| Progress Complete | Utility Ownership Evacuation | Date: 04 September 2026 | Time: 11:14 AM | Name: Ghost |
+
+    1. ✅ Seed management and console rendering moved to Trainer, metric accumulation moved to the logger connector, and model materialization moved to Strategy ownership.
+    2. ✅ The dead compile and channels-last façade module was removed with no compatibility alias because the harness had no current consumer for either duplicate operation.
+    3. ✅ Local metrics, optimization, spawned distributed TorchMetrics, and model-parallel materialization pass through the canonical owner paths.

@@ -4,4 +4,4 @@ The logger connector owns the distinct metric views consumed by callbacks, exter
 
 Modules and loops remain responsible for producing and reducing metrics at their established lifecycle points. Concrete loggers remain responsible for backend persistence. The connector routes those results without introducing another logging API or changing metric computation.
 
-`logger_connector.py` is the current complete owner. Additional files are admitted only if a metric result model or independently replaceable synchronization mechanism becomes a real current concept.
+`logger_connector.py` owns routing and views. `metric_accumulator.py` owns weighted step-to-epoch reduction and distributed scalar synchronization as the logger lifecycle's reusable reduction mechanism.

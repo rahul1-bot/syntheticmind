@@ -4,9 +4,10 @@
 
 | Capability | Ownership |
 |---|---|
-| `trainer.py` | Public stage entrypoints and top-level lifecycle sequencing. |
+| `trainer.py` | Public stage entrypoints, top-level lifecycle sequencing, and deterministic hook dispatch. |
 | `states.py` | Trainer function, stage, status, progress, interruption, and stop state. |
-| `call.py` | Central deterministic dispatch of module, datamodule, callback, and Strategy hooks. |
+| `seed.py` | Python, NumPy, PyTorch, accelerator, and dataloader-worker random-state initialization. |
+| `console.py` | Rank-safe lifecycle and metric rendering for the Trainer and progress callbacks. |
 | `connectors/accelerator_connector.py` | Accelerator, devices, nodes, Strategy, precision, cluster environment, checkpoint I/O, and layer-synchronization compatibility. |
 | `connectors/callback_connector.py` | Callback validation, defaults, model callback attachment, ordering, and checkpoint identities. |
 | `connectors/checkpoint_connector.py` | Checkpoint selection, full-trajectory assembly, restoration, and resume lifecycle. |

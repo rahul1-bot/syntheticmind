@@ -275,3 +275,9 @@
     2. A package name must describe the concepts actually implemented rather than copy the breadth of an upstream framework. `checkpoint_io.py` is correct while checkpoint transport is the only I/O plugin family; `io/` becomes justified only if distinct plugin I/O concepts actually appear.
     3. Launcher policy and launcher mechanisms form one distributed-systems concept. Keeping the policy module beside Strategy while its subprocess and multiprocessing implementations live in `launchers/` makes ownership harder to infer and creates an artificial package boundary.
     4. Relocation verification must include importable spawned workers, subprocess workers, Strategy serialization, optional precision adapters, and checkpoint wrappers because local construction cannot expose stale serialized module paths.
+
+| Memory | Utility Modules Conceal Framework Ownership | Date: 04 September 2026 | Time: 11:14 AM | Name: Ghost |
+
+    1. Randomness configuration changes with Trainer run construction, console rendering changes with Trainer lifecycle observation, metric accumulation changes with logger reduction semantics, and model materialization changes with Strategy topology. None is a generic utility concern.
+    2. A one-consumer helper module should be deleted when it duplicates a native framework operation, or moved beside its natural owner when it carries reusable state or a complete mechanism used by that owner.
+    3. Import relocation is incomplete until spawned workers and distributed strategies deserialize the moved class successfully. Compilation and local unit behavior alone cannot prove a process-boundary move.

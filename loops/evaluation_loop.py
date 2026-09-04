@@ -52,7 +52,7 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.evaluation import evaluation_context
-from syntheticmind.utilities.metric_accumulator import MetricAccumulator, extract_batch_size
+from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
 from syntheticmind.utilities.model_helpers import (
     ModuleMode,
     is_overridden,

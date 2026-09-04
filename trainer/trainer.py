@@ -61,7 +61,7 @@ from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
     _LoggerConnector
 )
 from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
-from syntheticmind.utilities.console import ConsoleRenderer
+from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
@@ -72,7 +72,7 @@ from syntheticmind.utilities.filesystem import (
     normalize_path
 )
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
-from syntheticmind.utilities.seed import SeedManager
+from syntheticmind.trainer.seed import SeedManager
 from syntheticmind.utilities.torch_flags import configure_torch_flags
 from syntheticmind.utilities.types import (
     CheckpointDict,
