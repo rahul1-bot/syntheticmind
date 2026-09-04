@@ -107,6 +107,7 @@ from syntheticmind.trainer.connectors.accelerator_connector import (
     _AcceleratorConnector
 )
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
+from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
@@ -120,7 +121,6 @@ from syntheticmind.utilities.filesystem import (
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.optimizers import _optimizers_to_device
 from syntheticmind.utilities.seed import SeedManager
-from syntheticmind.utilities.signal_connector import _SignalConnector
 from syntheticmind.utilities.torch_flags import configure_torch_flags
 from syntheticmind.utilities.types import (
     CheckpointDict,
@@ -675,7 +675,7 @@ class Trainer:
         self._loggers: list[Logger] = resolved_loggers
         self.profiler: Profiler = _resolve_profiler(profiler)
         self.state: TrainerState = TrainerState()
-        self._signal_connector: _SignalConnector = _SignalConnector(self)
+        self._signal_connector: _SignalConnector = _SignalConnector(self.strategy)
         self._is_mid_epoch_validation: bool = False
         self._validation_schedule: ValidationSchedule = ValidationSchedule(
             effective_val_check_interval,

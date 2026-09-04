@@ -173,6 +173,12 @@
     3. ✅ Model callback fit, validation, test, prediction, repeated-stage, checkpoint, serialization, invalid-return, duplicate-state, configure-hook logging, spawn, and fork paths pass.
     4. ✅ The migration removed more than two hundred callback-composition lines from Trainer without changing the public callback list or stage entrypoints.
 
+| Progress Complete | Signal Connector Relocation | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
+
+    1. ✅ The signal connector moved from the generic utility package into Trainer connectors and now depends on Strategy rather than the entire Trainer.
+    2. ✅ Conditional type imports and generic object state were removed while nested handler registration, restoration, worker termination, and serialization behavior remained intact.
+    3. ✅ Spawn execution and a live SIGTERM probe confirm propagation, expected interruption completion, and owned-process cleanup.
+
 | Progress Active | Data Connector Reconstruction | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
 
     1. Trainer currently owns data source attachment, DataModule binding, data preparation, dataloader requests, limits, distributed and unrepeated sampler replacement, overfit behavior, loader reconstruction, and reload cadence across one large method region.

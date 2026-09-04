@@ -199,3 +199,10 @@
     4. Trainer continues to own callback hook execution and stage sequencing; the connector owns only callback composition and configuration state, so no competing lifecycle entrypoint was introduced.
     5. Invalid return values, non-callback sequence members, duplicate state keys, illegal configure-hook logging, and callback setup failures leave the configuration boundary reusable for a later stage.
     6. Fit, validation, test, prediction, checkpoint participation, repeated stages, serialization, DDP spawn, and DDP fork verification pass after the migration.
+
+| Architecture Decision | Signal Connector Placement | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
+
+    1. Process-signal registration, nested registration depth, launched-worker termination, original-handler chaining, serialization cleanup, and teardown now live in `trainer/connectors/signal_connector.py`.
+    2. The connector depends only on the selected Strategy because worker termination is a launcher responsibility; the former full-Trainer dependency and conditional type import were removed.
+    3. Signal handler state now uses a closed union covering Strategy, handlers, booleans, integers, and absence rather than a generic object dictionary.
+    4. DDP spawn serialization and live SIGTERM propagation pass, the originating process exits through the expected interruption path, and no owned child remains attached after completion.
