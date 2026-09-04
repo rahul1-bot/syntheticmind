@@ -273,6 +273,10 @@ class Strategy:
         return 1
 
     @property
+    def data_parallel_size(self) -> int:
+        return 1
+
+    @property
     def is_global_zero(self) -> bool:
         return self.global_rank == 0
 

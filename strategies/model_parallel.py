@@ -148,6 +148,17 @@ class ModelParallelStrategy(ParallelStrategy):
         }
 
     @property
+    @override
+    def data_parallel_size(self) -> int:
+        if self._device_mesh is not None:
+            return self._device_mesh["data_parallel"].size()
+        return (
+            self.num_nodes
+            if self._data_parallel_size == "auto"
+            else self._data_parallel_size
+        )
+
+    @property
     def device_mesh(self) -> DeviceMesh:
         if self._device_mesh is None:
             raise RuntimeError("The device mesh is unavailable before process setup.")

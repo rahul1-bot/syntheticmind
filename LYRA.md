@@ -181,3 +181,9 @@
     1. Learning-rate telemetry now follows optimizer and scheduler lifecycle rather than batch or decorative configuration state.
     2. Multiple optimizers, repeated types, parameter groups, explicit names, momentum, weight decay, and dynamic fine-tuning groups retain distinct metric identities.
     3. Logger emission remains rank-zero-owned while callback metric views and resume coordinates remain coherent across workers.
+
+| Strategic Note | Data-Axis Throughput Semantics | Date: 04 September 2026 | Time: 12:52 PM | Name: Ghost |
+
+    1. Strategy now distinguishes data-parallel sample replication from total distributed world size, preventing tensor-parallel ranks from inflating throughput.
+    2. Training rates include data wait and compute, exclude validation pauses, and synchronize accelerator work before measuring elapsed time.
+    3. Accumulation windows count every microbatch while emitting on optimizer progress, with explicit custom cardinality for nonstandard batch structures.

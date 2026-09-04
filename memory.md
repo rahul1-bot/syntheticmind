@@ -91,16 +91,6 @@
     5. Equal tensor shapes and participation by every selected rank are preconditions; uneven data requires a separate explicit padding or object-gather protocol.
     6. Named tuple reconstruction preserves concrete user collection contracts after recursive tensor transformation.
 
-| Memory | Checkpoint Reconstruction Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
-
-    1. Class checkpoint loading is constructor reconstruction followed by state restoration, not a state-dictionary shortcut. Hyperparameters must create the correct subclass architecture before weights can be applied.
-    2. Explicit constructor values override saved values, unknown values are filtered when unsupported, and wrapper-style `hparams` constructors receive overrides inside the wrapped mapping.
-    3. `configure_model` runs before `on_load_checkpoint`, and the load hook runs before `load_state_dict`, enabling deferred layers and checkpoint payload mutation.
-    4. `strict=False` permits missing and unexpected keys but never tensor shape mismatches. Relaxed differences remain visible through warnings.
-    5. Mapped state tensors determine returned model placement; automatic mapping retains available accelerator tags and sends unavailable accelerator storage to CPU.
-    6. Trainer restoration and class reconstruction share hook and strictness meanings even though only Trainer restoration includes optimizer, scheduler, callback, datamodule, precision, loop, loader, and random state.
-    7. Checkpoint-controlled import paths are executable behavior. SyntheticMind rejects external instantiators instead of inheriting a vendor CLI allowlist.
-
 | Memory | Model-Parallel Evidence and Persistence Ownership | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
 
     1. A standalone DTensor and distributed-checkpoint probe establishes only PyTorch runtime availability; it does not establish SyntheticMind Trainer wiring, hook order, optimizer restoration, callback participation, progress continuation, or failure cleanup.
@@ -296,3 +286,11 @@
     3. Metric identity includes scheduler name or optimizer type, repeated optimizer occurrence, and parameter-group name. Ambiguous explicit names must fail rather than overwrite another optimizer's telemetry.
     4. Optimizer parameter groups may grow during fine-tuning; the first historical series must migrate from the unsuffixed key to the first-group key when a second unnamed group appears.
     5. Resume state requires only the last emitted step and epoch coordinates. Persisting the complete learning-rate history would bloat checkpoints while the experiment logger already owns durable history.
+
+| Memory | Throughput Follows the Data Axis | Date: 04 September 2026 | Time: 12:52 PM | Name: Ghost |
+
+    1. Total distributed world size is not necessarily sample parallelism; tensor-parallel workers cooperate on the same samples, so only the Strategy's data-parallel dimension multiplies local batch cardinality.
+    2. End-to-end training throughput must include dataloader wait and optimizer work but exclude validation pauses from the training clock.
+    3. Accelerator timing requires synchronization immediately before reading the clock, or queued CUDA and MPS work makes elapsed time and rate measurements dishonest.
+    4. Recursive inference may accept a batch size only when all reachable tensors agree. A domain-specific callable is the honest boundary for structures whose cardinality cannot be inferred generically.
+    5. Accumulation windows emit on optimizer progress while counting every contributing microbatch, preserving both sample and batch rates.

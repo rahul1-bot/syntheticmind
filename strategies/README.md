@@ -4,6 +4,8 @@
 
 `ParallelStrategy` is the shared distributed execution policy. It owns parallel devices, cluster ranks, process-group initialization, tensor reduction, distributed collectives, gradient synchronization, process launch, and process-scoped cleanup. DDP and model-parallel execution inherit these semantics instead of reproducing them. Mean, sum, minimum, and maximum metric reductions therefore execute through the selected Strategy rather than ambient process-global helpers.
 
+`data_parallel_size` names the replicated sample-processing axis independently from total world size. DDP uses the full world, while model parallelism reports only the data-parallel mesh dimension so throughput and sample accounting never multiply by tensor-parallel workers.
+
 ```text
 Strategy
 ├── SingleDeviceStrategy

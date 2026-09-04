@@ -52,17 +52,6 @@
     5. ✅ Model, data, checkpoint, and callback hooks; model-provided callbacks; logger access; rank-safe printing; nested gathering; and model checkpoint reconstruction preserve established extension semantics.
     6. ✅ Checkpoints, profiler actions, model summaries, storage, asynchronous I/O, barebones execution, and terminal presentation retain explicit owners and verified local or distributed paths.
 
-| Architecture Decision | Checkpoint Construction Security and Compatibility | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
-
-    1. Saved constructor hyperparameters, historical SyntheticMind keys, YAML or CSV replacement files, and explicit keyword overrides follow deterministic precedence.
-    2. Unknown saved values are filtered when a subclass has no arbitrary keyword parameter, while wrapper-style `hparams` constructors receive overrides within their wrapped mapping.
-    3. Local, remote-filesystem, and seekable binary checkpoint sources are supported with PyTorch-compatible explicit map-location forms and automatic unavailable-accelerator fallback to CPU.
-    4. `configure_model` executes before `on_load_checkpoint`, and the load hook executes before `load_state_dict`, allowing deferred layers and payload mutation to participate correctly.
-    5. Explicit model `strict_loading` and call-level `strict` settings are consistent across class reconstruction and Trainer restoration; conflicts fail and relaxed key differences remain visible.
-    6. Checkpoint-controlled external instantiators are rejected because CLI integration code does not own SyntheticMind model construction and arbitrary import paths are executable behavior.
-    7. Three focused checkpoint services separate payload I/O, hyperparameter reconstruction, and model restoration without copied Lightning internals or new source comments.
-    8. Manual, Trainer-produced, CPU, MPS, unavailable-device, subprocess, spawn, fork, stateful-continuation, and direct two-rank Gloo evidence establishes the current contract without static-analysis tools.
-
 | Architecture Decision | Atomic Sharded Checkpoint Generations | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
 
     1. Sharded checkpoints now store immutable distributed generations beneath one checkpoint directory and publish visibility through a strict versioned `active_generation` record rather than deleting the readable checkpoint before writing its replacement.
@@ -298,3 +287,12 @@
     3. Every optimizer and parameter group receives a deterministic scheduler, optimizer-type, occurrence, or explicit group name; ambiguous scheduler and group names fail instead of overwriting metrics.
     4. Optional momentum, weight decay, and key prefixes are scalar-validated, dynamic parameter-group growth preserves existing history, and callback metrics remain visible on every rank while durable logger emission remains rank-zero-owned.
     5. Last step and epoch emission coordinates persist without serializing unbounded history; forced and automatic cadence, two manual optimizers, repeated types, named and dynamic groups, momentum, weight decay, invalid configuration, missing logger, exact resume, and spawned DDP persistence pass.
+
+| Architecture Decision | Data-Parallel Throughput Accounting | Date: 04 September 2026 | Time: 12:52 PM | Name: Ghost |
+
+    1. Strategy now exposes `data_parallel_size` separately from world size: local execution reports one, DDP reports the complete replica world, and model parallelism reports only the data-parallel mesh dimension.
+    2. `ThroughputMonitor` aggregates global samples, batches, and elapsed wall time over optimizer-step windows and complete epochs, including dataloader wait while excluding validation pauses.
+    3. CUDA and MPS execution synchronize before timing reads, preventing queued accelerator work from producing fictitious rates.
+    4. Recursive batch-cardinality inference requires every reachable tensor to agree; ambiguous structures fail, while the standard optional `batch_size_fn` supports domain-specific batches with a validated non-negative result.
+    5. Window and epoch metrics enter callback views and the rank-zero logger, while configuration requires a logger and a positive optimizer-step cadence.
+    6. CPU accumulation windows, nested and custom batch cardinality, invalid configuration, MPS synchronization, DDP global sample totals, rank-zero persistence, and tensor-parallel axis semantics pass.

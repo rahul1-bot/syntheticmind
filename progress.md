@@ -237,7 +237,7 @@
 
 | Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. EarlyStopping, throughput monitoring, device statistics, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
+    1. EarlyStopping, device statistics, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
     2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose distributed quantities or persisted state remain semantically wrong.
     3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
 
@@ -263,3 +263,11 @@
     3. ✅ Every optimizer and parameter group has stable collision-checked naming with custom scheduler names, group names, repeated optimizer types, prefixes, momentum, and weight decay.
     4. ✅ Dynamic parameter groups preserve their existing history, callback metric views update on every rank, and logger writes remain rank-zero-owned.
     5. ✅ Callback emission coordinates persist across checkpoint resume, and local multi-optimizer, epoch scheduler, dynamic group, invalid-boundary, missing-logger, resume, and spawned DDP probes pass.
+
+| Progress Complete | Data-Parallel Throughput Accounting | Date: 04 September 2026 | Time: 12:52 PM | Name: Ghost |
+
+    1. ✅ Strategy exposes the sample-replica axis independently from world size, with local, DDP, and model-parallel semantics.
+    2. ✅ Throughput windows count every accumulated microbatch, emit on optimizer-step cadence, and exclude validation pauses from epoch timing.
+    3. ✅ CUDA and MPS synchronize before clock reads, recursive tensor cardinalities must agree, and custom batch-size functions have a strict result contract.
+    4. ✅ Window and epoch sample, batch, and duration metrics reach callback views and rank-zero logger output.
+    5. ✅ CPU accumulation, nested and dynamic cardinality, invalid boundaries, MPS execution, spawned DDP global totals, and tensor-parallel axis probes pass.

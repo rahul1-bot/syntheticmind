@@ -13,7 +13,7 @@
 | `lr_monitor.py` | `LearningRateMonitor`, which records per-group learning rates. |
 | `progress_bar.py` | `ProgressBarCallback`, which reports stage progress. |
 | `model_summary/` | The `ModelSummary` callback, layer and model inspection report, and optional Rich renderer. |
-| `throughput_monitor.py` | `ThroughputMonitor`, which records samples-per-second telemetry. |
+| `throughput_monitor.py` | `ThroughputMonitor`, which records synchronized window and epoch throughput over the Strategy's data-parallel sample axis. |
 | `device_stats_monitor.py` | `DeviceStatsMonitor`, which records device utilization. |
 
 ## Related Components

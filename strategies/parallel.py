@@ -308,6 +308,11 @@ class ParallelStrategy(Strategy, LaunchStrategy):
 
     @property
     @override
+    def data_parallel_size(self) -> int:
+        return self.world_size
+
+    @property
+    @override
     def root_device(self) -> torch.device:
         if not self.parallel_devices:
             return torch.device("cpu")
