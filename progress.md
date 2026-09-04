@@ -133,12 +133,12 @@
     3. ✅ A partial run retains the current epoch, loader, scalar reductions, TorchMetrics tensor or list state, and schedulers without synthetic epoch hooks; graph/custom-group metrics and changed worlds reject explicitly.
     4. ✅ Exact local, differing-rank DDP, precisely typed spawned optimizer and scheduler post-fit state, stateful-loader, accumulated, plateau, validation-trigger, tensor-parallel, and sharded FSDP2 continuation pass.
 
-| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
+| Progress Complete | Loop Lifecycle Documentation | Date: 04 September 2026 | Time: 10:41 PM | Name: Ghost |
 
     1. ✅ TrainingEpochLoop composes bounded resume, iteration, optimization, cadence, partial state, and true completion; max-step termination preserves the epoch rather than firing end hooks or schedulers.
     2. ✅ One Trainer transfer transaction serves every stage, Strategy owns deferred gradient synchronization, and SyntheticOptimizer uses distinct automatic and manual step operations without direct DDP inspection or a boolean step mode.
     3. ✅ Standard and plateau scheduler operations are explicit, epoch plateau state advances before monitoring persistence, `estimated_stepping_batches` is the sole horizon calculation, manual clipping avoids configuration mutation, and dead duplicate scheduler state is gone.
-    4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, partial metric and scheduler resume, spawned persistence, stateful continuation, plateau scheduling, and sharded model-parallel paths pass.
+    4. ✅ All loop modules now carry project-authorized ownership, lifecycle, client-return, continuation, and failure comments; `loops/README.md` and `optimization/README.md` document fit, automatic, manual, evaluation, prediction, validation cadence, and durability contracts, while CPU metric routing and two-rank accumulated DDP probes pass.
 
 | Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
 

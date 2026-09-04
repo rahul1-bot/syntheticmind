@@ -1,3 +1,29 @@
+# This module:
+# 1. Defines EvaluationLoop, the shared validation and test lifecycle over model
+#    modes, hooks, precision, Strategy dispatch, multiple dataloaders, metric
+#    accumulation, result construction, monitoring order, and restoration
+#
+# Design decisions:
+# - Validation and test share one loop because both execute no-gradient scalar
+#   evaluation with the same batch, hook, metric, and result contracts;
+#   prediction remains separate because it retains arbitrary outputs
+# - Standalone evaluation may use inference_mode, while validation inside fit
+#   uses no_grad so the training runtime retains ordinary tensor version behavior
+# - Sequential CombinedLoader execution produces one result mapping per loader;
+#   non-sequential composition produces one aggregate result over the batch tree
+# - Dataloader-index signature requirements are validated before consuming data
+#   and adapt to hooks that intentionally omit batch_idx without catching errors
+#   thrown from inside client code
+# - Non-monitoring validation epoch-end callbacks and the Module hook run before
+#   hook metrics merge; early stopping and checkpoint callbacks run afterward so
+#   they observe the final settled validation state
+# - Callback, logger, progress, and returned-result metric views are routed
+#   independently and sanity execution does not update ordinary progress views
+# - Exact nested model modes restore automatically unless the client explicitly
+#   overrides the corresponding model-train hook and assumes that policy
+#
+# Author: Rahul Sawhney
+
 import inspect
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager
@@ -40,12 +66,17 @@ type _EvaluationHook = Callable[..., StepOutput | None]
 
 
 class EvaluationLoop(Loop):
+    # Trainer-owned validation or test execution. Client code implements the
+    # corresponding Module step and optional hooks; this loop owns cadence and
+    # reduction without acquiring model or data construction.
     @override
     def __init__(
         self,
         stage: _EvaluationStage = "validate",
         inference_mode: bool = True
     ) -> None:
+        # Selects validation or test semantics and initializes independent
+        # callback, logger, progress, and public result views.
         super().__init__()
         self.stage: _EvaluationStage = stage
         self.inference_mode: bool = inference_mode
@@ -57,6 +88,8 @@ class EvaluationLoop(Loop):
         self.results: list[dict[str, float]] = []
 
     def run(self) -> list[dict[str, float]]:
+        # Selects backend-safe no-gradient context and returns one scalar mapping
+        # per sequential loader or one mapping for composed evaluation.
         use_inference_mode: bool = (
             self.inference_mode and self.trainer.state.stage != "fit"
         )
@@ -64,6 +97,9 @@ class EvaluationLoop(Loop):
             return self._run()
 
     def _run(self) -> list[dict[str, float]]:
+        # Resets prior results, prepares data and modes, validates signatures,
+        # executes batches, publishes metrics, dispatches ordered end hooks, and
+        # restores model state.
         self._reset_results()
 
         trainer: syntheticmind.Trainer = self.trainer
@@ -139,6 +175,7 @@ class EvaluationLoop(Loop):
         return self.results
 
     def _reset_results(self) -> None:
+        # Clears every consumer view before reusing the loop for another pass.
         self.epoch_metrics: dict[str, float] = {}
         self._callback_epoch_metrics: dict[str, torch.Tensor] = {}
         self._logger_epoch_metrics: dict[str, torch.Tensor] = {}
@@ -152,6 +189,9 @@ class EvaluationLoop(Loop):
         running_stage: RunningStage,
         epoch_accumulators: list[_EpochAccumulator]
     ) -> None:
+        # Computes per-loader result mappings, flattens the public epoch view,
+        # updates non-sanity progress and logged views, and emits logger metrics at
+        # the current optimizer step.
         self.results: list[dict[str, float]] = [
             self._reduce_epoch_metrics(epoch_accumulator)
             for epoch_accumulator in epoch_accumulators
@@ -184,6 +224,8 @@ class EvaluationLoop(Loop):
         non_monitoring_callbacks: list[Callback],
         training_modes: dict[str, bool]
     ) -> None:
+        # Delegates to validation or test end ordering because validation has
+        # monitoring callbacks and fit-owned mode semantics that test does not.
         if self.stage == "validate":
             self._run_validation_end(
                 trainer,
@@ -216,6 +258,9 @@ class EvaluationLoop(Loop):
         non_monitoring_callbacks: list[Callback],
         training_modes: dict[str, bool]
     ) -> None:
+        # Publishes batch-reduced callback metrics, runs non-monitoring and Module
+        # epoch-end hooks, merges their metrics, runs monitors, closes the stage,
+        # and restores model modes according to client override policy.
         trainer._logger_connector.callback_metrics.update(
             self._callback_epoch_metrics
         )
@@ -267,6 +312,8 @@ class EvaluationLoop(Loop):
         callbacks: list[Callback],
         training_modes: dict[str, bool]
     ) -> None:
+        # Publishes callback metrics, runs test epoch and stage end hooks, merges
+        # hook metrics, and restores model modes.
         trainer._logger_connector.callback_metrics.update(
             self._callback_epoch_metrics
         )
@@ -310,6 +357,8 @@ class EvaluationLoop(Loop):
         state: TrainerState,
         running_stage: RunningStage
     ) -> None:
+        # Adds only values introduced or changed by epoch-end hooks to every
+        # public result mapping without duplicating batch-reduced metrics.
         batch_epoch_metrics: dict[str, float] = dict(self.epoch_metrics)
         self._consume_epoch_end_hook_metrics(module, state, running_stage)
         hook_epoch_metrics: dict[str, float] = {
@@ -330,6 +379,8 @@ class EvaluationLoop(Loop):
         module: Module,
         state: TrainerState
     ) -> _EvaluationSetup:
+        # Sets running-stage identity, sampler epoch, sanity or stage limits,
+        # CombinedLoader mode, result cardinality, and loader-index requirements.
         running_stage: RunningStage = (
             "validating" if self.stage == "validate" else "testing"
         )
@@ -378,6 +429,7 @@ class EvaluationLoop(Loop):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Dispatches the stage-specific Module mode hook before start callbacks.
         if self.stage == "validate":
             trainer._hook_dispatcher.call_module(
                 module,
@@ -397,6 +449,8 @@ class EvaluationLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
+        # Dispatches stage-start and epoch-start callbacks before corresponding
+        # Module hooks for validation or test.
         if self.stage == "validate":
             trainer._hook_dispatcher.call_callbacks(
                 module,
@@ -452,6 +506,8 @@ class EvaluationLoop(Loop):
         running_stage: RunningStage,
         epoch_accumulators: list[_EpochAccumulator]
     ) -> None:
+        # Builds the bounded fetcher under profiler ownership and advances batches
+        # with termination checks until configured or natural exhaustion.
         with trainer.profiler.profile(f"setup_{self.stage}_dataloader"):
             data_fetcher: _DataFetcher[tuple[Batch, int, int]] = _DataFetcher(
                 combined_loader,
@@ -495,6 +551,9 @@ class EvaluationLoop(Loop):
         running_stage: RunningStage,
         epoch_accumulators: list[_EpochAccumulator]
     ) -> None:
+        # Converts and transfers a batch, adapts hook and step arguments,
+        # dispatches start and end hooks around precision/Strategy execution, and
+        # accumulates pending Module observations into the correct result window.
         batch: Batch = trainer.precision_plugin.convert_input(fetched[0])
         batch_idx: int = fetched[1]
         dataloader_idx: int = fetched[2]
@@ -554,6 +613,8 @@ class EvaluationLoop(Loop):
         batch_idx: int,
         dataloader_idx: int | None
     ) -> _BatchHookArguments:
+        # Adds loader identity only when sequential multi-loader execution makes
+        # it semantically meaningful.
         if dataloader_idx is None:
             return batch, batch_idx
         return batch, batch_idx, dataloader_idx
@@ -566,6 +627,8 @@ class EvaluationLoop(Loop):
         batch_idx: int,
         dataloader_idx: int | None
     ) -> _BatchHookArguments:
+        # Adapts to step methods that intentionally accept no batch_idx while
+        # preserving loader identity when required.
         if module._hook_accepts_parameter(
             step_hook,
             "batch_idx",
@@ -583,6 +646,7 @@ class EvaluationLoop(Loop):
         callbacks: list[Callback],
         hook_arguments: _BatchHookArguments
     ) -> None:
+        # Dispatches stage-specific callback then Module batch-start hooks.
         if self.stage == "validate":
             trainer._hook_dispatcher.call_callbacks(
                 module,
@@ -616,6 +680,8 @@ class EvaluationLoop(Loop):
         module: Module,
         step_arguments: _BatchHookArguments
     ) -> StepOutput:
+        # Enters the selected precision step and logging contexts, then invokes
+        # the live execution model through Strategy.
         model: nn.Module | None = trainer.strategy.model
         assert model is not None
         step_context: AbstractContextManager[None] = (
@@ -648,6 +714,8 @@ class EvaluationLoop(Loop):
         outputs: StepOutput,
         hook_arguments: _BatchHookArguments
     ) -> None:
+        # Dispatches stage-specific callback then Module batch-end hooks with the
+        # normalized client output.
         if self.stage == "validate":
             trainer._hook_dispatcher.call_callbacks(
                 module,
@@ -684,6 +752,8 @@ class EvaluationLoop(Loop):
         module: Module,
         include_dataloader_idx: bool
     ) -> None:
+        # Validates step and batch-hook signatures against actual loader count,
+        # accepting explicit defaults or variable positional arguments.
         prefix: str = "validation" if self.stage == "validate" else "test"
         for hook_name in (
             f"{prefix}_step",
@@ -727,6 +797,8 @@ class EvaluationLoop(Loop):
                 )
 
     def _get_combined_loader(self) -> CombinedLoader:
+        # Resolves fit-owned validation with reload support or the standalone test
+        # loader already prepared by Trainer.
         trainer: syntheticmind.Trainer = self.trainer
         if self.stage == "validate":
             if trainer.state.stage == "fit":
@@ -744,6 +816,9 @@ class EvaluationLoop(Loop):
         running_stage: RunningStage,
         batch: Batch
     ) -> None:
+        # Computes immediate observations, creates or updates epoch accumulators,
+        # routes non-sanity step views, emits rank-owned logger values, and drains
+        # the Module observation buffer.
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             module._reset_logged_metrics()
@@ -808,6 +883,8 @@ class EvaluationLoop(Loop):
         state: TrainerState,
         running_stage: RunningStage
     ) -> None:
+        # Computes metrics produced by epoch-end hooks, merges callback and public
+        # results, emits logger values, updates progress, and drains the buffer.
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return
@@ -844,6 +921,9 @@ class EvaluationLoop(Loop):
         self,
         epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]]
     ) -> dict[str, float]:
+        # Computes each scalar or TorchMetrics window, populates independent
+        # consumer views, resets accumulator state, and returns logger-visible
+        # Python scalars for one result window.
         reduced: dict[str, float] = {}
         for metric, accumulator in epoch_accum.values():
             value: torch.Tensor = accumulator.compute(

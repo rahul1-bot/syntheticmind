@@ -1,3 +1,24 @@
+# This module:
+# 1. Defines ValidationSchedule, the stateful policy resolving epoch eligibility
+#    and batch-, cross-epoch-, fraction-, final-batch-, stop-, or time-based
+#    validation boundaries
+#
+# Design decisions:
+# - check_val_every_n_epoch=None gives integer intervals cross-epoch batch
+#   semantics; a finite epoch cadence resets integer counting within each epoch
+# - Fractional intervals require a sized loader because a proportion cannot be
+#   resolved from an unknown horizon
+# - Unsized loaders accept integer, time-based, or final-exhaustion validation;
+#   the last form waits for lookahead-confirmed natural epoch completion
+# - Cooperative stopping triggers validation before exit when minimum epoch and
+#   step conditions allow the stop, ensuring monitors observe the final state
+# - Time cadence uses monotonic time and advances only after validation ends, so
+#   a long validation pass does not immediately trigger another pass
+# - String durations use explicit DD:HH:MM:SS clock fields and mappings delegate
+#   only to timedelta-supported integer units
+#
+# Author: Rahul Sawhney
+
 import time
 from datetime import timedelta
 
@@ -9,11 +30,15 @@ type _ValidationInterval = int | float | str | timedelta | dict[str, int]
 
 
 class ValidationSchedule:
+    # Configured validation policy reused across fit epochs. Trainer supplies the
+    # resolved train-loader horizon and whether a validation source exists.
     def __init__(
         self,
         val_check_interval: _ValidationInterval | None,
         check_val_every_n_epoch: int | None
     ) -> None:
+        # Validates public cadence forms, parses optional duration, and starts
+        # disabled until Trainer attaches actual data.
         if check_val_every_n_epoch is not None and (
             isinstance(check_val_every_n_epoch, bool)
             or not isinstance(check_val_every_n_epoch, int)
@@ -65,6 +90,8 @@ class ValidationSchedule:
         validation_enabled: bool,
         reset_time: bool
     ) -> None:
+        # Resolves a concrete batch interval from loader size and public cadence,
+        # validates sized and unsized constraints, and optionally resets time.
         self._validation_enabled: bool = validation_enabled
         if self.time_interval_seconds is not None:
             self.batch_interval: int | None = None
@@ -99,6 +126,7 @@ class ValidationSchedule:
             self._last_validation_time: float = time.monotonic()
 
     def is_epoch_eligible(self, current_epoch: int) -> bool:
+        # Applies one-based epoch cadence or permits every cross-epoch interval.
         return (
             self.check_val_every_n_epoch is None
             or (current_epoch + 1) % self.check_val_every_n_epoch == 0
@@ -113,6 +141,8 @@ class ValidationSchedule:
         should_stop: bool,
         can_stop_early: bool
     ) -> bool:
+        # Evaluates enabled data, epoch cadence, cooperative stop, monotonic time,
+        # final exhaustion, and local or cross-epoch batch coordinates in order.
         if not self._validation_enabled or not self.is_epoch_eligible(current_epoch):
             return False
         if should_stop and can_stop_early:
@@ -129,6 +159,7 @@ class ValidationSchedule:
         return (current_iteration + 1) % self.batch_interval == 0
 
     def mark_validation_end(self) -> None:
+        # Starts the next time interval after validation work completes.
         if self.time_interval_seconds is not None:
             self._last_validation_time: float = time.monotonic()
 
@@ -138,6 +169,8 @@ class ValidationSchedule:
 
     @property
     def requires_unsized_epoch_end(self) -> bool:
+        # Whether an unsized loader requires lookahead-confirmed exhaustion to
+        # schedule its final validation pass.
         return (
             self._validation_enabled
             and self.time_interval_seconds is None
@@ -148,6 +181,8 @@ class ValidationSchedule:
         self,
         interval: str | timedelta | dict[str, int]
     ) -> float:
+        # Converts timedelta, mapping, or DD:HH:MM:SS input to non-negative
+        # seconds with strict field and type validation.
         if isinstance(interval, timedelta):
             seconds: float = interval.total_seconds()
         elif isinstance(interval, dict):

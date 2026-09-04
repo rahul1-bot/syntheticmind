@@ -135,15 +135,15 @@
     6. Direct resumable saves during incomplete batches fail; ModelCheckpoint records due batch or validation triggers and flushes at the correct batch or epoch durability boundary, while weights-only output remains safe and cannot continue fit.
     7. Exact scalar and TorchMetrics state, schedulers, differing-rank histories, spawned post-fit payloads, world-size rejection, corruption, stateful data, and sharded FSDP2 resume pass; spawned optimizer payloads use the integer-key-aware OptimizerState contract rather than a false string-key checkpoint mapping.
 
-| Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
+| Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 10:41 PM | Name: Ghost |
 
     1. `TrainingEpochLoop.run` composes epoch start, resumable iteration, batch advancement, tail optimization, partial-state retention, and true epoch completion; reaching a run ceiling inside the loader no longer executes epoch-end hooks, epoch schedulers, or epoch increment.
     2. Fetch, transfer, batch hooks, automatic or manual optimization, metric dispatch, scheduled validation, scheduler cadence, and loader continuation remain private transitions on the one epoch owner; no batch-manager, state-container, helper class, or new public API was introduced.
     3. Trainer now owns one DataModule-over-Module batch-transfer hook transaction used by training, validation, testing, and prediction, deleting three duplicated stage implementations while preserving exact hook dispatch and profiling.
     4. Strategy owns deferred backward synchronization. DDP supplies `no_sync`, while loops and `SyntheticOptimizer` request the policy without importing or inspecting the wrapper; explicit automatic and manual step operations replace the former boolean step contract.
     5. Standard and plateau schedulers advance only at their real step or completed-epoch boundaries; epoch metric state survives partial fit and checkpoint restoration, while `estimated_stepping_batches` remains the sole horizon calculation.
-    6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; Trainer, evaluation, and prediction orchestration are already decomposed by lifecycle transition, and conditional annotation imports are absent across production.
-    7. CPU, MPS, automatic and manual optimization, accumulated DDP, stateful data, scalar and TorchMetrics partial epochs, spawned parent persistence, plateau cadence, tensor parallelism, and sharded FSDP2 exact continuation pass.
+    6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; authorized VOCODE comments and `loops/README.md` now document every epoch, evaluation, prediction, optimization, fetch, validation-cadence, checkpoint-durability, and client return boundary without splitting the concept or adding docstrings.
+    7. CPU, MPS, automatic and manual optimization, accumulated DDP, scalar and TorchMetrics routing, multiple loaders, stateful data, spawned parent persistence, plateau cadence, tensor parallelism, and sharded FSDP2 exact continuation pass after the prose-only phase.
 
 | Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
 

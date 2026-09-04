@@ -1,3 +1,27 @@
+# This module:
+# 1. Defines FitLoop, the outer training lifecycle over training start, logical
+#    loader epochs, monitoring order, stop conditions, and training end
+# 2. Coordinates distributed sampler epochs and flushes metrics logged from
+#    epoch-level Module hooks
+#
+# Design decisions:
+# - FitLoop owns only the epoch sequence; TrainingEpochLoop owns batch execution,
+#   optimization, scheduled validation, metric windows, and continuation state
+# - A logical epoch completes only when the training loader exhausts. Reaching a
+#   max-step or stop boundary inside the loader returns without epoch-end hooks,
+#   epoch increment, or epoch scheduler advancement
+# - Non-monitoring callbacks and the Module epoch-end hook run before hook metrics
+#   flush and plateau schedulers; monitoring callbacks run afterward so early
+#   stopping and checkpoint ranking observe final epoch state
+# - DistributedSampler receives the logical epoch before iteration so shuffling
+#   remains consistent across ranks and exact checkpoint continuation
+# - Early stop requests are honored only after configured minimum epochs and
+#   optimizer steps, while terminal max limits remain unconditional
+# - Training start and end hooks surround only an execution that has real batches
+#   and has not already reached a terminal boundary
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Callable, Iterable
 from typing import cast, override
 
@@ -20,14 +44,20 @@ __all__: list[str] = ["FitLoop"]
 
 
 class FitLoop(Loop):
+    # Trainer-owned outer fit driver. It composes one reusable TrainingEpochLoop
+    # and advances TrainerState only at true epoch completion.
     @override
     def __init__(self, min_epochs: int, max_epochs: int) -> None:
+        # Stores resolved epoch bounds and awaits Trainer connection of the epoch
+        # loop after all runtime components exist.
         super().__init__()
         self.min_epochs: int = min_epochs
         self.max_epochs: int = max_epochs
         self.epoch_loop: TrainingEpochLoop | None = None
 
     def run(self) -> None:
+        # Validates terminal conditions, dispatches training start, iterates
+        # eligible epochs, honors cooperative stopping, and dispatches training end.
         trainer: syntheticmind.Trainer = self.trainer
         module: Module | None = trainer.module
         assert module is not None
@@ -77,6 +107,8 @@ class FitLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
+        # Dispatches callback hooks before the Module hook at the fit-to-training
+        # lifecycle boundary.
         trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_start",
@@ -97,6 +129,8 @@ class FitLoop(Loop):
         monitoring_callbacks: list[Callback],
         non_monitoring_callbacks: list[Callback]
     ) -> None:
+        # Refreshes data, sampler, modes, progress, and hooks, executes one epoch,
+        # and advances state only when the loader genuinely completes.
         assert self.epoch_loop is not None
         epoch: int = state.current_epoch
         trainer._ensure_train_dataloader()
@@ -130,6 +164,8 @@ class FitLoop(Loop):
         trainer: syntheticmind.Trainer,
         epoch: int
     ) -> None:
+        # Propagates logical epoch to every standard distributed training sampler
+        # in the active nested loader collection.
         combined_loader: CombinedLoader | None = (
             trainer._data_connector.train_combined_loader
         )
@@ -149,6 +185,7 @@ class FitLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
+        # Dispatches callback then Module epoch-start hooks before batch fetch.
         trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_epoch_start",
@@ -168,6 +205,8 @@ class FitLoop(Loop):
         monitoring_callbacks: list[Callback],
         non_monitoring_callbacks: list[Callback]
     ) -> None:
+        # Finalizes non-monitoring hooks and their metrics, advances plateau
+        # scheduling, then invokes monitoring callbacks against settled state.
         trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_epoch_end",
@@ -200,6 +239,8 @@ class FitLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
+        # Dispatches terminal training hooks and rechecks process termination
+        # before control returns to Trainer finalization.
         trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_end",
@@ -216,6 +257,8 @@ class FitLoop(Loop):
         return self.epoch_loop.max_steps != -1 and state.global_step >= self.epoch_loop.max_steps
 
     def _can_stop_early(self, state: TrainerState) -> bool:
+        # Applies both minimum epoch and minimum optimizer-step constraints to a
+        # cooperative callback or client stop request.
         assert self.epoch_loop is not None
         return (
             state.current_epoch >= self.min_epochs
@@ -231,6 +274,9 @@ class FitLoop(Loop):
         trainer: syntheticmind.Trainer,
         state: TrainerState
     ) -> None:
+        # Computes observations produced by epoch hooks, updates callback, logger,
+        # and progress views, emits rank-owned logger records, resets stateful
+        # Metrics, and drains the Module buffer.
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return

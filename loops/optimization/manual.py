@@ -1,3 +1,16 @@
+# This module:
+# 1. Normalizes reporting output from a manual-optimization training_step while
+#    leaving backward, zeroing, optimizer order, and stepping with client code
+#
+# Design decisions:
+# - A tensor becomes a detached ``"loss"`` mapping for callback consistency
+# - Mapping outputs retain client keys but detach a tensor loss so returned batch
+#   state cannot preserve an autograd graph
+# - None represents a valid reporting-empty manual step because optimization may
+#   have completed entirely through Module methods
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Callable, Mapping
 
 import torch
@@ -9,11 +22,14 @@ __all__: list[str] = []
 
 
 class _ManualOptimization:
+    # Stateless normalization of one client-owned manual training step.
     @torch.enable_grad()
     def run(
         self,
         step_operation: Callable[[], TrainingStepOutput]
     ) -> StepOutput:
+        # Executes the client step with gradients enabled and converts its return
+        # to the common detached batch-output mapping.
         raw_outputs: TrainingStepOutput = step_operation()
         if raw_outputs is None:
             return {}

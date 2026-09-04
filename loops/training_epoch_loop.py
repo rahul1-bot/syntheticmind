@@ -1,3 +1,37 @@
+# This module:
+# 1. Defines TrainingEpochLoop, one logical training-loader epoch composed from
+#    resume coordinates, data fetch, transfer, hooks, automatic or manual
+#    optimization, accumulation, validation, scheduler cadence, metrics,
+#    checkpoint durability, and exact continuation state
+# 2. Owns the rank-local scalar and TorchMetrics windows required to resume a
+#    partial epoch without fabricating an epoch boundary
+#
+# Design decisions:
+# - A logical epoch ends only when its CombinedLoader exhausts. A max-step,
+#   callback stop, or time boundary inside the loader preserves the current epoch
+#   and does not run epoch-end hooks or epoch schedulers
+# - Stateful loaders restore their physical cursor and continue directly;
+#   stateless loaders replay the completed prefix from the epoch-start RNG state,
+#   then restore checkpoint-time RNG before the first new batch
+# - Unsized lookahead captures loader state after the returned batch and before
+#   the unseen prefetch, preventing checkpoints from skipping data on resume
+# - Automatic optimization owns closure, zeroing, backward, accumulation,
+#   clipping, managed step, progress, and scheduler cadence. Manual optimization
+#   executes only the client step and lets Module methods drive mutation
+# - DDP synchronization is deferred through Strategy during non-boundary
+#   microbatches. If loader exhaustion leaves a partial accumulation tail,
+#   gradients synchronize and step exactly once before epoch completion
+# - Checkpoints are durable only outside an incomplete batch and, for automatic
+#   optimization, after a complete optimizer boundary; callbacks may record save
+#   intent earlier but persistence waits for this state
+# - Standard schedulers and plateau schedulers are separate operations because a
+#   plateau step requires a settled monitor. Epoch schedulers run only at true
+#   loader completion
+# - Epoch metric identity, accumulator values, TorchMetrics state, update count,
+#   loader cursor, and RNG coordinates persist together and validate before any
+#   resumed live state mutates
+#
+# Author: Rahul Sawhney
 
 import warnings
 from collections.abc import Callable, Iterator
@@ -55,6 +89,9 @@ type _EpochMetricEntry = tuple[LoggedMetric, MetricAccumulator]
 
 
 class TrainingEpochLoop(Loop):
+    # Stateful training epoch reused by FitLoop. Client code interacts through
+    # Module training and optimization methods; Trainer and checkpoint callbacks
+    # inspect durability and continuation state through this owner.
     @override
     def __init__(
         self,
@@ -65,6 +102,8 @@ class TrainingEpochLoop(Loop):
         gradient_clip_algorithm: ClipAlgorithm | None = None,
         log_every_n_steps: int = 10
     ) -> None:
+        # Stores resolved step, accumulation, clipping, and logging policy and
+        # initializes optimization helpers plus empty continuation and metric state.
         super().__init__()
         self.min_steps: int | None = min_steps
         self.max_steps: int = max_steps
@@ -92,10 +131,14 @@ class TrainingEpochLoop(Loop):
         self.is_last_batch: bool = False
 
     def reset_on_run(self) -> None:
+        # Clears prior lifecycle state before a new fit while resetting the
+        # externally visible last-batch marker.
         self.reset_on_teardown()
         self.is_last_batch: bool = False
 
     def reset_on_teardown(self) -> None:
+        # Releases epoch accumulators, cursor coordinates, replay RNG, loader
+        # snapshots, and durability state after fit ownership ends.
         self._reset_epoch_metrics()
         self._completed_batches: int = 0
         self._total_batches_processed: int = 0
@@ -109,6 +152,9 @@ class TrainingEpochLoop(Loop):
         self.epoch_completed: bool = True
 
     def run(self) -> None:
+        # Initializes epoch RNG, executes remaining batches, closes any
+        # accumulation tail, stores continuation when incomplete, and publishes
+        # epoch metrics only after genuine loader exhaustion.
         self._start_epoch()
 
         trainer: syntheticmind.Trainer = self.trainer
@@ -159,6 +205,8 @@ class TrainingEpochLoop(Loop):
             self._epoch_accum: dict[str, _EpochMetricEntry] = {}
 
     def _start_epoch(self) -> None:
+        # Restores the epoch-start RNG needed for stateless prefix replay, then
+        # captures the start state of the active logical epoch for future pause.
         self.validation_ran_this_epoch: bool = False
         self._checkpoint_is_durable: bool = True
         if self._resume_rng_state is not None:
@@ -175,6 +223,9 @@ class TrainingEpochLoop(Loop):
         trainer: syntheticmind.Trainer,
         combined_loader: CombinedLoader
     ) -> _BatchIteration:
+        # Distinguishes physical stateful cursor restoration from stateless prefix
+        # replay, validates offsets against sized horizons, configures unsized
+        # snapshots, and returns the live fetcher plus resume coordinates.
         total_batches: int | None = combined_loader._length()
         loader_state_restored: bool = self._combined_loader_state_restored
         self._combined_loader_state_restored: bool = False
@@ -225,6 +276,9 @@ class TrainingEpochLoop(Loop):
         combined_loader: CombinedLoader,
         epoch_accum: dict[str, _EpochMetricEntry]
     ) -> _BatchLoopResult:
+        # Fetches, optionally replays, converts, and advances batches until
+        # natural exhaustion or a terminal control boundary, returning final
+        # index, accumulation state, and true epoch completion.
         state: TrainerState = trainer.state
         iteration: _BatchIteration = self._prepare_batch_iteration(
             trainer,
@@ -282,6 +336,10 @@ class TrainingEpochLoop(Loop):
         data_fetcher: _DataFetcher[tuple[Batch, int, int]],
         epoch_accum: dict[str, _EpochMetricEntry]
     ) -> bool | None:
+        # Marks the checkpoint unsafe, restores checkpoint-time RNG after replay,
+        # transfers data, dispatches start control, executes optimization,
+        # records progress, dispatches end and metrics, runs cadence, and flushes
+        # deferred checkpoint intent at the next durable boundary.
         self._checkpoint_is_durable: bool = False
         self._restore_checkpoint_random_state()
         batch: Batch = trainer._transfer_batch(
@@ -353,11 +411,15 @@ class TrainingEpochLoop(Loop):
         trainer: syntheticmind.Trainer,
         state: TrainerState
     ) -> bool:
+        # Combines terminal max steps with cooperative stop requests that satisfy
+        # FitLoop minimum epoch and step constraints.
         return self._max_steps_reached(state) or (
             trainer.should_stop and trainer.fit_loop._can_stop_early(state)
         )
 
     def _restore_checkpoint_random_state(self) -> None:
+        # After stateless prefix replay, restores the exact RNG captured at the
+        # interruption so the first new batch follows the uninterrupted trajectory.
         if self._resume_checkpoint_rng_state is None:
             return
         self.trainer._checkpoint_connector.restore_random_state(
@@ -376,6 +438,9 @@ class TrainingEpochLoop(Loop):
         tail_is_accumulating: bool,
         epoch_completed: bool
     ) -> None:
+        # Synchronizes and steps an incomplete accumulation tail at loader
+        # exhaustion, flushes now-durable batch checkpoints, and advances standard
+        # epoch schedulers only when the epoch completed.
         if module.automatic_optimization and tail_is_accumulating:
             assert optimizer is not None
             strategy.sync_gradients(optimizer)
@@ -408,6 +473,8 @@ class TrainingEpochLoop(Loop):
         combined_loader: CombinedLoader,
         epoch_completed: bool
     ) -> None:
+        # Clears continuation after completion or stores loader state, completed
+        # logical batches, global batch coordinate, and epoch-start RNG for pause.
         combined_loader_states: list[DataLoaderState] = list(
             self._completed_loader_states
             if self._use_completed_loader_states
@@ -438,6 +505,8 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         batch_idx: int
     ) -> bool:
+        # Dispatches callback and Module batch-start hooks and interprets only the
+        # established Module return value ``-1`` as stop-before-computation.
         trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_batch_start",
@@ -465,6 +534,9 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         batch_idx: int
     ) -> _BatchOptimizationResult:
+        # Selects manual step normalization or automatic closure execution,
+        # suppressing distributed backward synchronization on non-boundary
+        # accumulation microbatches.
         with trainer.profiler.profile("run_training_batch"):
             if not module.automatic_optimization:
                 manual_step: Callable[[], TrainingStepOutput] = partial(
@@ -510,6 +582,8 @@ class TrainingEpochLoop(Loop):
         data_fetcher: _DataFetcher[tuple[Batch, int, int]],
         batch_idx: int
     ) -> bool:
+        # Advances logical and cross-epoch batch coordinates and adopts the
+        # unsized fetcher's post-return loader snapshot as the durable cursor.
         self._completed_batches: int = batch_idx + 1
         self._total_batches_processed: int = self._total_batches_processed + 1
         if self._use_completed_loader_states:
@@ -535,6 +609,8 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         batch_idx: int
     ) -> None:
+        # Previews pending metrics for progress, then dispatches callback and
+        # Module batch-end hooks before final metric accumulation.
         trainer._preview_logged_metrics(module, "training")
         trainer._hook_dispatcher.call_callbacks(
             module,
@@ -561,6 +637,9 @@ class TrainingEpochLoop(Loop):
         batch_idx: int,
         is_accumulating: bool
     ) -> None:
+        # Evaluates validation schedule against batch and optimizer coordinates,
+        # restores training stage afterward, and advances step-interval plateau
+        # schedulers only at optimizer boundaries.
         is_last_batch: bool = self.is_last_batch
         if trainer._validation_schedule.should_validate(
             state.current_epoch,
@@ -593,6 +672,8 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         batch_idx: int
     ) -> TrainingStepOutput:
+        # Enters precision and hook context, then executes the client training
+        # step through the Strategy-managed model identity.
         with self.trainer.precision_plugin.train_step_context():
             with module._hook_context("training_step"):
                 outputs: TrainingStepOutput = self.trainer._hook_dispatcher.call_strategy(
@@ -613,6 +694,8 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         batch_idx: int
     ) -> OptimizerClosure:
+        # Composes client step, precision-aware backward, and accumulation-window
+        # zeroing into the closure consumed by managed optimizer stepping.
         step_operation: Callable[[], TrainingStepOutput] = partial(
             self._run_training_step,
             strategy,
@@ -650,6 +733,8 @@ class TrainingEpochLoop(Loop):
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
+        # Resolves loop or explicit clipping policy, validates the algorithm, and
+        # delegates numerical handling to the active precision plugin.
         resolved_gradient_clip_val: int | float | None = (
             self.gradient_clip_val if gradient_clip_val is None else gradient_clip_val
         )
@@ -683,6 +768,8 @@ class TrainingEpochLoop(Loop):
         create_graph: bool = False,
         inputs: BackwardInputs = None
     ) -> None:
+        # Routes client or automatic backward through Strategy and precision;
+        # Module ownership is already carried by the connected Strategy.
         del module
         trainer._hook_dispatcher.call_strategy(
             "backward",
@@ -703,6 +790,8 @@ class TrainingEpochLoop(Loop):
         closure: OptimizerClosure | None = None,
         kwargs: OptimizerStepOptions | None = None
     ) -> OptimizerStepOutput:
+        # Executes one client-requested managed optimizer step and advances global
+        # progress exactly once for manual optimization.
         output: OptimizerStepOutput = self._optimizer_step_only(
             trainer,
             module,
@@ -721,6 +810,8 @@ class TrainingEpochLoop(Loop):
         closure: OptimizerClosure | None = None,
         kwargs: OptimizerStepOptions | None = None
     ) -> OptimizerStepOutput:
+        # Executes an automatic managed step without incrementing progress here;
+        # the enclosing epoch operation owns that transition.
         return self._optimizer_step_only(
             trainer,
             module,
@@ -736,6 +827,8 @@ class TrainingEpochLoop(Loop):
         optimizer: torch.optim.Optimizer,
         batch_idx: int
     ) -> None:
+        # Public loop capability used by Module manual optimization to preserve
+        # zero-grad hooks and model customization.
         self._optimizer_zero_grad(trainer, module, optimizer, batch_idx)
 
     def _do_optimizer_step(
@@ -747,6 +840,9 @@ class TrainingEpochLoop(Loop):
         batch_idx: int,
         closure: OptimizerClosure | None = None
     ) -> None:
+        # Resolves the matching SyntheticOptimizer, selects automatic context,
+        # dispatches Module.optimizer_step, advances global progress, and steps
+        # standard step schedulers.
         synthetic_optimizer: SyntheticOptimizer = next(
             wrapped_optimizer
             for wrapped_optimizer in trainer._synthetic_optimizers
@@ -777,6 +873,7 @@ class TrainingEpochLoop(Loop):
         interval: SchedulerInterval,
         current_index: int
     ) -> None:
+        # Advances non-plateau schedulers matching interval and frequency.
         self._update_lr_schedulers(
             trainer,
             module,
@@ -792,6 +889,7 @@ class TrainingEpochLoop(Loop):
         interval: SchedulerInterval,
         current_index: int
     ) -> None:
+        # Advances plateau schedulers only after their monitored metric may exist.
         self._update_lr_schedulers(
             trainer,
             module,
@@ -808,6 +906,8 @@ class TrainingEpochLoop(Loop):
         current_index: int,
         scheduler_kind: Literal["standard", "plateau"]
     ) -> None:
+        # Filters by scheduler kind, interval, and frequency; resolves plateau
+        # monitor under strict or warning policy; then dispatches the Module hook.
         for configuration in trainer.lr_scheduler_configs:
             is_plateau: bool = scheduler_kind == "plateau"
             if configuration.reduce_on_plateau != is_plateau:
@@ -848,6 +948,8 @@ class TrainingEpochLoop(Loop):
         closure: OptimizerClosure | None = None,
         kwargs: OptimizerStepOptions | None = None
     ) -> OptimizerStepOutput:
+        # Normalizes optional closure and keyword state and invokes Strategy
+        # optimizer stepping without changing Trainer progress.
         step_kwargs: OptimizerStepOptions = {} if kwargs is None else kwargs
         resolved_closure: OptimizerClosure = closure or self._empty_closure
         return trainer._hook_dispatcher.call_strategy(
@@ -869,6 +971,8 @@ class TrainingEpochLoop(Loop):
         optimizer: torch.optim.Optimizer,
         batch_idx: int
     ) -> None:
+        # Dispatches callback and Module pre-zero hooks before the overridable
+        # Module.optimizer_zero_grad operation.
         callbacks: list[Callback] = trainer.callbacks
         trainer._hook_dispatcher.call_callbacks(
             module,
@@ -896,6 +1000,8 @@ class TrainingEpochLoop(Loop):
         state: TrainerState,
         module: Module
     ) -> None:
+        # Advances TrainerState and mirrors the completed optimizer-step count onto
+        # the client Module.
         state.increment_global_step()
         module._global_step: int = state.global_step
 
@@ -907,6 +1013,9 @@ class TrainingEpochLoop(Loop):
         is_accumulating: bool,
         is_last_batch: bool
     ) -> None:
+        # Optionally clears gradients at a completed automatic boundary, marks
+        # mid-epoch ownership, executes validation, advances time cadence, and
+        # restores training stage identity.
         if module.automatic_optimization and not is_accumulating:
             trainer._call_on_validation_model_zero_grad(module)
         trainer._is_mid_epoch_validation: bool = not is_last_batch
@@ -922,9 +1031,13 @@ class TrainingEpochLoop(Loop):
 
     @property
     def checkpoint_is_durable(self) -> bool:
+        # Whether public checkpoint persistence can represent the complete current
+        # optimization and batch transition without replay ambiguity.
         return self._checkpoint_is_durable
 
     def epoch_metric_state(self) -> CheckpointDict:
+        # Serializes every active epoch observation identity, scalar accumulator,
+        # TorchMetrics tensor state, and update count for rank-local gathering.
         state: CheckpointDict = {}
         storage_key: str
         metric_entry: _EpochMetricEntry
@@ -945,6 +1058,9 @@ class TrainingEpochLoop(Loop):
         state: CheckpointDict,
         module: Module
     ) -> None:
+        # Rebuilds metric observations around registered live Metric attributes or
+        # scalar placeholders, validates identity and state kind, restores
+        # accumulator windows, and marks the epoch incomplete.
         self._reset_epoch_metrics()
         storage_key: str
         entry_value: CheckpointValue
@@ -1019,6 +1135,7 @@ class TrainingEpochLoop(Loop):
         self.epoch_completed: bool = not bool(state)
 
     def _reset_epoch_metrics(self) -> None:
+        # Resets every live accumulator before dropping the epoch window mapping.
         metric_entry: _EpochMetricEntry
         for metric_entry in self._epoch_accum.values():
             metric_entry[1].reset()
@@ -1032,6 +1149,9 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         is_accumulating: bool = False
     ) -> None:
+        # Computes step observations, validates resumed epoch metadata, updates
+        # scalar or Metric accumulators, routes callback/logger/progress views,
+        # emits on real optimizer cadence, and drains Module state.
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             module._reset_logged_metrics()
@@ -1103,6 +1223,8 @@ class TrainingEpochLoop(Loop):
         epoch_accum: dict[str, _EpochMetricEntry],
         state: TrainerState
     ) -> None:
+        # Computes complete epoch windows after true loader exhaustion, routes all
+        # consumer views, resets accumulators, and emits one rank-zero logger record.
         if not epoch_accum:
             return
         callback_reduced: dict[str, torch.Tensor] = {}

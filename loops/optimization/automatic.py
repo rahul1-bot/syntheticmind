@@ -1,3 +1,20 @@
+# This module:
+# 1. Implements automatic training-step output normalization, zeroing, loss
+#    scaling for gradient accumulation, and backward invocation
+#
+# Design decisions:
+# - training_step may return a scalar tensor, a mapping containing ``"loss"``, or
+#   None; distributed execution rejects None because rank-divergent skipping
+#   would break collective ordering
+# - The loss divides by accumulation factor before backward so the summed
+#   microbatch gradient matches a mean over the accumulation window
+# - The detached normalized loss replaces any client mapping loss for callbacks
+#   and logging, preventing batch outputs from retaining the autograd graph
+# - Zeroing occurs only when the epoch loop supplies an operation for the current
+#   accumulation boundary
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Callable, Mapping
 
@@ -15,6 +32,7 @@ __all__: list[str] = []
 
 
 class _AutomaticOptimization:
+    # One automatic closure execution with normalized reporting output.
     def __init__(self, accumulation_factor: int) -> None:
         if accumulation_factor < 1:
             raise ValueError("accumulation_factor must be positive.")
@@ -29,6 +47,8 @@ class _AutomaticOptimization:
         backward_operation: Callable[[torch.Tensor], None],
         zero_grad_operation: Callable[[], None] | None
     ) -> OptimizerStepOutput:
+        # Executes training_step, validates and scales its loss, optionally zeros
+        # gradients, invokes precision-aware backward, and returns detached loss.
         raw_outputs: TrainingStepOutput = step_operation()
         if raw_outputs is None:
             warnings.warn(
@@ -66,4 +86,5 @@ class _AutomaticOptimization:
 
     @property
     def outputs(self) -> StepOutput:
+        # Defensive copy of normalized step output for batch-end hooks.
         return dict(self._outputs)

@@ -1,3 +1,27 @@
+# This module:
+# 1. Defines PredictionLoop, the no-gradient prediction lifecycle over model mode,
+#    hooks, nested or sequential dataloaders, precision, Strategy dispatch,
+#    optional CPU output retention, and result reconstruction
+#
+# Design decisions:
+# - Prediction remains separate from EvaluationLoop because it retains arbitrary
+#   model outputs rather than reducing scalar metrics
+# - The active CombinedLoader is sequential for multiple loaders, preserving one
+#   output list per loader and requiring dataloader_idx only when several leaves
+#   exist
+# - Step invocation adapts to client predict_step signatures that omit batch_idx,
+#   while signature validation occurs before iteration rather than catching a
+#   TypeError raised inside client code
+# - Retained outputs move recursively to CPU immediately after each step so the
+#   result does not pin accelerator memory for the complete prediction horizon
+# - return_predictions=False executes the full lifecycle without retaining
+#   outputs and is mandatory for multiprocessing launchers that cannot reconcile
+#   arbitrary worker result trees
+# - Exact nested model modes restore after prediction end hooks, and prediction
+#   logging state is cleared because clients communicate through return values
+#
+# Author: Rahul Sawhney
+
 import inspect
 from collections.abc import Callable, Iterator
 from typing import cast, override
@@ -21,21 +45,29 @@ type _PredictionHook = Callable[..., ModelOutput | None]
 
 
 class PredictionLoop(Loop):
+    # Trainer-owned prediction execution. Clients implement Module.predict_step
+    # and optionally batch hooks; Trainer.predict controls data and whether
+    # outputs return to the caller.
     @override
     def __init__(
         self,
         return_predictions: bool = True,
         inference_mode: bool = True
     ) -> None:
+        # Records output-retention and inference-mode policy.
         super().__init__()
         self.return_predictions: bool = return_predictions
         self.inference_mode: bool = inference_mode
 
     def run(self) -> list[ModelOutput] | list[list[ModelOutput]] | None:
+        # Executes prediction under the backend-safe no-gradient context and
+        # returns one list or a list per dataloader when retention is enabled.
         with self._evaluation_context(self.inference_mode):
             return self._run()
 
     def _run(self) -> list[ModelOutput] | list[list[ModelOutput]] | None:
+        # Prepares stage state, validates signatures, dispatches hooks and batches,
+        # restores modes, clears logging state, and reconstructs result shape.
         trainer: syntheticmind.Trainer = self.trainer
         module: Module | None = trainer.module
         assert module is not None
@@ -84,6 +116,8 @@ class PredictionLoop(Loop):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> _PredictionSetup:
+        # Attaches running-stage identity, applies per-loader limits, resolves
+        # combined horizon, and determines whether hooks need dataloader_idx.
         combined_loader: CombinedLoader | None = (
             trainer._data_connector.predict_combined_loader
         )
@@ -104,6 +138,8 @@ class PredictionLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
+        # Selects evaluation mode, then dispatches prediction start and epoch-start
+        # callbacks before the corresponding Module hooks.
         trainer._hook_dispatcher.call_module(
             module,
             "on_predict_model_eval",
@@ -137,6 +173,8 @@ class PredictionLoop(Loop):
         callbacks: list[Callback],
         training_modes: dict[str, bool]
     ) -> None:
+        # Dispatches epoch-end and stage-end callbacks before Module hooks, then
+        # restores the exact nested model modes captured before prediction.
         trainer._hook_dispatcher.call_callbacks(
             module,
             "on_predict_epoch_end",
@@ -169,6 +207,8 @@ class PredictionLoop(Loop):
         include_dataloader_idx: bool,
         predictions_by_dataloader: list[list[ModelOutput]]
     ) -> None:
+        # Creates the bounded data fetcher under profiler ownership and advances
+        # batches until exhaustion while polling process termination.
         with trainer.profiler.profile("setup_predict_dataloader"):
             data_fetcher: _DataFetcher[tuple[Batch, int, int]] = _DataFetcher(
                 combined_loader,
@@ -205,6 +245,9 @@ class PredictionLoop(Loop):
         include_dataloader_idx: bool,
         predictions_by_dataloader: list[list[ModelOutput]]
     ) -> None:
+        # Converts and transfers one batch, dispatches start hooks, executes the
+        # precision and Strategy step, optionally stores CPU output, then
+        # dispatches end hooks.
         batch: Batch = trainer.precision_plugin.convert_input(fetched[0])
         batch_idx: int = fetched[1]
         dataloader_idx: int = fetched[2]
@@ -276,6 +319,8 @@ class PredictionLoop(Loop):
         batch_idx: int,
         dataloader_idx: int | None
     ) -> _PredictionHookArguments:
+        # Builds batch-hook arguments with loader identity only for multi-loader
+        # execution.
         if dataloader_idx is None:
             return batch, batch_idx
         return batch, batch_idx, dataloader_idx
@@ -287,6 +332,8 @@ class PredictionLoop(Loop):
         batch_idx: int,
         dataloader_idx: int | None
     ) -> _PredictionHookArguments:
+        # Adapts to predict_step methods that intentionally accept only batch and
+        # preserves loader identity when the client signature requires it.
         if module._hook_accepts_parameter(
             module.predict_step,
             "batch_idx",
@@ -303,6 +350,8 @@ class PredictionLoop(Loop):
         module: Module,
         step_arguments: _PredictionHookArguments
     ) -> ModelOutput:
+        # Enters precision and logging hook contexts, then invokes the selected
+        # Strategy against the live execution model.
         model: nn.Module | None = trainer.strategy.model
         assert model is not None
         with trainer.precision_plugin.predict_step_context():
@@ -319,6 +368,8 @@ class PredictionLoop(Loop):
         module: Module,
         include_dataloader_idx: bool
     ) -> None:
+        # Validates predict step and hook signatures against actual loader count
+        # before any batch is consumed, accepting explicit parameters or varargs.
         for hook_name in (
             "predict_step",
             "on_predict_batch_start",
