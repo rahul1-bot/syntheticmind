@@ -1,8 +1,8 @@
-| Strategic Direction | SyntheticMind Harness Hardening | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Strategic Direction | SyntheticMind Harness Hardening | Date: 04 September 2026 | Time: 07:48 PM | Name: Ghost |
 
     1. SyntheticMind is Rahul's private machine-learning harness for FAU study, independent research, experimentation, and direct end-to-end control of machine-learning workflows.
-    2. The harness is intentionally incomplete and must not be represented as production-ready, release-ready, or capability-complete.
-    3. The active objective is full user-facing capability parity with core PyTorch Lightning while retaining an independent SyntheticMind architecture.
+    2. The defined private core Trainer reconstruction scope is complete and executable; this does not represent public production readiness, release readiness, universal hardware support, or completion of excluded capabilities.
+    3. Future capabilities require a new evidence-backed scope rather than extending this completed objective through speculative parity or copied framework baggage.
     4. Fabric, public documentation, release machinery, promotional work, and replication of the upstream PyTorch Lightning test suite are excluded.
     5. Code behavior, inherited extension compatibility, failure handling, and proportionate executable verification control the work queue.
     6. New source-code comments and docstrings remain prohibited. The active ground-up refactor explicitly targets rewritten legacy modules, so stale or misleading source prose is removed with the code it described rather than preserved as false architecture.
@@ -43,7 +43,7 @@
     4. CPU, MPS, distributed, subprocess, spawn, fork, notebook, persistence, and optional-dependency paths are exercised in proportion to the capability's real execution surface.
     5. Historical references to static-analysis evidence describe work performed before the prohibition and do not authorize any future invocation.
 
-| Architecture State | Verified Framework Runtime Baseline | Date: 04 September 2026 | Time: 05:23 PM | Name: Ghost |
+| Architecture State | Verified Framework Runtime Baseline | Date: 04 September 2026 | Time: 07:48 PM | Name: Ghost |
 
     1. ✅ Fit, validation, test, prediction, sanity, failure, and teardown lifecycles preserve standard hook order, module modes, stage state, causal exceptions, and run controls.
     2. ✅ CPU, CUDA, MPS, precision, automatic and manual optimization, scheduler cadence, distributed launchers, samplers, signals, and parent-state reconciliation form an executable training runtime.
@@ -51,6 +51,7 @@
     4. ✅ Metric production, graph state, reduction, TorchMetrics, callback views, progress views, logger output, scheduler monitoring, early stopping, and checkpoint ranking remain distinct and coherent.
     5. ✅ Model, data, checkpoint, and callback hooks; model-provided callbacks; logger access; rank-safe printing; nested gathering; and model checkpoint reconstruction preserve established extension semantics.
     6. ✅ ConsoleRenderer owns terminal mechanics and owner-bound metric ordering without a lambda, while one ProgressBarCallback owns rank-zero stage presentation; the hook-rich callback retains an explicit concept-integrity size exception without annotation, prose, static, or pass-through debt.
+    7. CUDA execution remains hardware-unavailable, installed PyTorch 2.9 rejects `torch.compile` on Python 3.14, and macOS may abort during post-success spawned-process shutdown with a native recursive-mutex error; these are recorded environment boundaries rather than simulated capability.
 
 | Architecture Decision | Atomic Sharded Checkpoint Generations | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
 
@@ -161,7 +162,7 @@
     4. DataModule and DatasetDataModule retain preparation, setup, teardown, loader construction, batch transfer, state, direct-dataset construction, and the current `load_from_checkpoint` classmethod over constructor hyperparameters plus DataModule state.
     5. Model and DataModule reconstruction share schema-v2 payload reading and hyperparameter precedence but retain distinct private loaders because only models own configure hooks, strict parameter application, and device mapping.
     6. Every production module now contains zero future annotation imports, conditional type imports, `Any`, `object`, source comments, static methods, module functions, lambdas, and unannotated assignments; all fifty-five established public Module method signatures remain unchanged.
-    7. The 1,242-line module and 1,158-line Module class retain an explicit concept-integrity exception because splitting the researcher-facing PyTorch model contract through mixins or forwarding services would destroy extension semantics; every method remains within its hard limit.
+    7. Module, TrainingEpochLoop, CombinedLoader, LoggedMetric, and MetricAccumulator retain Rahul's explicit SyntheticMind concept-integrity size exception because splitting their extension, epoch, loader-tree, observation, or reduction state would create forwarding fragments; every method remains within its hard limit.
     8. Package import, hook dispatch, log failures, scalar and TorchMetrics views, differentiable gather, runtime access, CPU, MPS, DDP, spawn, model and DataModule local, file-like, and remote hydration, optimization, exact continuation, and model parallelism pass.
 
 | Architecture Decision | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |

@@ -1,9 +1,9 @@
-| Strategic Note | SyntheticMind Development Intent | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Strategic Note | SyntheticMind Development Intent | Date: 04 September 2026 | Time: 07:48 PM | Name: Ghost |
 
     1. SyntheticMind is private infrastructure for Rahul's study, research, experimentation, and direct ownership of complete machine-learning workflows.
-    2. The target is full user-facing core PyTorch Lightning capability parity without becoming a Lightning clone or importing its product identity.
+    2. The defined private core Trainer capability target is complete without becoming a Lightning clone or importing its product identity.
     3. Fabric, public documentation, release machinery, promotional work, and upstream test-suite replication remain outside the active objective.
-    4. The harness is incomplete. Capability claims require implemented runtime behavior and focused evidence rather than declared parameters or surface resemblance.
+    4. Completion is bounded to verified training lifecycle, state, data, optimization, metrics, precision, callbacks, observability, and distributed execution; public release, deployment conversion, Fabric, unsupported hardware, and future integrations remain outside it.
     5. New source comments and docstrings remain prohibited. Rewritten legacy modules are explicitly in scope for removal of stale or misleading prose, while unrelated surviving comments remain unchanged.
 
 | Strategic Note | Public Contracts and Internal Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
@@ -61,23 +61,12 @@
     3. PyTorch-native deployment tools remain available to downstream projects directly; SyntheticMind does not wrap them until a distinct framework-owned lifecycle and executable hardware evidence require that boundary.
     4. Ignored historical probes remain comparative evidence only and must not be cited as present production capability.
 
-| Strategic Hold | Controlled Restart Requirement | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
+| Architecture Correction | Controlled Restart Resolution | Date: 04 September 2026 | Time: 07:48 PM | Name: Ghost |
 
-    1. Rahul stopped the recursive hardening run because the model-parallel implementation expanded too broadly and departed from the required `code-guidelines.md` discipline.
-    2. The current code is preserved only as an interrupted review snapshot. It is not accepted model-parallel architecture and carries no completed-capability claim.
-    3. The added future-annotations import, helper boundaries, generic Strategy methods, Trainer wiring, checkpoint decomposition, names, and inheritance effects must be challenged individually before reuse.
-    4. A restart requires one Rahul-aligned slice at a time, full reading of the directly affected runtime path, minimal code movement, and focused executable verification before the next slice begins.
-    5. Lightning remains a behavioral and terminology reference, while SyntheticMind architecture remains independently governed by `code-guidelines.md`.
-    6. No implementation or parity work remains active until Rahul explicitly resumes it.
-
-| Strategic Note | Controlled SyntheticMind Restart | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
-
-    1. Rahul explicitly resumed the complete harness objective under the current root workspace `code-guidelines.md`; older repository-local guideline material remains historical and cannot override the current standard.
-    2. The first accepted slice recovered model-parallel persistence ownership without reproducing the interrupted function collection or introducing a public abstraction family.
-    3. Full and sharded two-rank training and resume now execute through `Module`, `Trainer`, `ModelParallelStrategy`, optimizer state, callback checkpointing, and Trainer progress restoration rather than through a standalone PyTorch primitive probe.
-    4. The model call contract was corrected so default prediction passes through inherited `nn.Module.__call__` behavior and registered forward hooks.
-    5. The next checkpoint slice must provide atomic sharded generation publication and failure recovery before model-parallel checkpoint durability can be marked complete.
-    6. Subsequent work remains sequential: finish checkpoint durability, repair strategy ownership and dependency direction, then recompute missing core Trainer capability against pinned and current Lightning evidence.
+    1. Rahul stopped the August snapshot because model-parallel work had expanded beyond concept ownership and the current `code-guidelines.md`; that rejected snapshot never carried an accepted capability claim.
+    2. Rahul explicitly resumed the objective under the root guideline, after which each slice was re-audited from runtime paths rather than inherited from the interrupted design.
+    3. Atomic sharded publication, independent Strategy ownership, full and sharded tensor parallelism, composable FSDP2, registered module call semantics, and exact continuation now have end-to-end evidence.
+    4. This resolved correction supersedes all incomplete-state and next-step language from the interrupted snapshot while retaining the reason the restart occurred.
 
 | Strategic Note | Model-Parallel Checkpoint Durability | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
 
@@ -86,7 +75,7 @@
     3. Legacy flat sharded directories remain readable and migrate on their next successful save without deleting the legacy generation before publication.
     4. Exact model-state comparison establishes trajectory equivalence for full and sharded resume, while injected distributed shard, metadata, and publication failures establish preservation of the active artifact.
     5. Checkpoint format collisions now fail visibly rather than converting a file into a directory or a directory into a file through destructive replacement.
-    6. The next architectural target is the Strategy hierarchy and its dependency direction, especially the incorrect inheritance of model parallelism from DDP and the duplicated distributed-step contracts.
+    6. Strategy reconstruction subsequently removed false DDP inheritance, centralized shared parallel execution, and verified independent tensor-parallel and composable FSDP2 paths.
 
 | Strategic Note | Strategy and Initialization Boundary | Date: 04 September 2026 | Time: 06:23 PM | Name: Ghost |
 
