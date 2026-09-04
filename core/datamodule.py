@@ -28,6 +28,7 @@ class DataModule(DataHooks, HyperparametersMixin):
     _checkpoint_hyperparameters_name: ClassVar[str] = "datamodule_hparams_name"
     _checkpoint_hyperparameters_type: ClassVar[str] = "datamodule_hparams_type"
 
+    @override
     def __init__(self) -> None:
         super().__init__()
         self.trainer: syntheticmind.Trainer | None = None
@@ -116,6 +117,7 @@ class DataModule(DataHooks, HyperparametersMixin):
 
 
 class DatasetDataModule(DataModule):
+    @override
     def __init__(
         self,
         train_dataset: DatasetSource | None = None,

@@ -1,7 +1,7 @@
 import inspect
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager
-from typing import Literal, cast
+from typing import Literal, cast, override
 
 import syntheticmind
 import torch
@@ -40,6 +40,7 @@ type _EvaluationHook = Callable[..., StepOutput | None]
 
 
 class EvaluationLoop(Loop):
+    @override
     def __init__(
         self,
         stage: _EvaluationStage = "validate",

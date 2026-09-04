@@ -40,6 +40,7 @@ class PyTorchProfiler(Profiler):
         "with_modules", "acc_events"
     })
 
+    @override
     def __init__(
         self,
         dirpath: str | Path | None = None,

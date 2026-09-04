@@ -16,6 +16,7 @@ __all__: list[str] = ["CSVLogger"]
 
 type _CSVRow = dict[str, str | None]
 class CSVLogger(Logger):
+    @override
     def __init__(
         self,
         save_dir: str | Path,

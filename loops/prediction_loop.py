@@ -1,6 +1,6 @@
 import inspect
 from collections.abc import Callable, Iterator
-from typing import cast
+from typing import cast, override
 
 import syntheticmind
 import torch
@@ -21,6 +21,7 @@ type _PredictionHook = Callable[..., ModelOutput | None]
 
 
 class PredictionLoop(Loop):
+    @override
     def __init__(
         self,
         return_predictions: bool = True,

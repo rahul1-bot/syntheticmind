@@ -195,12 +195,12 @@
     3. Checkpoint serialization belongs to CheckpointIO and distributed shards to model parallelism; a path-bound object earns existence because it retains a resolved backend and applies one local or remote identity across metadata, resources, mutation, staging, and containment.
     4. Storage relocation requires local, file-URL, remote, transaction, staging, checkpoint, logger, profiler, model-hydration, distributed, and failure-recovery evidence; successful path joining alone proves almost nothing.
 
-| Memory | Dependency-Neutral Framework Contracts | Date: 04 September 2026 | Time: 05:07 PM | Name: Ghost |
+| Memory | Dependency-Neutral Framework and Override Contracts | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 
     1. Shared aliases and used framework exceptions are contracts, not utilities; an exported failure category with no raise site or consumer is compatibility theatre rather than a useful semantic boundary.
     2. Placing these contracts at the package root prevents core, Trainer, loops, strategies, plugins, callbacks, loggers, and profilers from depending on a generic utility layer or on one another merely to name shared domains.
     3. A contract relocation requires multiprocessing and distributed execution evidence because imported module paths participate in worker reconstruction even when local imports compile.
-    4. Constructor prefixes and inheritance are exception behavior and remain stable, while obsolete prose and unused exception names should be removed rather than preserved as speculative API surface.
+    4. Override markers follow declared parent methods, not the mere existence of `object` or Protocol metaclass machinery; real constructor, representation, serialization, hook, and algorithm replacements require `@override`, while invented obligations create false architecture.
 
 | Memory | Combined Loader Is a Data Composition Primitive | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
 

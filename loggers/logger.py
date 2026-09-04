@@ -4,7 +4,7 @@ from argparse import Namespace
 from datetime import date, datetime, timedelta
 from operator import itemgetter
 from pathlib import Path
-from typing import cast
+from typing import cast, override
 
 import numpy as np
 import torch
@@ -195,6 +195,7 @@ class Logger:
                 f"Logger {name} must be one path segment without traversal, got {value!r}."
             )
 
+    @override
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(save_dir={self._save_dir!r}, "

@@ -3,7 +3,7 @@ import shutil
 import sys
 import textwrap
 import time
-from typing import TextIO
+from typing import TextIO, override
 
 __all__: list[str] = ["ConsoleRenderer"]
 
@@ -37,6 +37,7 @@ class ConsoleRenderer:
         self._spinner_index: int = 0
         self._last_render_time: float = 0.0
 
+    @override
     def __getstate__(self) -> dict[str, float]:
         return {"refresh_interval": self.refresh_interval}
 

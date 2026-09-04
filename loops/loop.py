@@ -1,4 +1,5 @@
 from contextlib import AbstractContextManager
+from typing import override
 
 import syntheticmind
 import torch
@@ -45,5 +46,6 @@ class Loop:
             return torch.inference_mode()
         return torch.no_grad()
 
+    @override
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"

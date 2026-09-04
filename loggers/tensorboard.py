@@ -35,6 +35,7 @@ class _TensorBoardWriter(Protocol):
 
 
 class TensorBoardLogger(Logger):
+    @override
     def __init__(
         self,
         save_dir: str | Path,

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Iterable
-from typing import cast
+from typing import cast, override
 
 import syntheticmind
 import torch
@@ -20,6 +20,7 @@ __all__: list[str] = ["FitLoop"]
 
 
 class FitLoop(Loop):
+    @override
     def __init__(self, min_epochs: int, max_epochs: int) -> None:
         super().__init__()
         self.min_epochs: int = min_epochs

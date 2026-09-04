@@ -2,7 +2,7 @@ import os
 import pickle
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import cast, override
 
 import syntheticmind
 import torch
@@ -229,6 +229,7 @@ class _MultiprocessingLauncher:
         finally:
             self._processes.clear()
 
+    @override
     def __getstate__(self) -> _MultiprocessingLauncherState:
         state: _MultiprocessingLauncherState = cast(
             _MultiprocessingLauncherState,

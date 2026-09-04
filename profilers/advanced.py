@@ -20,6 +20,7 @@ type _AdvancedProfilerArguments = tuple[
 
 
 class AdvancedProfiler(Profiler):
+    @override
     def __init__(
         self,
         dirpath: str | Path | None = None,

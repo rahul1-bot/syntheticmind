@@ -33,6 +33,7 @@ type _ResetParameters = Callable[[], None]
 
 
 class _ModuleInitializer(TorchFunctionMode):
+    @override
     def __init__(self, enabled: bool = True) -> None:
         super().__init__()
         if type(enabled) is not bool:

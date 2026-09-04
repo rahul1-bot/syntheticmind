@@ -182,11 +182,11 @@
     3. ✅ One 214-line path-bound StoragePath replaced twenty-three free functions and owns resolved backend, local or remote semantics, resources, metadata, traversal, containment, mutation, copying, and staging without broad `object` returns.
     4. ✅ Every production consumer migrated without a compatibility façade; local, file URL, memory remote, CSV, profiler, full checkpoint, remote callback, schema-v2 hydration, DDP, and sharded failure-recovery paths pass.
 
-| Progress Complete | Cross-Subsystem Contract Placement | Date: 04 September 2026 | Time: 05:07 PM | Name: Ghost |
+| Progress Complete | Cross-Subsystem Contract and Override Placement | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 
     1. ✅ Framework type aliases and the four used exception categories live in canonical package-root modules; two unreferenced exported exception classes and all stale source prose were deleted.
     2. ✅ Every production and ignored verification import was migrated directly, with no compatibility façade or stale utility path retained.
-    3. ✅ Used exception inheritance, prefixes, SIGTERM exit code, constructor overrides, package compilation, assignments, naming, and punctuation pass without static-analysis tools.
+    3. ✅ The project-parent override census is empty after marking real DataModule, logger, loop, profiler, checkpoint-wrapper, torch-function, representation, and pickle overrides; constructors with only Protocol-generated or object ancestry remain undecorated.
     4. ✅ Model checkpoint hydration, optimizer execution, local metric views, two-rank DDP strategy execution, and two-rank TorchMetrics reduction pass after relocation.
     5. ✅ Stale deployment-export and interrupted-hold records were removed during ledger consolidation, keeping the active progress index below its child-scope soft limit.
 

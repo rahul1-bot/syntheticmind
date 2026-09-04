@@ -8,7 +8,7 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import IO, Literal, Never, cast
+from typing import IO, Literal, Never, cast, override
 
 import torch
 from loguru import logger as log
@@ -2746,6 +2746,7 @@ class Trainer:
         estimated_steps: int = stepping_per_epoch * self.max_epochs
         return min(estimated_steps, self.max_steps) if self.max_steps != -1 else estimated_steps
 
+    @override
     def __repr__(self) -> str:
         return (
             f"Trainer("

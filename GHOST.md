@@ -171,13 +171,13 @@
     4. Public class identities and Trainer configuration meanings remain unchanged, but obsolete import paths were removed without compatibility façades. Precision now explicitly inherits the checkpoint-hook contract and marks its checkpoint hook implementations as overrides.
     5. Full, half, mixed, and Transformer Engine precision execution, asynchronous checkpoint I/O, local optimizer execution, spawned DDP runtime state, subprocess DDP forward and consensus behavior, and sharded two-rank model parallelism pass through the new canonical paths.
 
-| Architecture Decision | Cross-Cutting Contract and Storage Ownership | Date: 04 September 2026 | Time: 05:20 PM | Name: Ghost |
+| Architecture Decision | Cross-Cutting Contract, Override, and Storage Ownership | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 
     1. Trainer owns run seeding, worker randomness, terminal rendering, deterministic algorithms, benchmark flags, and complete-run configuration; Loop owns evaluation gradient context.
     2. Core data transfer owns recursive batch placement, Module owns its one-consumer gather traversal, Strategy owns topology-sensitive initialization, and the logger connector owns metric accumulation.
     3. Path-bound StoragePath owns one resolved fsspec backend and protocol-aware normalization, joining, containment, metadata, resources, traversal, mutation, copying, and staging; twenty-three module functions and every broad fsspec return annotation were removed without changing ML-facing `str | Path` APIs.
     4. Framework exception and recursive domain type contracts live at the package root; only used FrameworkError, MisconfigurationError, CheckpointError, and SIGTERMException categories remain, with explicit constructor overrides and unchanged message prefixes.
-    5. Unused TrainingInterruptedError and DistributedError exports plus dead compilation, channels-last, context, torch-flag, checkpoint, tensor-traversal, and helper façades were deleted without compatibility aliases.
+    5. Every method replacing an explicit project or framework parent contract is marked `@override`, including real constructor, representation, and pickle hooks; Protocol-generated or `object`-only constructors remain deliberately undecorated because no declared obligation exists.
     6. Local, `file://`, in-memory remote, transactional CSV, profiler artifact, full checkpoint, remote ModelCheckpoint, schema-v2 model hydration, spawned DDP, and failure-atomic sharded model-parallel paths pass through StoragePath and their assigned artifact owners.
 
 | Architecture Decision | Training Data Composition Ownership | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |

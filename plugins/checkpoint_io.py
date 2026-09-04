@@ -231,6 +231,7 @@ class _WrappingCheckpointIO(CheckpointIO):
 
 
 class AsyncCheckpointIO(_WrappingCheckpointIO):
+    @override
     def __init__(self, checkpoint_io: CheckpointIO | None = None) -> None:
         super().__init__(checkpoint_io)
         self._executor: ThreadPoolExecutor | None = None

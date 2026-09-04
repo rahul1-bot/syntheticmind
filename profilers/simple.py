@@ -15,6 +15,7 @@ type _ExtendedReportRow = tuple[str, float, int, float, float]
 
 
 class SimpleProfiler(Profiler):
+    @override
     def __init__(
         self,
         dirpath: str | Path | None = None,

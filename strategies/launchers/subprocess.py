@@ -6,7 +6,7 @@ import sys
 import threading
 from importlib.machinery import ModuleSpec
 from pathlib import Path
-from typing import cast
+from typing import cast, override
 
 import syntheticmind
 import torch
@@ -199,6 +199,7 @@ class _SubprocessLauncher:
             self._observer.join(timeout=1)
         self._observer: _ChildProcessObserver | None = None
 
+    @override
     def __getstate__(self) -> _SubprocessLauncherState:
         state: _SubprocessLauncherState = cast(
             _SubprocessLauncherState,
