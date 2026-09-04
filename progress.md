@@ -1,7 +1,7 @@
 | Progress Baseline | Repository and Governing Contracts | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 
     1. ✅ The private repository uses stable `main`, active `dev`, and canonical `origin`; completed phases are committed and synchronized to `origin/dev`.
-    2. ✅ The controlling PyTorch Lightning comparison is the ignored local checkout at revision `fcef404516264798b6c582ef556eaa17e5c29bfb`.
+    2. ✅ The controlling PyTorch Lightning comparison is the ignored `external/` checkout at revision `21ac84116633b8c629da03c41e6d6ec2cfb15241` from 01 September 2026.
     3. ✅ The governing Python rules are `/Users/rahulsawhney/Library/CloudStorage/OneDrive-Personal/Documents/StudyDocuments/Rahul/code-guidelines.md`; repository-local historical copies have no authority.
     4. ✅ Public terminology, inheritance, method, parameter, default, state, hook, and lifecycle compatibility are mandatory wherever SyntheticMind implements the same machine-learning concept.
     5. ✅ Fabric, public release or promotional documentation, upstream test-suite replication, new source comments, linters, and static type checkers remain excluded. Internal architecture references and mandatory ledgers remain active.
@@ -38,9 +38,9 @@
     4. ✅ Manual and Trainer-produced files, CPU, MPS, unavailable-device fallback, subprocess, spawn, fork, direct two-rank Gloo, and stateful-continuation regressions pass.
     5. ✅ Full Python compilation, signature and inheritance inspection, direct guideline review, exception probes, source-comment preservation, and diff validation pass without a linter or static type checker.
 
-| Progress Complete | Remaining Module Surface and Runtime State | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
+| Progress Complete | Module Runtime Surface | Date: 04 September 2026 | Time: 06:34 PM | Name: Ghost |
 
-    1. ✅ The unresolved pinned surface was recomputed after checkpoint reconstruction and separated into runtime-state, model-parallel device-mesh, TorchScript, ONNX, and TensorRT boundaries.
+    1. ✅ The module surface was recomputed after checkpoint reconstruction; runtime and model-parallel state remain core training contracts, while TorchScript, ONNX, and TensorRT convenience methods were removed as deployment baggage outside the active harness objective.
     2. ✅ `freeze` and `unfreeze` preserve fluent self-return, attached epoch, step, and rank properties use Trainer authority, detached values remain zero, and `on_gpu` retains CUDA-specific meaning.
     3. ✅ CPU, MPS, detached and attached state, parameter modes, direct two-rank Gloo, subprocess, spawn, fork, compilation, signature inspection, comment preservation, and diff review pass without static-analysis tools.
 

@@ -54,27 +54,12 @@
     3. CUDA-specific `on_gpu` behavior is available without misclassifying MPS placement.
     4. Local, MPS, direct Gloo, subprocess, spawn, fork, compilation, and direct guideline evidence establish the corrected surface without static-analysis tools.
 
-| Strategic Note | Model TorchScript Export Contract | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
+| Architecture Correction | Deployment Surface Retraction | Date: 04 September 2026 | Time: 06:34 PM | Name: Ghost |
 
-    1. ✅ SyntheticMind now exposes the standard `to_torchscript` inheritance surface without Lightning branding or copied internal architecture.
-    2. Scripting and tracing preserve exact nested model modes, remove runtime-only framework properties, route representative inputs through model or datamodule transfer ownership, and retain PyTorch keyword options.
-    3. Positional tuples, documented keyword dictionaries, local paths, remote filesystems, nested modules, CPU, MPS, and failure restoration have executable evidence.
-    4. Direct source and guideline review, Python compilation, signatures, inheritance, exception probes, artifact reload, and regressions establish the phase without static-analysis tools.
-
-| Strategic Note | Model ONNX Export Contract | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
-
-    1. ✅ SyntheticMind now exposes standard ONNX export through the installed modern dynamo engine and the explicit legacy engine without renaming either concept.
-    2. Input ownership, keyword semantics, dynamic shapes, dynamic axes, evaluation behavior, exact nested mode restoration, return types, dependency diagnostics, and artifact destinations retain distinct executable meanings.
-    3. `ONNXProgram`, local files, byte buffers, remote files, and external-data siblings persist through one SyntheticMind-owned boundary while PyTorch owns graph conversion.
-    4. ONNX checking and ONNX Runtime inference on CPU and MPS-originated models establish usable artifacts rather than serialization-only claims.
-
-| Strategic Note | Model TensorRT Compilation Contract | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
-
-    1. ✅ SyntheticMind now exposes the pinned `to_tensorrt` inheritance surface without importing Lightning product identity or copying its internal architecture.
-    2. Torch-TensorRT owns CUDA engine lowering; SyntheticMind owns dependency guards, CUDA target validation, input and transfer semantics, exact model restoration, IR dispatch, and destination handling.
-    3. Local orchestration evidence covers dependency, validation, positional and named inputs, model and datamodule hooks, compile and persistence calls, local, buffer, and remote destinations, and restoration failures.
-    4. Real TensorRT engine construction is not verified or claimed because the current Apple-silicon host and installed PyTorch runtime have no CUDA support.
-    5. Direct source and guideline review, Python compilation, signatures, inheritance, exception probes, export regressions, and diff validation establish the locally reachable contract without linters or static type checkers.
+    1. Earlier TorchScript, ONNX, and TensorRT convenience surfaces were experimental additions from the pre-reconstruction snapshot and are not current SyntheticMind capabilities.
+    2. Their one-consumer exporter and compiler modules were removed because deployment conversion is outside the active training-harness objective and did not justify permanent core classes, files, or public methods.
+    3. PyTorch-native deployment tools remain available to downstream projects directly; SyntheticMind does not wrap them until a distinct framework-owned lifecycle and executable hardware evidence require that boundary.
+    4. Ignored historical probes remain comparative evidence only and must not be cited as present production capability.
 
 | Strategic Hold | Controlled Restart Requirement | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
 

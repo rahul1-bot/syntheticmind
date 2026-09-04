@@ -1,4 +1,4 @@
-# syntheticmind: The PyTorch Training Framework
+# syntheticmind: A PyTorch Research Training Framework
 
 `syntheticmind/` is an independent PyTorch research framework for constructing and controlling machine-learning training systems. It is project-agnostic by design: domain models, datasets, simulation environments, and experiment policy remain downstream of the framework contracts rather than leaking into the reusable training lifecycle.
 
@@ -24,7 +24,7 @@ The public surface follows established PyTorch research vocabulary. Models subcl
 
 Framework-wide type contracts live in `syntheticmind.types`, and the framework exception vocabulary lives in `syntheticmind.exceptions`. These dependency-direction contracts sit at the package root because every semantic subsystem consumes them; they are not utility behavior and do not belong to any one runtime concept.
 
-`Trainer` orchestrates the fit, validate, test, and predict stages under parameters covering epoch ceilings, accelerator and strategy selection, precision, gradient accumulation and clipping, validation cadence, sanity validation, per-stage batch limits, deterministic seeding, and checkpoint resume. Manual optimization through `manual_backward`, `optimizer_step`, `toggle_optimizer`, and `untoggle_optimizer` supports multi-optimizer research models; the adversarial vocoders of this study use this path for their alternating generator and discriminator updates.
+`Trainer` orchestrates the fit, validate, test, and predict stages under parameters covering epoch ceilings, accelerator and strategy selection, precision, gradient accumulation and clipping, validation cadence, sanity validation, per-stage batch limits, deterministic seeding, and checkpoint resume. Manual optimization through `manual_backward`, `optimizer_step`, `toggle_optimizer`, and `untoggle_optimizer` supports research systems with alternating or otherwise model-controlled optimizer updates.
 
 ## Checkpoints
 
