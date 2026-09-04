@@ -123,8 +123,8 @@
 
     1. ✅ MetricAccumulator now owns scalar validation, optional nested-batch inference, weighted epoch reduction, TorchMetrics windows, and Strategy-driven synchronization; loops provide observations and cadence without importing a free inference function.
     2. ✅ The established direct update API remains compatible, ambiguous nested leading dimensions fail with an explicit-batch-size remedy, and the accumulator contains no module function, fake Protocol, generic `object`, stale prose, or unannotated owner state.
-    3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
-    4. ✅ Weighted, dataclass, ambiguity, tensor-state, TorchMetrics, CPU, MPS, remote fsspec, external DDP, spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
+    3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events, and every logger source now documents its exact runtime and client contract.
+    4. ✅ `loggers/README.md` documents configuration, run identity, metric ownership, portable hyperparameters, CSV and TensorBoard semantics, and a current custom-backend pattern; compilation, imports, source-format auditing, local CSV widening and resumption, real TensorBoard emission, and the prior weighted, CPU, MPS, remote, DDP, and spawn paths pass without static-analysis tools.
 
 | Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 07:43 PM | Name: Ghost |
 

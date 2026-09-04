@@ -123,7 +123,7 @@
     4. Shared hyperparameter normalization accepts portable deterministic values, rejects live modules and non-scalar tensors or arrays, and emits once per run across sequential and spawned stages through explicit launcher-state transfer.
     5. CSV persistence validates existing headers, reconciles worker-written schema before later stages, widens columns transactionally, restores in-memory schema on failed promotion, resumes existing rows, and supports transactional fsspec replacement.
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
-    7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
+    7. Every logger module now carries authorized ownership, normalization, schema, optional-dependency, and finalization comments; `loggers/README.md` documents client configuration, metric ownership, portable hyperparameters, backend semantics, and custom logger integration, while local CSV schema widening and resumption plus real TensorBoard event emission pass alongside the existing weighted, CPU, MPS, remote, DDP, and spawn evidence.
 
 | Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:43 PM | Name: Ghost |
 

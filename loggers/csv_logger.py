@@ -1,3 +1,25 @@
+# This module:
+# 1. Defines CSVLogger, the experiment backend that persists scalar observations
+#    to a resumable CSV table and hyperparameters to deterministic JSON
+# 2. Implements transactional metric-schema widening for local and fsspec
+#    storage while preserving prior rows
+#
+# Design decisions:
+# - The first CSV column is always step, making training coordinate ownership
+#   explicit and reserving that name from client metrics
+# - New metric names widen the existing schema in sorted order and rewrite prior
+#   rows before the new observation is appended; historical rows retain empty
+#   cells instead of being discarded or split across files
+# - Local rewrites use a same-directory temporary file, file synchronization,
+#   atomic replacement, and best-effort directory synchronization
+# - Remote rewrites run inside the fsspec transaction boundary; append behavior
+#   is expressed as a transactional full replacement because remote append is
+#   not consistently atomic across implementations
+# - Writer state is acquired lazily and finalize is idempotent, allowing Trainer
+#   teardown after runs that emitted only hyperparameters or failed before metrics
+#
+# Author: Rahul Sawhney
+
 import csv
 import json
 import os
@@ -15,7 +37,11 @@ from syntheticmind.primitives.types import HyperparameterDict
 __all__: list[str] = ["CSVLogger"]
 
 type _CSVRow = dict[str, str | None]
+
+
 class CSVLogger(Logger):
+    # Portable default logger for client experiments requiring inspectable files
+    # and resumable schema evolution on local or supported remote storage.
     @override
     def __init__(
         self,
@@ -23,6 +49,14 @@ class CSVLogger(Logger):
         name: str = "default",
         version: int | str | None = None
     ) -> None:
+        # Establishes the run paths and inspects any existing metric header
+        # without opening a persistent writer.
+        #
+        # Args:
+        #     save_dir: Local or supported fsspec experiment root.
+        #     name: Safe run grouping segment. Default: ``"default"``.
+        #     version: Safe string, non-negative integer, or None. Default:
+        #         ``None``.
         super().__init__(save_dir=save_dir, name=name, version=version)
         self._metrics_path: str = StoragePath(self.log_dir).join("metrics.csv")
         self._hyperparameters_path: str = StoragePath(self.log_dir).join(
@@ -34,6 +68,8 @@ class CSVLogger(Logger):
 
     @override
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
+        # Validates one scalar observation, widens its table transactionally when
+        # new names appear, then appends and flushes the row.
         validated_metrics: dict[str, float] = self._validated_metrics(metrics, step)
         if "step" in validated_metrics:
             raise ValueError("CSV metric name 'step' conflicts with the logging coordinate.")
@@ -63,6 +99,8 @@ class CSVLogger(Logger):
 
     @override
     def log_hyperparams(self, params: HyperparameterDict) -> None:
+        # Replaces the complete normalized hyperparameter record deterministically
+        # rather than merging stale configuration from an earlier run.
         normalized_params: dict[str, _JsonValue] = self._normalize_hyperparameters(
             params
         )
@@ -77,6 +115,8 @@ class CSVLogger(Logger):
 
     @override
     def finalize(self) -> None:
+        # Detaches writer state before flushing and closing, making repeated or
+        # failure-driven teardown safe.
         file_handle: TextIOBase | None = self._file_handle
         self._file_handle: TextIOBase | None = None
         self._writer: csv.DictWriter | None = None
@@ -88,6 +128,8 @@ class CSVLogger(Logger):
             file_handle.close()
 
     def _read_existing_fieldnames(self) -> list[str]:
+        # Validates a resumable table header and rejects malformed coordinate or
+        # duplicate-column state before appending.
         metrics_path: StoragePath = StoragePath(self._metrics_path)
         if not metrics_path.exists() or metrics_path.size == 0:
             return ["step"]
@@ -108,6 +150,8 @@ class CSVLogger(Logger):
         return list(fieldnames)
 
     def _read_existing_rows(self) -> list[_CSVRow]:
+        # Reads prior rows for schema widening and rejects values extending beyond
+        # the declared header.
         metrics_path: StoragePath = StoragePath(self._metrics_path)
         if not metrics_path.exists() or metrics_path.size == 0:
             return []
@@ -125,6 +169,8 @@ class CSVLogger(Logger):
         return rows
 
     def _merge_existing_fieldnames(self) -> None:
+        # Reconciles fields written by an earlier logger instance before this
+        # instance opens its writer.
         existing_fieldnames: list[str] = self._read_existing_fieldnames()
         fieldname: str
         for fieldname in existing_fieldnames:
@@ -132,6 +178,8 @@ class CSVLogger(Logger):
                 self._fieldnames.append(fieldname)
 
     def _rewrite_metrics(self) -> None:
+        # Closes any active append handle and replaces the table under the widened
+        # schema while retaining historical row order.
         self.finalize()
         existing_rows: list[_CSVRow] = self._read_existing_rows()
         stream: StringIO = StringIO()
@@ -145,6 +193,8 @@ class CSVLogger(Logger):
         self._replace_text(self._metrics_path, stream.getvalue())
 
     def _open_writer(self) -> None:
+        # Lazily opens the local append stream and writes the header only for a
+        # new or empty artifact.
         metrics_path: StoragePath = StoragePath(self._metrics_path)
         file_exists: bool = metrics_path.exists()
         file_is_empty: bool = not file_exists or metrics_path.size == 0
@@ -164,6 +214,8 @@ class CSVLogger(Logger):
             writer.writeheader()
 
     def _append_remote_row(self, row: dict[str, int | float]) -> None:
+        # Builds the new remote content and commits it through the shared
+        # transactional replacement path.
         stream: StringIO = StringIO()
         writer: csv.DictWriter = csv.DictWriter(
             stream,
@@ -185,6 +237,8 @@ class CSVLogger(Logger):
         )
 
     def _replace_text(self, path: str, content: str) -> None:
+        # Publishes one complete text artifact through fsspec transactions or a
+        # synchronized local atomic replacement.
         storage_path: StoragePath = StoragePath(path)
         if not storage_path.is_local:
             StoragePath(storage_path.parent).make_directory()

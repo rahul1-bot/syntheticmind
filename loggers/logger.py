@@ -1,3 +1,26 @@
+# This module:
+# 1. Defines Logger, the stateful experiment-record contract for scalar metrics,
+#    portable hyperparameters, run-directory identity, and finalization
+# 2. Defines the recursive JSON-compatible value boundary shared by concrete
+#    logging backends
+#
+# Design decisions:
+# - Logger is a regular inheritance contract with explicit unsupported defaults,
+#   not an ABC; concrete backends override three operations while reusing one
+#   validated identity and normalization policy
+# - Trainer's logger connector owns metric reduction, tensor-to-scalar conversion,
+#   rank-zero routing, and fan-out. Logger implementations receive only completed
+#   Python scalar observations and never inspect Module metric buffers
+# - Run names and versions are single safe path segments, preventing experiment
+#   identity from escaping save_dir or changing storage roots
+# - Hyperparameters normalize recursively into deterministic JSON-compatible
+#   values; live modules, non-scalar tensors, non-scalar arrays, non-finite
+#   floats, and unsupported runtime objects fail instead of degrading to repr
+# - Sets sort by their canonical JSON representation so repeated runs persist
+#   stable metadata independent of hash iteration order
+#
+# Author: Rahul Sawhney
+
 import json
 import math
 from argparse import Namespace
@@ -21,12 +44,23 @@ type _JsonValue = (
 
 
 class Logger:
+    # Stateful destination contract for experiment backends. Client loggers
+    # subclass this class, call its constructor, and implement log_metrics,
+    # log_hyperparams, and finalize without reimplementing validation.
     def __init__(
         self,
         save_dir: str | Path,
         name: str = "default",
         version: int | str | None = None
     ) -> None:
+        # Establishes one safe run identity without touching the destination.
+        #
+        # Args:
+        #     save_dir: Local or supported remote storage root.
+        #     name: Optional single directory segment grouping the run.
+        #         Default: ``"default"``.
+        #     version: Non-negative integer, safe string segment, or None for no
+        #         version directory. Integer versions use ``version_N``.
         if not isinstance(save_dir, str | Path):
             raise TypeError("`save_dir` must be a string or Path.")
         self._validate_path_segment(name, "name")
@@ -41,33 +75,46 @@ class Logger:
         self._version: int | str | None = version
 
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
+        # Persists one completed scalar observation at a non-negative training
+        # coordinate. Concrete backends must validate through _validated_metrics.
         del metrics, step
         raise NotImplementedError(f"{type(self).__name__} must implement log_metrics().")
 
     def log_hyperparams(self, params: HyperparameterDict) -> None:
+        # Persists one portable configuration mapping. Concrete backends should
+        # normalize through _normalize_hyperparameters before serialization.
         del params
         raise NotImplementedError(f"{type(self).__name__} must implement log_hyperparams().")
 
     def finalize(self) -> None:
+        # Flushes and releases backend resources. Trainer attempts this operation
+        # during every stage teardown, including failure.
         raise NotImplementedError(f"{type(self).__name__} must implement finalize().")
 
     @property
     def save_dir(self) -> str:
+        # Returns the normalized storage root supplied by the client.
         return self._save_dir
 
     @property
     def name(self) -> str:
+        # Returns the run's optional grouping segment.
         return self._name
 
     @property
     def version(self) -> int | str | None:
+        # Returns the configured version identity before path formatting.
         return self._version
 
     @property
     def log_dir(self) -> str:
+        # Returns the complete backend directory derived from root, name, and
+        # version without creating it.
         return self._log_directory()
 
     def _log_directory(self) -> str:
+        # Composes safe identity segments through StoragePath so local and remote
+        # implementations share one path convention.
         directory: str = (
             StoragePath(self._save_dir).join(self._name)
             if self._name
@@ -87,6 +134,8 @@ class Logger:
         metrics: dict[str, float],
         step: int
     ) -> dict[str, float]:
+        # Enforces one non-negative integer coordinate and non-boolean numeric
+        # scalar mapping before a backend sees the observation.
         if type(step) is not int:
             raise TypeError(f"Logger step must be an integer, got {step!r}.")
         if step < 0:
@@ -111,6 +160,8 @@ class Logger:
         self,
         params: HyperparameterDict
     ) -> dict[str, _JsonValue]:
+        # Validates public names and recursively normalizes values to the shared
+        # portable metadata representation.
         if not isinstance(params, dict):
             raise TypeError("Logger hyperparameters must be a dictionary.")
         normalized: dict[str, _JsonValue] = {}
@@ -123,6 +174,8 @@ class Logger:
         return normalized
 
     def _normalize_hyperparameter(self, value: HyperparameterValue) -> _JsonValue:
+        # Converts supported scalar, temporal, path, dtype, device, Namespace,
+        # array, and container values without retaining live compute objects.
         if value is None or isinstance(value, bool | int | str):
             return value
         if isinstance(value, float):
@@ -188,6 +241,7 @@ class Logger:
         )
 
     def _validate_path_segment(self, value: str, name: str) -> None:
+        # Restricts name and string version values to one traversal-free segment.
         if not isinstance(value, str):
             raise TypeError(f"Logger {name} must be a string.")
         if value in {".", ".."} or "/" in value or "\\" in value:
@@ -197,6 +251,7 @@ class Logger:
 
     @override
     def __repr__(self) -> str:
+        # Exposes the complete run identity without opening backend resources.
         return (
             f"{type(self).__name__}(save_dir={self._save_dir!r}, "
             f"name={self._name!r}, version={self._version!r})"
