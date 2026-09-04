@@ -7,8 +7,8 @@ __all__: list[str] = ["ClusterEnvironment", "LocalEnvironment"]
 
 @runtime_checkable
 class ClusterEnvironment(Protocol):
-    @staticmethod
-    def detect() -> bool: ...
+    @classmethod
+    def detect(cls) -> bool: ...
 
     def world_size(self) -> int: ...
 
@@ -84,9 +84,10 @@ class LocalEnvironment(ClusterEnvironment):
     def teardown(self) -> None:
         pass
 
-    @staticmethod
+    @classmethod
     @override
-    def detect() -> bool:
+    def detect(cls) -> bool:
+        del cls
         return True
 
     @property

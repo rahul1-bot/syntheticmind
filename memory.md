@@ -118,9 +118,9 @@
     5. Checkpoint artifact reading and live-state restoration are separate operations. Metadata may be loaded before model construction, while restoration must occur only after the model and optimizers exist; a bounded preload cache preserves this ordering without duplicate disk reads.
     6. Asynchronous checkpointing requires a main-thread snapshot before worker submission. The snapshot and background save belong to the checkpoint plugin itself and do not justify nested functions, module functions, or a callable wrapper object.
 
-| Memory | Accelerator and Precision Boundary Design | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
+| Memory | Accelerator and Precision Boundary Design | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
 
-    1. Static backend queries do not require an abstract implementation base; a structural accelerator contract preserves substitution while concrete accelerators own discovery, parsing, binding, and backend-local observations.
+    1. Backend discovery and device parsing are type-level operations: classmethod Protocol contracts preserve subclass identity and substitution, while static methods erase the implementing class and encourage hard-coded concrete names.
     2. Integer GPU configuration is a device count, numeric strings are explicit identifiers, and `-1` selects every device; one stateful parser must preserve these distinct meanings.
     3. Accelerator, Strategy, precision, environment, checkpoint storage, and layer synchronization form one compatibility matrix and therefore require one Trainer connector rather than independent temporary resolver objects.
     4. Recursive conversion belongs to the concrete precision lifecycle, while optional libraries belong in isolated adapters with stable domain configuration.

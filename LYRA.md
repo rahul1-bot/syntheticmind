@@ -112,9 +112,9 @@
     5. Process-group lifetime now follows the participating process rather than an individual Trainer stage, which preserves sequential distributed stages and live DTensor access while retaining exception and exit cleanup.
     6. Empty initialization preserves RNG, precision contexts direct construction dtype, meta tensors materialize through reset operations, and local plus distributed model-parallel probes pass.
 
-| Strategic Note | Execution Collaborator Reconstruction | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
+| Strategic Note | Execution Collaborator Reconstruction | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
 
-    1. Device, cluster-environment, and layer-synchronization extension points now use structural contracts without inherited placeholder behavior.
+    1. Device and cluster-environment type operations use classmethod Protocol obligations with explicit concrete inheritance and overrides; layer synchronization retains its separate structural contract without placeholder behavior.
     2. Device selection has one invariant owner, and resolved topology is an immutable validated boundary rather than a mutable dataclass assembled by a free function.
     3. Precision retains one concrete shared lifecycle while recursive conversion now belongs to that lifecycle directly, avoiding a stateless converter object and duplicate conversion paths.
     4. Transformer Engine is isolated as an optional external adapter and follows the current NVIDIA `autocast` and delayed-scaling contract instead of the historical `fp8_autocast` call shape.

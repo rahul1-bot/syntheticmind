@@ -40,9 +40,10 @@ class CPUAccelerator(Accelerator):
             statistics["cpu/load_average_15m"] = load_average[2]
         return statistics
 
-    @staticmethod
+    @classmethod
     @override
-    def parse_devices(devices: DeviceInput) -> int | list[int]:
+    def parse_devices(cls, devices: DeviceInput) -> int | list[int]:
+        del cls
         normalized_devices: int | str | list[int] = devices
         if isinstance(normalized_devices, str) and normalized_devices.strip().isdigit():
             normalized_devices: int | str | list[int] = int(normalized_devices)
@@ -52,24 +53,31 @@ class CPUAccelerator(Accelerator):
             raise TypeError("CPUAccelerator requires a positive integer device count.")
         return normalized_devices
 
-    @staticmethod
+    @classmethod
     @override
-    def get_parallel_devices(devices: int | list[int]) -> list[torch.device]:
+    def get_parallel_devices(
+        cls,
+        devices: int | list[int]
+    ) -> list[torch.device]:
+        del cls
         if not isinstance(devices, int):
             raise TypeError("CPUAccelerator requires an integer device count.")
         return [torch.device("cpu")] * devices
 
-    @staticmethod
+    @classmethod
     @override
-    def auto_device_count() -> int:
+    def auto_device_count(cls) -> int:
+        del cls
         return 1
 
-    @staticmethod
+    @classmethod
     @override
-    def is_available() -> bool:
+    def is_available(cls) -> bool:
+        del cls
         return True
 
-    @staticmethod
+    @classmethod
     @override
-    def name() -> str:
+    def name(cls) -> str:
+        del cls
         return "cpu"

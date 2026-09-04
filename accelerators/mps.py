@@ -33,18 +33,22 @@ class MPSAccelerator(Accelerator):
             "mps/recommended_max_bytes": float(torch.mps.recommended_max_memory())
         }
 
-    @staticmethod
+    @classmethod
     @override
-    def parse_devices(devices: DeviceInput) -> int | list[int]:
+    def parse_devices(cls, devices: DeviceInput) -> int | list[int]:
         parser: _AcceleratorDeviceParser = _AcceleratorDeviceParser(
-            MPSAccelerator.auto_device_count(),
-            "MPSAccelerator"
+            cls.auto_device_count(),
+            cls.__name__
         )
         return parser.parse(devices)
 
-    @staticmethod
+    @classmethod
     @override
-    def get_parallel_devices(devices: int | list[int]) -> list[torch.device]:
+    def get_parallel_devices(
+        cls,
+        devices: int | list[int]
+    ) -> list[torch.device]:
+        del cls
         if not isinstance(devices, list):
             raise TypeError("MPSAccelerator requires parsed device IDs.")
         parallel_devices: list[torch.device] = []
@@ -53,17 +57,20 @@ class MPSAccelerator(Accelerator):
             parallel_devices.append(torch.device("mps", device_id))
         return parallel_devices
 
-    @staticmethod
+    @classmethod
     @override
-    def auto_device_count() -> int:
+    def auto_device_count(cls) -> int:
+        del cls
         return 1
 
-    @staticmethod
+    @classmethod
     @override
-    def is_available() -> bool:
+    def is_available(cls) -> bool:
+        del cls
         return torch.backends.mps.is_available()
 
-    @staticmethod
+    @classmethod
     @override
-    def name() -> str:
+    def name(cls) -> str:
+        del cls
         return "mps"

@@ -74,14 +74,14 @@
     7. ✅ Subprocess, spawn, fork, and direct external launch modes pass; SIGTERM reaches the local worker group and leaves no surviving probe process.
     8. ✅ Empty, normal, precision-directed, and meta initialization plus full and sharded model-parallel baseline, interrupted, and resumed runs pass; distributed failure injection preserves the active generation and asynchronous snapshots preserve pre-mutation tensors.
 
-| Progress Complete | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
+| Progress Complete | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
 
-    1. ✅ Accelerator, cluster-environment, layer-synchronization, and checkpoint storage extension points use earned structural Protocols with explicit concrete implementations and no shared placeholder lifecycle.
+    1. ✅ Accelerator and cluster-environment type-level discovery operations are classmethod Protocol obligations with explicit concrete inheritance and `@override`; static pseudo-methods and placeholder lifecycle remain absent.
     2. ✅ GPU parsing owns count and identifier semantics, uniqueness, range, and availability validation; immutable `DeviceTopology` owns resolution from accelerator, device selection, configured devices, and node count.
     3. ✅ Strict immutable `PluginConfiguration` owns the resolved plugin record, and plugin resolution rejects duplicate families, invalid synchronization combinations, and unsupported values.
     4. ✅ Full, half, double, mixed, and Transformer Engine precision share one concrete lifecycle; recursive floating-point conversion no longer requires a stateless converter class.
     5. ✅ Transformer Engine targets `transformer_engine>=2.18.0`, uses the current `autocast` recipe API, exposes strict delayed-scaling configuration, isolates dynamic imports, and passes a source-shaped optional-adapter probe while real CUDA execution remains unavailable on this host.
-    6. ✅ CPU topology, explicit and all-device GPU parsing, MPS training, unavailable CUDA rejection, CPU true and mixed precision, layer-sync state round trip, plugin conflicts, direct DDP, spawn DDP, and local model-parallel execution pass.
+    6. ✅ Class and instance calls, runtime Protocol conformance, CPU topology, explicit and all-device parsing, MPS training, unavailable CUDA rejection, precision, layer sync, plugin conflicts, DDP, spawn, and model parallelism pass.
     7. ✅ Accelerator, plugin, and precision modules remain within hard class and module limits and contain no `Any`, generic `object`, ABC, abstract method, module-level function, custom `__call__`, source prose, or terminal trailing comma.
 
 | Progress Complete | Concept-First Strategy Reconstruction | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
