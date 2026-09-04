@@ -86,10 +86,10 @@ class _WorkerStateTransfer:
             precision_plugin_state=trainer.precision_plugin.state_dict(),
             validation_metrics=dict(trainer.validate_loop.epoch_metrics),
             test_metrics=dict(trainer.test_loop.epoch_metrics),
-            total_train_batches=trainer._total_train_batches,
-            total_val_batches=trainer._total_val_batches,
-            total_test_batches=trainer._total_test_batches,
-            total_predict_batches=trainer._total_predict_batches,
+            total_train_batches=trainer._data_connector.total_train_batches,
+            total_val_batches=trainer._data_connector.total_val_batches,
+            total_test_batches=trainer._data_connector.total_test_batches,
+            total_predict_batches=trainer._data_connector.total_predict_batches,
             train_dataloader_states=trainer._last_train_dataloader_states,
             train_dataloader_state_active=trainer._train_dataloader_state_active,
             train_dataloader_batches_completed=(
@@ -165,10 +165,10 @@ class _WorkerStateTransfer:
         trainer.test_loop.epoch_metrics: dict[str, float] = dict(
             worker_output.test_metrics
         )
-        trainer._total_train_batches: int | None = worker_output.total_train_batches
-        trainer._total_val_batches: list[int | None] | None = worker_output.total_val_batches
-        trainer._total_test_batches: list[int | None] | None = worker_output.total_test_batches
-        trainer._total_predict_batches: list[int | None] | None = (
+        trainer._data_connector.total_train_batches: int | None = worker_output.total_train_batches
+        trainer._data_connector.total_val_batches: list[int | None] | None = worker_output.total_val_batches
+        trainer._data_connector.total_test_batches: list[int | None] | None = worker_output.total_test_batches
+        trainer._data_connector.total_predict_batches: list[int | None] | None = (
             worker_output.total_predict_batches
         )
         trainer._last_train_dataloader_states: list[CheckpointDict] = (

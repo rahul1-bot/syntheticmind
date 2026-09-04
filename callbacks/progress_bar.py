@@ -467,15 +467,15 @@ class ProgressBarCallback(Callback):
 
     def _raw_total(self, trainer: Trainer, running_stage: RunningStage) -> int | None:
         if running_stage == "training":
-            return trainer._total_train_batches
+            return trainer._data_connector.total_train_batches
         if running_stage == "validating":
-            combined_loader = trainer._val_combined_loader
+            combined_loader = trainer._data_connector.val_combined_loader
             return None if combined_loader is None else combined_loader._length()
         if running_stage == "testing":
-            combined_loader = trainer._test_combined_loader
+            combined_loader = trainer._data_connector.test_combined_loader
             return None if combined_loader is None else combined_loader._length()
         if running_stage == "predicting":
-            combined_loader = trainer._predict_combined_loader
+            combined_loader = trainer._data_connector.predict_combined_loader
             return None if combined_loader is None else combined_loader._length()
         return None
 

@@ -185,3 +185,17 @@
     2. The next bounded phase must move this vertical runtime slice into `trainer/connectors/data_connector.py` without changing direct-dataloader, model-owned, DataModule-owned, multiple-loader, stateful-loader, distributed, or prediction-order behavior.
     3. `CombinedLoader` and batch-limit placement must be decided from the resulting data-flow concept rather than moved mechanically during the connector extraction.
     4. Verification must cover all three data ownership sources, nested loaders, combination modes, worker settings, batch limits, overfit batches, reload cadence, stateful continuation, DDP sampler partitioning, and unrepeated distributed prediction.
+
+| Progress Complete | Data Connector Reconstruction | Date: 04 September 2026 | Time: 09:26 AM | Name: Ghost |
+
+    1. ✅ One data connector now owns source selection, factory invocation, nested combination, limits, reload state, overfit determinism, distributed sampler injection, unrepeated prediction partitioning, and DataLoader reconstruction.
+    2. ✅ Loops, progress reporting, launcher result transfer, checkpoint continuation, and Trainer public loader views consume connector-owned prepared loaders and totals without duplicate Trainer storage.
+    3. ✅ The rewritten connector contains no broad annotations, free functions, source prose, custom callable object, or unannotated assignment; its explicit concept-integrity size exception is documented.
+    4. ✅ Module, DataModule, direct, nested, stateful, persistent-worker, overfit, limited, reloaded, DDP, spawn, fork, prediction, and model-parallel execution paths pass.
+
+| Progress Active | Logger Connector Reconstruction | Date: 04 September 2026 | Time: 09:26 AM | Name: Ghost |
+
+    1. Metric routing currently spans Module logging buffers, Trainer callback and logger mappings, loop dispatch methods, metric accumulators, progress callbacks, and logger emission without one explicit composition owner.
+    2. The next bounded phase must preserve tensor-versus-scalar boundaries, step and epoch routing, distributed reduction, multiple-dataloader identity, sanity isolation, progress views, callback monitoring, and logger cadence while establishing the logger connector.
+    3. Metric computation remains with the metric owner and loop lifecycle; the connector owns collection views, reset boundaries, and external logger emission rather than inventing a second logging API.
+    4. Verification must cover standard logging, TorchMetrics, distributed reduction, multiple loaders, launcher transfer, checkpoint monitors, progress views, tensor state, and logger output.

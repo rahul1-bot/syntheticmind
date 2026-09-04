@@ -81,7 +81,7 @@ class PredictionLoop(Loop):
         strategy: Strategy = trainer.strategy
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
-        combined_loader: CombinedLoader | None = trainer._predict_combined_loader
+        combined_loader: CombinedLoader | None = trainer._data_connector.predict_combined_loader
         assert combined_loader is not None
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model

@@ -599,10 +599,10 @@ class EvaluationLoop(Loop):
         if self.stage == "validate":
             if trainer.state.stage == "fit":
                 trainer._ensure_val_dataloader()
-            assert trainer._val_combined_loader is not None
-            return trainer._val_combined_loader
-        assert trainer._test_combined_loader is not None
-        return trainer._test_combined_loader
+            assert trainer._data_connector.val_combined_loader is not None
+            return trainer._data_connector.val_combined_loader
+        assert trainer._data_connector.test_combined_loader is not None
+        return trainer._data_connector.test_combined_loader
 
     def _accumulate_metrics(
         self,

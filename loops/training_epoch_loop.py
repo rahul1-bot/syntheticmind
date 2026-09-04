@@ -239,7 +239,7 @@ class TrainingEpochLoop(Loop):
         if not optimizers:
             raise RuntimeError("Trainer has no optimizers configured for training.")
         optimizer: torch.optim.Optimizer | None = trainer.optimizer
-        combined_loader: CombinedLoader | None = trainer._train_combined_loader
+        combined_loader: CombinedLoader | None = trainer._data_connector.train_combined_loader
         assert combined_loader is not None
         device: torch.device = strategy.root_device
         model: nn.Module | None = strategy.model

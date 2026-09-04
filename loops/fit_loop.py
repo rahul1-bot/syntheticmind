@@ -84,7 +84,7 @@ class FitLoop(Loop):
             callback for callback in callbacks if not isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         assert self.epoch_loop is not None
-        max_train_batches: int | None = trainer._total_train_batches
+        max_train_batches: int | None = trainer._data_connector.total_train_batches
         trainer._raise_if_sigterm()
         if (
             self._max_epochs_reached(state)
@@ -119,7 +119,7 @@ class FitLoop(Loop):
             # DistributedSampler derives its shuffle permutation from the
             # epoch number; seeding it every epoch prevents repeating the
             # first epoch's shuffle order indefinitely.
-            combined_loader: CombinedLoader | None = trainer._train_combined_loader
+            combined_loader: CombinedLoader | None = trainer._data_connector.train_combined_loader
             if combined_loader is not None:
                 for train_dl in combined_loader.flattened:
                     if (
