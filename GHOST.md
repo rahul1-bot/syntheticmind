@@ -180,14 +180,14 @@
     5. Dead compilation, channels-last, context, torch-flag, checkpoint, tensor-traversal, and helper façades were deleted without compatibility aliases.
     6. Local, MPS, spawned DDP, nested collective, TorchMetrics, checkpoint, remote storage, asynchronous I/O, failure-atomic model-parallel, and model-hydration paths pass through the assigned owners.
 
-| Architecture Decision | Training Data Composition Ownership | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
+| Architecture Decision | Training Data Composition Ownership | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
 
     1. `CombinedLoader` moved from the transitional utility package to the canonical `syntheticmind.combined_loader` module and is exported from the package root as a first-class training-data composition concept.
     2. Root placement preserves dependency direction because both model-facing `DatasetDataModule` construction and outward Trainer stage execution consume the concept; placing it beneath Trainer connectors would force core data contracts to import orchestration.
     3. The four private mode iterators remain colocated because minimum-size, maximum-size, cycling, and sequential traversal are real algorithmic variants constructed, reset, serialized, and consumed exclusively by `CombinedLoader`.
-    4. Module-level functions, the mutable mode-dispatch dictionary, generic `object` annotations, and the legacy utility import surface were removed. Recursive batch, iterable, sampler, state, and pickle domains are now explicit, and byte batches are represented by the shared batch scalar contract.
+    4. Module-level functions, static pseudo-utilities, mutable mode dispatch, generic annotations, and legacy utility imports are absent; tree-leaf classification, safe length, and limit normalization are private operations on the live CombinedLoader owner.
     5. The cohesive 588-line module and 337-line primary class exceed generic structural limits under Rahul's explicit SyntheticMind concept-integrity authority. Splitting tree structure, limits, iteration, state continuation, and worker teardown would create implementation fragments and is therefore rejected.
-    6. All four combination modes, finite and unsized limits, nested dataset construction, serialization, state capture and restoration, persistent workers, spawned DDP lifecycle execution, exact stateful resume, and direct two-rank prediction ordering pass through the canonical module.
+    6. All four combination modes, finite and unsized limits, nested construction, serialization, state capture and restoration, persistent-worker cleanup, two-rank lifecycle execution, exact stateful resume, and prediction ordering pass.
 
 | Architecture Decision | Strategy-Owned Distributed Reduction | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
 

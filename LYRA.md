@@ -128,11 +128,11 @@
     3. The remaining utility modules must be reassigned by machine-learning concept: nested loader composition to the training-data lifecycle, model inspection to callback ownership, and distributed operations to Strategy or their actual consumers.
     4. Each reassignment remains bounded by executable process, checkpoint, and lifecycle evidence; moving filenames without correcting ownership is not progress.
 
-| Strategic Note | Training Data Composition Boundary | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
+| Strategic Note | Training Data Composition Boundary | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
 
     1. `CombinedLoader` is now an explicit SyntheticMind data-composition API rather than a utility implementation detail.
     2. Its package-root placement keeps model-facing DataModule construction inward from Trainer orchestration while allowing every stage loop to consume one canonical loader tree.
-    3. Distinct combination algorithms remain private collaborators of the public owner, preserving recognized machine-learning semantics without exporting a class family.
+    3. Distinct combination algorithms remain private collaborators, while leaf classification, safe length, and limit normalization execute as owner-bound operations without exporting a class family or static utility surface.
     4. The next ownership target is distributed behavior still concealed in utilities; Strategy must absorb execution semantics while consumers retain only their real presentation or metric responsibilities.
 
 | Strategic Note | Distributed Execution Authority | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |

@@ -202,10 +202,10 @@
     3. A contract relocation requires multiprocessing and distributed execution evidence because imported module paths participate in worker reconstruction even when local imports compile.
     4. Historical capability notes that describe code deliberately removed from the current scope should be pruned from active ledgers; Git history remains the chronology while ledgers retain current durable knowledge.
 
-| Memory | Combined Loader Is a Data Composition Primitive | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
+| Memory | Combined Loader Is a Data Composition Primitive | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
 
     1. Nested loader tree shape, sampling mode, length and limit semantics, iteration state, stateful-loader continuation, and worker teardown form one training-data concept rather than unrelated utility mechanisms.
-    2. The mode iterator classes pay architectural rent because each implements a distinct recognized traversal algorithm and exists only as a private strategy selected by one public `CombinedLoader` owner.
+    2. The mode iterator classes pay rent as distinct traversal algorithms, while tree-leaf classification, safe length, and limit normalization remain private instance operations rather than static utilities detached from the loader state they interpret.
     3. A core DataModule and outward Trainer loops both consume loader composition, so an inward package-root module preserves acyclic dependency direction better than a Trainer connector subpackage or a one-file data directory.
     4. Worker reconstruction, pickling, direct distributed execution, and exact stateful resume are mandatory relocation evidence because ordinary local iteration cannot expose module-path or cursor-ownership regressions.
     5. Explicit project authority may retain one oversized cohesive concept when every proposed split creates implementation fragments; the exception must name the inseparable responsibilities and remain subject to subtraction review.

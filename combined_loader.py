@@ -541,8 +541,7 @@ class CombinedLoader(Iterator[_IteratorOutput]):
             case "sequential":
                 return _Sequential
 
-    @staticmethod
-    def _is_primitive_collection(value: _TreeNode) -> bool:
+    def _is_primitive_collection(self, value: _TreeNode) -> bool:
         children: Iterable[_TreeNode]
         if isinstance(value, dict):
             children = cast(dict[str, _TreeNode], value).values()
@@ -556,8 +555,7 @@ class CombinedLoader(Iterator[_IteratorOutput]):
                 return False
         return True
 
-    @staticmethod
-    def _safe_length(value: _TreeNode | None) -> int | None:
+    def _safe_length(self, value: _TreeNode | None) -> int | None:
         if not isinstance(value, Sized):
             return None
         try:
@@ -565,8 +563,7 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         except TypeError:
             return None
 
-    @staticmethod
-    def _normalize_limit(limit: _Limit) -> _Limit:
+    def _normalize_limit(self, limit: _Limit) -> _Limit:
         if limit is None:
             return None
         if type(limit) is bool or not isinstance(limit, (int, float)):
