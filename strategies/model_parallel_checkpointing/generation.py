@@ -1,3 +1,25 @@
+# This module:
+# 1. Defines the strict versioned pointer that publishes one immutable sharded
+#    checkpoint generation and retains its immediate predecessor
+# 2. Creates UUIDv7 generation identities, validates pointers, and atomically
+#    publishes local or transactional remote pointer updates
+#
+# Design decisions:
+# - A non-empty distributed checkpoint directory cannot be atomically replaced
+#   portably, so immutable generation directories hold data and one small pointer
+#   is the publication commit point
+# - The pointer records active and previous published generations explicitly;
+#   selecting the newest directory would allow a complete but unpublished failed
+#   generation to displace the last valid recovery point
+# - UUIDv7 provides sortable unique generation identity and strict schema
+#   constraints reject malformed or future pointer formats
+# - Local publication writes, flushes, fsyncs, atomically replaces, and fsyncs the
+#   parent directory; remote publication uses the resolved fsspec transaction
+# - Failed local pointer writes remove their temporary file and preserve the
+#   previously published pointer
+#
+# Author: Rahul Sawhney
+
 import io
 import os
 import tempfile
@@ -25,6 +47,8 @@ type CheckpointGenerationId = Annotated[
 
 
 class _CheckpointGenerationPointer(BaseModel):
+    # Immutable publication record naming the readable generation and the prior
+    # published recovery generation retained during pruning.
     schema_version: Literal[1] = 1
     generation_id: CheckpointGenerationId
     previous_generation_id: CheckpointGenerationId | None = None
@@ -37,6 +61,7 @@ class _CheckpointGenerationPointer(BaseModel):
 
     @property
     def retained_generation_ids(self) -> frozenset[str]:
+        # Unique non-null generation identities protected from pruning.
         retained_generation_ids: set[str] = set()
         generation_id: str | None
         for generation_id in (self.generation_id, self.previous_generation_id):
@@ -46,6 +71,7 @@ class _CheckpointGenerationPointer(BaseModel):
 
 
 class _CheckpointGenerationIndex:
+    # Publication-index owner for one checkpoint root.
     def __init__(self) -> None:
         self._pointer_filename: str = "active_generation"
 
@@ -57,6 +83,8 @@ class _CheckpointGenerationIndex:
         global_rank: int,
         broadcast: CheckpointBroadcast
     ) -> str:
+        # Creates UUIDv7 on rank zero, broadcasts it, and validates canonical form
+        # on every rank before generation paths are constructed.
         local_generation_id: str | None = str(uuid7()) if global_rank == 0 else None
         broadcast_generation_id: str | None = broadcast(local_generation_id, 0)
         if not isinstance(broadcast_generation_id, str):
@@ -70,6 +98,8 @@ class _CheckpointGenerationIndex:
         self,
         checkpoint_path: str | Path
     ) -> _CheckpointGenerationPointer | None:
+        # Reads and strictly validates the current pointer, returning None for a
+        # legacy flat sharded checkpoint with no pointer.
         pointer_path: str = self._pointer_path(checkpoint_path)
         if not StoragePath(pointer_path).is_file():
             return None
@@ -87,6 +117,8 @@ class _CheckpointGenerationIndex:
         checkpoint_path: str | Path,
         generation_id: CheckpointGenerationId
     ) -> _CheckpointGenerationPointer:
+        # Builds the next pointer from current active identity and commits it
+        # through the backend-specific atomic write boundary.
         previous_pointer: _CheckpointGenerationPointer | None = self.read(
             checkpoint_path
         )
@@ -109,6 +141,8 @@ class _CheckpointGenerationIndex:
         pointer_path: str | Path,
         pointer: _CheckpointGenerationPointer
     ) -> None:
+        # Commits remote JSON transactionally or local JSON through fsynced
+        # temporary-file replacement and parent-directory synchronization.
         pointer_payload: str = pointer.model_dump_json()
         storage_path: StoragePath = StoragePath(pointer_path)
         if not storage_path.is_local:

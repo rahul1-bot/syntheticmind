@@ -1,3 +1,20 @@
+# This module:
+# 1. Implements Accelerator for CPU execution and multi-process CPU topology
+# 2. Exposes process time, logical CPU count, and available system load averages
+#    through the device-statistics contract
+#
+# Design decisions:
+# - CPU is always available and is the guaranteed automatic fallback
+# - A positive device count represents identical CPU worker slots rather than
+#   indexed hardware, so parsing returns the count and parallel devices repeat
+#   torch.device("cpu")
+# - setup_device validates backend identity but requires no process-global
+#   selection operation equivalent to torch.cuda.set_device
+# - Load averages are reported only on operating systems that expose them, while
+#   process time and CPU count remain portable baseline statistics
+#
+# Author: Rahul Sawhney
+
 import os
 import time
 from typing import override
@@ -12,11 +29,15 @@ __all__: list[str] = ["CPUAccelerator"]
 
 
 class CPUAccelerator(Accelerator):
+    # Host execution backend. Clients normally select it through
+    # Trainer(accelerator="cpu"); custom code may also construct and pass the
+    # instance directly.
     def __init__(self) -> None:
         self._device: torch.device = torch.device("cpu")
 
     @override
     def setup_device(self, device: torch.device) -> None:
+        # Binds only CPU devices and rejects cross-backend placement early.
         if device.type != "cpu":
             raise MisconfigurationError(f"CPUAccelerator cannot bind {device}.")
         self._device: torch.device = device
@@ -27,6 +48,8 @@ class CPUAccelerator(Accelerator):
 
     @override
     def get_device_stats(self, device: torch.device) -> dict[str, float]:
+        # Collects backend-native host counters without allocating tensors or
+        # synchronizing model execution.
         if device.type != "cpu":
             raise MisconfigurationError(f"CPUAccelerator cannot inspect {device}.")
         statistics: dict[str, float] = {
@@ -43,6 +66,8 @@ class CPUAccelerator(Accelerator):
     @classmethod
     @override
     def parse_devices(cls, devices: DeviceInput) -> int | list[int]:
+        # Accepts a positive integer count or its numeric string form; explicit
+        # CPU identifier lists have no meaningful hardware interpretation.
         del cls
         normalized_devices: int | str | list[int] = devices
         if isinstance(normalized_devices, str) and normalized_devices.strip().isdigit():
@@ -59,6 +84,7 @@ class CPUAccelerator(Accelerator):
         cls,
         devices: int | list[int]
     ) -> list[torch.device]:
+        # Creates one identical CPU placement entry per requested worker process.
         del cls
         if not isinstance(devices, int):
             raise TypeError("CPUAccelerator requires an integer device count.")

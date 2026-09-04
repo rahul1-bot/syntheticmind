@@ -1,3 +1,29 @@
+# This module:
+# 1. Captures and restores process-global stochastic and deterministic state
+#    across multiprocessing ownership
+# 2. Collects the complete rank-zero Trainer stage outcome and reconciles it into
+#    the dormant parent Module, DataModule, callbacks, metrics, data, precision,
+#    checkpoint, optimizer, scheduler, signal, and progress state
+# 3. Separates CPU worker tensor storage from fork-shared parent storage
+#
+# Design decisions:
+# - The parent does not fabricate live optimizer or loop execution after workers
+#   finish; WorkerOutput transports the exact state produced by rank-zero runtime
+# - Metric tensors detach and move to CPU because an autograd graph cannot cross
+#   process ownership meaningfully
+# - Module and DataModule reconnect to the parent Trainer before runtime views are
+#   restored, preserving recursive accessors and subsequent stage reuse
+# - Callback state restores in configured order against the same callback list;
+#   validation and test results, logger views, and one-time hyperparameter status
+#   are reconciled independently
+# - Exact partial-epoch state includes loader cursor, active flag, completed
+#   batches, total batch index, epoch-start RNG, per-rank metric windows, native
+#   optimizer state, and scheduler state
+# - Process-global restoration delegates to rng streams and Trainer Determinism,
+#   preventing launcher transport from becoming a second policy owner
+#
+# Author: Rahul Sawhney
+
 from typing import cast
 
 import syntheticmind
@@ -25,8 +51,12 @@ __all__: list[str] = []
 
 
 class _WorkerStateTransfer:
+    # Serialization-safe state bridge between worker-owned execution and the
+    # original parent objects retained by multiprocessing launch.
     @classmethod
     def capture_global_state(cls, trainer: syntheticmind.Trainer) -> _GlobalState:
+        # Captures exact random streams and deterministic backend flags through
+        # their owning Trainer collaborators.
         del cls
         return _GlobalState(
             random_state=trainer._randomness.capture(),
@@ -42,6 +72,8 @@ class _WorkerStateTransfer:
         trainer: syntheticmind.Trainer,
         global_state: _GlobalState
     ) -> None:
+        # Restores process-global stochastic and deterministic state before a
+        # worker consumes model, data, or optimizer operations.
         del cls
         trainer._randomness.restore(global_state.random_state)
         trainer._determinism.restore(
@@ -59,6 +91,8 @@ class _WorkerStateTransfer:
         datamodule: DataModule | None,
         result: StageResult
     ) -> _WorkerOutput:
+        # Detaches runtime views and assembles one complete rank-zero stage result
+        # after worker execution and teardown state have settled.
         callback_metrics: dict[str, torch.Tensor] = {}
         metric_name: str
         metric_value: torch.Tensor
@@ -133,6 +167,9 @@ class _WorkerStateTransfer:
         datamodule: DataModule | None,
         stage: TrainerStage
     ) -> None:
+        # Reconnects parent ownership, applies model and participant state,
+        # restores result views and exact continuation coordinates, then restores
+        # process-global state last.
         module.load_state_dict(worker_output.module_state_dict, strict=False)
         trainer.module: Module | None = module
         trainer.strategy.model: torch.nn.Module | None = module
@@ -215,6 +252,8 @@ class _WorkerStateTransfer:
         worker_output: _WorkerOutput,
         trainer: syntheticmind.Trainer
     ) -> None:
+        # Restores the checkpoint connector's exact partial-epoch and post-fit
+        # optimizer or scheduler payloads without constructing live worker objects.
         del cls
         trainer._checkpoint_connector.train_dataloader_states: list[DataLoaderState] = (
             worker_output.train_dataloader_states
@@ -244,6 +283,8 @@ class _WorkerStateTransfer:
     @classmethod
     @torch.no_grad()
     def unshare_module_storage(cls, module: Module) -> None:
+        # Clones parameter and buffer storage in a forked CPU worker so mutations
+        # cannot alter the dormant parent's shared tensors before reconciliation.
         tensor: torch.Tensor
         for tensor in (*module.parameters(), *module.buffers()):
             tensor.data: torch.Tensor = tensor.data.clone()

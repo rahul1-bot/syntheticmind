@@ -1,3 +1,26 @@
+# This module:
+# 1. Implements NVIDIA Transformer Engine precision with delayed-scaling FP8
+#    autocast, float16 or bfloat16 weights, fallback autocast, and optional layer
+#    replacement
+# 2. Re-exports the strict configuration and structural live recipe contracts
+#    clients use to customize delayed scaling
+#
+# Design decisions:
+# - The policy requires transformer_engine 2.18.0 or newer and the current
+#   autocast(enabled=True, recipe=...) API; unsupported installations fail at
+#   configuration rather than degrading silently
+# - Weights remain float16 or bfloat16 while eligible compute enters Transformer
+#   Engine FP8 autocast with an explicit fallback compute dtype
+# - replace_layers=True patches construction during configure_model;
+#   replace_layers=None performs recursive post-construction replacement only
+#   when the model contains no existing Transformer Engine layer
+# - Linear replacement requires both dimensions divisible by sixteen and
+#   LayerNorm replacement requires one normalized dimension; unsupported layers
+#   warn and remain native rather than being converted incorrectly
+# - Outputs return to the current default floating dtype at the plugin boundary
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
@@ -23,6 +46,9 @@ __all__: list[str] = [
 
 
 class TransformerEnginePrecision(Precision):
+    # Optional FP8 execution policy for CUDA Transformer workloads. Clients may
+    # supply DelayedScalingConfiguration or a live DelayedScalingRecipe and
+    # choose whether native Linear and LayerNorm layers are replaced.
     precision: PrecisionType = "transformer-engine"
 
     def __init__(
@@ -33,6 +59,8 @@ class TransformerEnginePrecision(Precision):
         replace_layers: bool | None = None,
         fallback_compute_dtype: torch.dtype | None = None
     ) -> None:
+        # Validates dependency, weight and fallback dtypes, layer-replacement
+        # policy, and recipe before any model structure mutates.
         if not _TransformerEngineAdapter.is_available():
             raise ModuleNotFoundError(
                 "Transformer Engine precision requires transformer_engine>=2.18.0."
@@ -69,6 +97,8 @@ class TransformerEnginePrecision(Precision):
 
     @override
     def convert_module(self, module: nn.Module) -> nn.Module:
+        # Avoids double conversion when Transformer Engine layers already exist,
+        # optionally replaces eligible native layers, then converts weight storage.
         has_transformer_engine_layer: bool = False
         child: nn.Module
         for child in module.modules():
@@ -86,6 +116,8 @@ class TransformerEnginePrecision(Precision):
     @contextmanager
     @override
     def module_init_context(self) -> Iterator[None]:
+        # Combines optional constructor replacement with the selected true weight
+        # dtype during client configure_model.
         stack: ExitStack = ExitStack()
         with stack:
             if self.replace_layers:
@@ -96,6 +128,8 @@ class TransformerEnginePrecision(Precision):
     @contextmanager
     @override
     def forward_context(self) -> Iterator[None]:
+        # Enters weight default dtype, CUDA fallback autocast, and Transformer
+        # Engine FP8 autocast as one reversible forward transaction.
         stack: ExitStack = ExitStack()
         with stack:
             stack.enter_context(_DtypeContext(self.weights_dtype))
@@ -117,6 +151,8 @@ class TransformerEnginePrecision(Precision):
         return self._convert_floating_point(data, torch.get_default_dtype())
 
     def _replace_layers(self, module: nn.Module) -> None:
+        # Recursively replaces eligible native Linear and one-dimensional
+        # LayerNorm children while copying their complete state dictionaries.
         child_name: str
         child: nn.Module
         for child_name, child in module.named_children():

@@ -1,3 +1,22 @@
+# This module:
+# 1. Owns construction, rank specialization, capture, and restoration of the
+#    environment variables used by local distributed launchers
+#
+# Design decisions:
+# - ClusterEnvironment supplies semantic topology and rendezvous values;
+#   DistributedEnvironment converts them into the standard variables consumed by
+#   torch.distributed and child interpreters
+# - OMP_NUM_THREADS defaults to available CPUs divided across local processes,
+#   preventing every worker from independently oversubscribing the host
+# - Rank-specific values derive global rank from node rank and local process
+#   index, preserving multi-node coordinates even though local launch itself is
+#   restricted to one node
+# - Capture records absence as well as values and restore removes variables that
+#   did not exist, so a completed or failed launch leaves the parent environment
+#   exactly as it began
+#
+# Author: Rahul Sawhney
+
 import os
 from typing import ClassVar
 
@@ -9,6 +28,8 @@ __all__: list[str] = []
 
 
 class _DistributedEnvironment:
+    # Reversible environment owner bound to the narrow launch topology supplied
+    # by ParallelStrategy.
     _environment_keys: ClassVar[tuple[str, ...]] = (
         "MASTER_ADDR",
         "MASTER_PORT",
@@ -24,6 +45,8 @@ class _DistributedEnvironment:
         self._strategy: LaunchStrategy = strategy
 
     def local_values(self) -> dict[str, str]:
+        # Validates rendezvous and thread policy and constructs values shared by
+        # every worker on this node before local-rank specialization.
         cluster_environment: ClusterEnvironment = self._strategy.cluster_environment
         master_address: str = cluster_environment.main_address
         master_port: str = str(cluster_environment.main_port)
@@ -71,6 +94,7 @@ class _DistributedEnvironment:
         environment: dict[str, str],
         local_rank: int
     ) -> dict[str, str]:
+        # Adds local and global rank to a copied base environment for one worker.
         rank_environment: dict[str, str] = dict(environment)
         rank_environment["LOCAL_RANK"]: str = str(local_rank)
         node_rank: int = int(environment["NODE_RANK"])
@@ -80,6 +104,7 @@ class _DistributedEnvironment:
         return rank_environment
 
     def capture(self) -> dict[str, str | None]:
+        # Snapshots every variable this launcher may mutate, including absence.
         snapshot: dict[str, str | None] = {}
         key: str
         for key in self._environment_keys:
@@ -87,6 +112,7 @@ class _DistributedEnvironment:
         return snapshot
 
     def restore(self, snapshot: dict[str, str | None]) -> None:
+        # Restores exact parent values and removes keys absent in the snapshot.
         key: str
         value: str | None
         for key, value in snapshot.items():

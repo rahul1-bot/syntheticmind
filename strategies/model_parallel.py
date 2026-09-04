@@ -1,3 +1,30 @@
+# This module:
+# 1. Implements named data- and tensor-parallel device meshes for client-owned
+#    tensor parallelism, composable FSDP2, or hybrid model plans
+# 2. Owns distributed parameter materialization and full or sharded
+#    model-parallel checkpoint representation
+#
+# Design decisions:
+# - ModelParallelStrategy is an independent ParallelStrategy rather than a DDP
+#   subclass because tensor-parallel and FSDP2 modules do not share replicated
+#   DDP wrapping identity
+# - The two named mesh axes must multiply exactly to world size. ``"auto"`` maps
+#   the data axis to node count and the tensor axis to local process count
+# - Client code applies the actual parallelization plan in configure_model where
+#   Module.device_mesh is available; Strategy supplies topology and lifecycle but
+#   never guesses which layers should shard
+# - Legacy FullyShardedDataParallel wrapping is rejected because the supported
+#   path is composable FSDP2 over the client plan
+# - Empty construction may place tensors on meta, after which materialization
+#   allocates on the rank device and invokes each module's reset_parameters;
+#   modules without a reset contract are reported explicitly
+# - Model-parallel checkpoint operations require collective participation from
+#   every rank even when only rank zero publishes metadata or a full artifact
+# - Gradient synchronization belongs to the client's composable plan, so the DDP
+#   tail-gradient algorithm is intentionally absent
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -25,6 +52,34 @@ __all__: list[str] = ["ModelParallelStrategy"]
 
 
 class ModelParallelStrategy(ParallelStrategy):
+    # Researcher-controlled model-parallel execution policy. Clients must
+    # override Module.configure_model and apply tensor-parallel, composable FSDP2,
+    # or hybrid transformations against the named device mesh.
+    #
+    # Example::
+    #
+    #     from typing import override
+    #
+    #     from torch import nn
+    #     from torch.distributed.tensor.parallel import (
+    #         ColwiseParallel,
+    #         parallelize_module
+    #     )
+    #
+    #     from syntheticmind import Module
+    #
+    #     class ParallelEncoder(Module):
+    #         def __init__(self) -> None:
+    #             super().__init__()
+    #             self.projection: nn.Linear = nn.Linear(1024, 4096)
+    #
+    #         @override
+    #         def configure_model(self) -> None:
+    #             parallelize_module(
+    #                 self,
+    #                 self.device_mesh["tensor_parallel"],
+    #                 {"projection": ColwiseParallel()}
+    #             )
     @override
     def __init__(
         self,
@@ -34,6 +89,8 @@ class ModelParallelStrategy(ParallelStrategy):
         process_group_backend: str | None = None,
         timeout: timedelta | None = default_pg_timeout
     ) -> None:
+        # Validates mesh dimensions and checkpoint format, selects collective
+        # process launch, and installs the model-parallel checkpoint owner.
         super().__init__(
             process_group_backend=process_group_backend,
             timeout=timeout,
@@ -54,17 +111,24 @@ class ModelParallelStrategy(ParallelStrategy):
 
     @override
     def connect(self, model: nn.Module) -> None:
+        # Connects the model and publishes an already initialized device mesh to
+        # the client Module when stage ordering created the mesh first.
         super().connect(model)
         if self._device_mesh is not None:
             self._require_module()._device_mesh: DeviceMesh | None = self._device_mesh
 
     @override
     def setup_environment(self) -> None:
+        # Initializes shared distributed environment, then creates the named
+        # device mesh before client model configuration.
         super().setup_environment()
         self._setup_device_mesh()
 
     @override
     def setup(self, model: nn.Module, device: torch.device) -> nn.Module:
+        # Requires a client parallelization plan, rejects FSDP1, materializes meta
+        # tensors, places remaining state, reconnects checkpoint ownership, and
+        # synchronizes ranks before execution.
         if not isinstance(model, Module):
             raise TypeError("ModelParallelStrategy requires a SyntheticMind Module.")
         if type(model).configure_model is ModelHooks.configure_model:
@@ -95,11 +159,14 @@ class ModelParallelStrategy(ParallelStrategy):
 
     @override
     def teardown(self) -> None:
+        # Removes mesh references from Strategy and Module while preserving shared
+        # process-group lifetime for sequential distributed stages.
         self._clear_device_mesh()
         super().teardown()
 
     @override
     def on_exception(self, exception: BaseException) -> None:
+        # Clears mesh references before shared distributed exception cleanup.
         self._clear_device_mesh()
         super().on_exception(exception)
 
@@ -109,6 +176,8 @@ class ModelParallelStrategy(ParallelStrategy):
         self,
         empty_init: bool | None = None
     ) -> Iterator[None]:
+        # Selects meta allocation only when empty_init is true and composes it
+        # with the active precision construction dtype.
         if empty_init is not None and type(empty_init) is not bool:
             raise TypeError("`empty_init` must be a bool or None.")
         empty_context: AbstractContextManager[None] = (
@@ -123,6 +192,8 @@ class ModelParallelStrategy(ParallelStrategy):
 
     @override
     def attach_precision_plugin(self, precision_plugin: Precision) -> None:
+        # Restricts numerical policies to those verified with DTensor and
+        # composable sharding before attaching the plugin.
         if not isinstance(precision_plugin, Precision):
             raise TypeError("precision_plugin must be a Precision instance.")
         supported_precisions: tuple[str, ...] = (
@@ -141,6 +212,8 @@ class ModelParallelStrategy(ParallelStrategy):
     @property
     @override
     def distributed_sampler_kwargs(self) -> dict[str, int] | None:
+        # Samples over the data-parallel mesh axis only; tensor-parallel ranks
+        # cooperating on the same samples do not create extra replicas.
         data_parallel_mesh: DeviceMesh = self.device_mesh["data_parallel"]
         return {
             "num_replicas": data_parallel_mesh.size(),
@@ -150,6 +223,7 @@ class ModelParallelStrategy(ParallelStrategy):
     @property
     @override
     def data_parallel_size(self) -> int:
+        # Resolved data-axis size from the live mesh or pre-setup configuration.
         if self._device_mesh is not None:
             return self._device_mesh["data_parallel"].size()
         return (
@@ -161,15 +235,20 @@ class ModelParallelStrategy(ParallelStrategy):
     @property
     @override
     def checkpoint_requires_all_ranks(self) -> bool:
+        # Full and sharded distributed state APIs require every model rank to
+        # participate even when rank zero owns final publication.
         return True
 
     @property
     def device_mesh(self) -> DeviceMesh:
+        # Named mesh available after process setup and during configure_model.
         if self._device_mesh is None:
             raise RuntimeError("The device mesh is unavailable before process setup.")
         return self._device_mesh
 
     def _setup_device_mesh(self) -> None:
+        # Resolves automatic axis sizes, validates rectangular world coverage,
+        # initializes the mesh, and attaches it to the connected Module.
         if self._data_parallel_size == "auto":
             data_parallel_size: int = self.num_nodes
         else:
@@ -192,6 +271,8 @@ class ModelParallelStrategy(ParallelStrategy):
         self._require_module()._device_mesh: DeviceMesh | None = self._device_mesh
 
     def _clear_device_mesh(self) -> None:
+        # Removes Module and Strategy references without destroying the process
+        # group that backs live distributed tensors.
         if self._module is not None:
             self._module._device_mesh: DeviceMesh | None = None
         self._device_mesh: DeviceMesh | None = None
@@ -201,6 +282,7 @@ class ModelParallelStrategy(ParallelStrategy):
         name: str,
         value: Literal["auto"] | int
     ) -> None:
+        # Accepts ``"auto"`` or a positive non-bool integer for one mesh axis.
         if value == "auto":
             return
         if isinstance(value, bool) or not isinstance(value, int):

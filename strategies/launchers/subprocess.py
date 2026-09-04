@@ -1,3 +1,26 @@
+# This module:
+# 1. Implements local distributed launch by re-executing the current importable
+#    module or Python script for nonzero local ranks
+# 2. Owns child process observation, signal propagation, environment rollback,
+#    thread-count rollback, bounded termination, and pickle-safe launcher state
+#
+# Design decisions:
+# - The parent process becomes local rank zero and executes Trainer directly;
+#   nonzero ranks start from the same module or script command and reconstruct
+#   runtime configuration from exported environment variables
+# - Interactive ``-c`` and stdin programs are rejected because they cannot be
+#   re-executed deterministically; clients use ddp_fork for that environment
+# - A daemon observer detects the first failed child and terminates the local job,
+#   preventing rank zero from hanging inside a collective after another rank dies
+# - Failure cleanup stops observation, terminates children, restores environment
+#   and torch thread count, and preserves SIGTERM as process termination
+# - atexit cleanup bounds graceful waits before terminate and kill escalation so
+#   orphaned workers do not survive interpreter shutdown
+# - Live Popen, observer, environment snapshot, and thread state are removed from
+#   pickle output because process resources cannot cross ownership
+#
+# Author: Rahul Sawhney
+
 import __main__
 import atexit
 import os
@@ -38,11 +61,14 @@ type _SubprocessLauncherState = dict[str, _SubprocessLauncherStateValue]
 
 
 class _SubprocessLauncher:
+    # Parent-side script re-execution launcher used by strategy="ddp".
     def __init__(
         self,
         strategy: LaunchStrategy,
         environment: _DistributedEnvironment
     ) -> None:
+        # Binds topology and environment, initializes empty process resources,
+        # and registers deterministic process-exit cleanup.
         self._strategy: LaunchStrategy = strategy
         self._environment: _DistributedEnvironment = environment
         self._processes: list[subprocess.Popen[bytes]] = []
@@ -59,6 +85,8 @@ class _SubprocessLauncher:
         datamodule: DataModule | None,
         stage_kwargs: StageArguments
     ) -> StageResult:
+        # Captures parent state, exports rank-zero environment, starts nonzero
+        # workers and observation, then executes the stage in the parent process.
         if self._processes:
             raise RuntimeError("The subprocess launcher already has active workers.")
         environment: dict[str, str] = self._environment.local_values()
@@ -92,6 +120,8 @@ class _SubprocessLauncher:
             raise
 
     def kill(self, signum: int) -> None:
+        # Delivers one signal to each live child without converting process races
+        # into secondary failures.
         process: subprocess.Popen[bytes]
         for process in self._processes:
             if process.poll() is None:
@@ -102,6 +132,7 @@ class _SubprocessLauncher:
 
     @property
     def processes(self) -> list[subprocess.Popen[bytes]]:
+        # Returns only children that remain alive at inspection time.
         active_processes: list[subprocess.Popen[bytes]] = []
         process: subprocess.Popen[bytes]
         for process in self._processes:
@@ -114,6 +145,8 @@ class _SubprocessLauncher:
         command: list[str],
         environment: dict[str, str]
     ) -> None:
+        # Re-executes the resolved command for local ranks one through N-1 with
+        # rank-specific copied environments.
         local_rank: int
         for local_rank in range(1, self._strategy.num_processes):
             child_environment: dict[str, str] = dict(os.environ)
@@ -128,6 +161,8 @@ class _SubprocessLauncher:
             self._processes.append(process)
 
     def _command(self) -> list[str]:
+        # Prefers module re-execution when __main__.__spec__ exists and otherwise
+        # requires a concrete script file; interactive inputs fail with guidance.
         main_spec: ModuleSpec | None = __main__.__spec__
         module_name: str | None = main_spec.name if main_spec is not None else None
         if module_name:
@@ -146,6 +181,8 @@ class _SubprocessLauncher:
         return [sys.executable, str(script_path), *sys.argv[1:]]
 
     def _terminate_workers(self) -> None:
+        # Requests graceful termination, waits five seconds, then kills any child
+        # that still owns process resources.
         process: subprocess.Popen[bytes]
         for process in self._processes:
             if process.poll() is None:
@@ -161,6 +198,8 @@ class _SubprocessLauncher:
                 process.wait()
 
     def _close(self) -> None:
+        # Process-exit transaction that joins or escalates every child, checks the
+        # observer, releases it, clears handles, and restores parent state.
         process: subprocess.Popen[bytes]
         for process in self._processes:
             if process.poll() is not None:
@@ -181,6 +220,8 @@ class _SubprocessLauncher:
         self._restore_environment()
 
     def _restore_environment(self) -> None:
+        # Restores every mutated environment key and the original torch thread
+        # count exactly once.
         if self._environment_snapshot is None:
             return
         self._environment.restore(self._environment_snapshot)
@@ -190,6 +231,8 @@ class _SubprocessLauncher:
             self._num_threads_snapshot: int | None = None
 
     def _stop_observer(self) -> None:
+        # Signals and joins the daemon observer unless cleanup is running from the
+        # observer thread itself.
         if self._observer is None:
             return
         self._observer.stop()
@@ -199,6 +242,8 @@ class _SubprocessLauncher:
 
     @override
     def __getstate__(self) -> _SubprocessLauncherState:
+        # Removes process, thread, observer, and rollback snapshots from pickle
+        # state while retaining reusable launch configuration.
         state: _SubprocessLauncherState = cast(
             _SubprocessLauncherState,
             dict(self.__dict__)

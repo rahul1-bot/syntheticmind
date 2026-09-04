@@ -1,3 +1,24 @@
+# This module:
+# 1. Defines the torch-function mode used to suppress parameter initialization
+#    during empty construction and to materialize distributed meta tensors on the
+#    rank device
+#
+# Design decisions:
+# - Initialization suppression intercepts torch.nn.init in-place functions and
+#   returns their target tensor without consuming random state or writing storage
+# - Additional tensor operations invoked from torch.nn.init are handled narrowly
+#   for randperm, out parameters, setitem, and in-place calls, preserving module
+#   constructor control flow without broad object escape hatches
+# - Call-stack inspection distinguishes initialization-internal operations from
+#   ordinary client tensor code executed under the same TorchFunctionMode
+# - Distributed materialization uses to_empty, then invokes reset_parameters on
+#   every local module owning tensors; modules without a reset contract are
+#   returned to the caller for explicit warning
+# - Empty initialization preserves the process RNG trajectory because skipped
+#   initializers and deterministic randperm replacement consume no randomness
+#
+# Author: Rahul Sawhney
+
 import inspect
 from collections.abc import Callable, Iterator
 from itertools import chain
@@ -33,8 +54,12 @@ type _ResetParameters = Callable[[], None]
 
 
 class _ModuleInitializer(TorchFunctionMode):
+    # Reversible initialization interception and distributed meta-materialization
+    # owner used by Strategy tensor construction.
     @override
     def __init__(self, enabled: bool = True) -> None:
+        # Validates whether initialization calls should be suppressed while the
+        # mode is active.
         super().__init__()
         if type(enabled) is not bool:
             raise TypeError(f"Module initialization mode must be a bool, got {enabled!r}.")
@@ -45,6 +70,8 @@ class _ModuleInitializer(TorchFunctionMode):
         module: torch.nn.Module,
         device: torch.device
     ) -> set[str]:
+        # Detects meta state, allocates empty storage on the rank device, resets
+        # each tensor-owning submodule, and reports types lacking reset_parameters.
         tensors: Iterator[torch.Tensor] = chain(
             module.parameters(),
             module.buffers()
@@ -72,6 +99,8 @@ class _ModuleInitializer(TorchFunctionMode):
         return uninitialized_modules
 
     def _called_from_torch_nn_init(self) -> bool:
+        # Walks the active Python frames and releases the frame reference in
+        # finally to avoid retaining execution state.
         frame: FrameType | None = inspect.currentframe()
         try:
             while frame is not None:
@@ -94,6 +123,9 @@ class _ModuleInitializer(TorchFunctionMode):
         args: tuple[_TorchFunctionValue, ...] = (),
         kwargs: dict[str, _TorchFunctionValue] | None = None
     ) -> _TorchFunctionValue:
+        # Suppresses recognized initialization writes while preserving target
+        # shapes and control flow; every operation outside initialization
+        # delegates to its original torch implementation.
         del types
         call_kwargs: dict[str, _TorchFunctionValue] = (
             {} if kwargs is None else kwargs

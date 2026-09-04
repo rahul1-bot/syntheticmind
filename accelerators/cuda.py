@@ -1,3 +1,19 @@
+# This module:
+# 1. Implements Accelerator for NVIDIA CUDA discovery, explicit device
+#    selection, process-local binding, and allocator statistics
+#
+# Design decisions:
+# - setup_device calls torch.cuda.set_device as well as recording the device so
+#   context-free CUDA allocations inside client code follow the resolved rank
+# - Before binding, get_device returns cuda:0 as the conventional provisional
+#   device; Trainer replaces it after topology and local-rank resolution
+# - Device parsing distinguishes counts, explicit identifiers, and all-visible
+#   selection through the shared GPU parser and rejects unavailable IDs
+# - Statistics expose allocator current and peak values, retry and out-of-memory
+#   counts, plus free and total device bytes without converting units
+#
+# Author: Rahul Sawhney
+
 from typing import override
 
 import torch
@@ -10,11 +26,14 @@ __all__: list[str] = ["CUDAAccelerator"]
 
 
 class CUDAAccelerator(Accelerator):
+    # NVIDIA execution backend selected by Trainer when CUDA is requested or
+    # available under automatic accelerator resolution.
     def __init__(self) -> None:
         self._device: torch.device | None = None
 
     @override
     def setup_device(self, device: torch.device) -> None:
+        # Validates CUDA identity and mutates this process's active CUDA device.
         if device.type != "cuda":
             raise MisconfigurationError(f"CUDAAccelerator cannot bind {device}.")
         self._device: torch.device | None = device
@@ -22,12 +41,15 @@ class CUDAAccelerator(Accelerator):
 
     @override
     def get_device(self) -> torch.device:
+        # Bound process-local device, or cuda:0 before topology setup.
         if self._device is None:
             return torch.device("cuda", 0)
         return self._device
 
     @override
     def get_device_stats(self, device: torch.device) -> dict[str, float]:
+        # Reads allocator and hardware memory counters for the resolved device
+        # index; callers synchronize execution before timing-sensitive sampling.
         if device.type != "cuda":
             raise MisconfigurationError(f"CUDAAccelerator cannot inspect {device}.")
         device_index: int = (
@@ -60,6 +82,8 @@ class CUDAAccelerator(Accelerator):
     @classmethod
     @override
     def parse_devices(cls, devices: DeviceInput) -> int | list[int]:
+        # Resolves public count, explicit ID, comma-separated, and all-device
+        # forms against torch.cuda.device_count.
         parser: _AcceleratorDeviceParser = _AcceleratorDeviceParser(
             cls.auto_device_count(),
             cls.__name__
@@ -72,6 +96,8 @@ class CUDAAccelerator(Accelerator):
         cls,
         devices: int | list[int]
     ) -> list[torch.device]:
+        # Converts validated identifiers into ordered CUDA placements used by
+        # Strategy local-rank selection.
         del cls
         if not isinstance(devices, list):
             raise TypeError("CUDAAccelerator requires parsed device IDs.")

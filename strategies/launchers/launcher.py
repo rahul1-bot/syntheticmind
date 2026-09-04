@@ -1,3 +1,24 @@
+# This module:
+# 1. Defines the process-launch coordinator selecting script re-execution,
+#    spawn, fork, forkserver, or externally created worker behavior
+# 2. Applies signal scope, local multi-node restrictions, prediction-return
+#    constraints, and process termination across concrete launchers
+#
+# Design decisions:
+# - ParallelStrategy owns one ProcessLauncher and clients select its start method
+#   through Strategy configuration rather than invoking launcher classes directly
+# - Externally created processes re-enter the Trainer stage immediately and never
+#   launch another worker set
+# - Local launch supports one node only; multi-node execution must arrive through
+#   torchrun or a scheduler-owned ClusterEnvironment
+# - Multiprocessing prediction cannot return arbitrary worker outputs to the
+#   parent and therefore requires return_predictions=False; script re-execution
+#   may preserve its ordinary process-local result
+# - SignalConnector wraps the complete launch so SIGTERM reaches owned workers
+#   and is checked before and after distributed execution
+#
+# Author: Rahul Sawhney
+
 from typing import cast
 
 import syntheticmind
@@ -21,11 +42,14 @@ __all__: list[str] = ["ProcessStartMethod"]
 
 
 class _ProcessLauncher:
+    # Internal dispatcher over subprocess and torch multiprocessing policies.
     def __init__(
         self,
         strategy: LaunchStrategy,
         start_method: ProcessStartMethod
     ) -> None:
+        # Validates host-supported start methods and constructs both concrete
+        # launchers around one reversible distributed environment.
         available_start_methods: set[str] = {"popen", *mp.get_all_start_methods()}
         if start_method not in available_start_methods:
             raise ValueError(
@@ -51,6 +75,8 @@ class _ProcessLauncher:
         datamodule: DataModule | None,
         stage_kwargs: StageArguments
     ) -> StageResult:
+        # Executes directly inside externally launched workers or delegates local
+        # process creation after validating node and prediction constraints.
         with trainer._signal_connector.launch_context():
             trainer._raise_if_sigterm()
             if not self.should_launch:
@@ -97,6 +123,7 @@ class _ProcessLauncher:
             return result
 
     def kill(self, signum: int) -> None:
+        # Propagates one signal to every process owned by either concrete launcher.
         self._subprocess_launcher.kill(signum)
         self._multiprocessing_launcher.kill(signum)
 
@@ -106,6 +133,8 @@ class _ProcessLauncher:
 
     @property
     def is_interactive_compatible(self) -> bool:
+        # Fork is the only supported local method that does not require an
+        # importable guarded program entry point.
         return self._start_method == "fork"
 
     @property

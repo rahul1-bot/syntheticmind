@@ -1,3 +1,27 @@
+# This module:
+# 1. Implements spawn, fork, and forkserver local process launch through
+#    torch.multiprocessing
+# 2. Executes one complete Trainer stage in each worker and reconciles the
+#    rank-zero runtime outcome into the dormant parent
+#
+# Design decisions:
+# - Spawn and forkserver validate that Trainer, Module, DataModule, callbacks,
+#   and stage arguments are pickleable before process creation; fork retains its
+#   interactive use but is prohibited with CUDA
+# - The guarded-program requirement is checked before recursive Python spawn so
+#   missing ``if __name__ == "__main__"`` fails with corrective guidance
+# - Every worker restores parent random and deterministic process state before
+#   execution and receives rank-specific rendezvous and thread variables
+# - CPU forked tensors may share storage with the parent, so workers clone Module
+#   parameter and buffer storage before mutation to preserve parent reconciliation
+# - Only local rank zero serializes WorkerOutput; all ranks execute the stage and
+#   collectives, while one authoritative result restores parent model, Trainer,
+#   callbacks, metrics, data, precision, optimizer, scheduler, and RNG state
+# - Process exit and SIGTERM failures interrupt Trainer state and preserve signal
+#   semantics rather than returning a partial rank-zero snapshot
+#
+# Author: Rahul Sawhney
+
 import os
 import pickle
 import tempfile
@@ -41,6 +65,9 @@ type _MultiprocessingLauncherState = dict[str, _MultiprocessingLauncherStateValu
 
 
 class _MultiprocessingWorker:
+    # Importable worker entry point required by torch multiprocessing start
+    # methods. It reconstructs process state, executes one stage, and publishes
+    # the sole parent snapshot from local rank zero.
     @classmethod
     def run(
         cls: type[_MultiprocessingWorker],
@@ -54,6 +81,8 @@ class _MultiprocessingWorker:
         output_path: Path,
         initial_global_state: _GlobalState
     ) -> None:
+        # Specializes environment and thread count, restores process-global state,
+        # isolates CPU storage, invokes Trainer, and writes the rank-zero result.
         del cls
         launch_strategy: LaunchStrategy = cast(
             LaunchStrategy,
@@ -85,12 +114,16 @@ class _MultiprocessingWorker:
 
 
 class _MultiprocessingLauncher:
+    # Parent-side owner for spawn, fork, or forkserver process lifetime and state
+    # reconciliation.
     def __init__(
         self,
         strategy: LaunchStrategy,
         environment: _DistributedEnvironment,
         start_method: ProcessStartMethod
     ) -> None:
+        # Binds topology, reversible environment, and start method with no active
+        # child process state.
         self._strategy: LaunchStrategy = strategy
         self._environment: _DistributedEnvironment = environment
         self._start_method: ProcessStartMethod = start_method
@@ -104,6 +137,8 @@ class _MultiprocessingLauncher:
         datamodule: DataModule | None,
         stage_kwargs: StageArguments
     ) -> StageResult:
+        # Validates transport, captures process globals, launches and joins every
+        # worker, loads the rank-zero snapshot, and restores it into the parent.
         self._validate_launch(trainer, module, datamodule, stage_kwargs)
         environment: dict[str, str] = self._environment.local_values()
         initial_global_state: _GlobalState = (
@@ -143,6 +178,8 @@ class _MultiprocessingLauncher:
         return worker_output.result
 
     def kill(self, signum: int) -> None:
+        # Sends a signal to every live multiprocessing child and tolerates races
+        # with processes that exited between inspection and delivery.
         process: mp.Process
         for process in self._processes:
             if process.pid is not None and process.is_alive():
@@ -153,6 +190,7 @@ class _MultiprocessingLauncher:
 
     @property
     def processes(self) -> list[mp.Process]:
+        # Defensive list of currently tracked child process objects.
         return list(self._processes)
 
     def _validate_launch(
@@ -162,6 +200,8 @@ class _MultiprocessingLauncher:
         datamodule: DataModule | None,
         stage_kwargs: StageArguments
     ) -> None:
+        # Enforces guarded entry, CUDA fork safety, and serialization requirements
+        # before any worker is created.
         if getattr(mp.current_process(), "_inheriting", False):
             raise RuntimeError(
                 "Multiprocessing DDP requires the program entry point to be guarded by "
@@ -194,6 +234,9 @@ class _MultiprocessingLauncher:
         output_path: Path,
         initial_global_state: _GlobalState
     ) -> None:
+        # Starts all local ranks, repeatedly joins their shared ProcessContext,
+        # converts termination exit codes into SIGTERMException, and clears child
+        # ownership in finally.
         try:
             process_context_result: ProcessContext | None = start_processes(
                 _MultiprocessingWorker.run,
@@ -232,6 +275,8 @@ class _MultiprocessingLauncher:
 
     @override
     def __getstate__(self) -> _MultiprocessingLauncherState:
+        # Removes live process handles from pickle state while preserving launch
+        # topology and environment policy.
         state: _MultiprocessingLauncherState = cast(
             _MultiprocessingLauncherState,
             dict(self.__dict__)

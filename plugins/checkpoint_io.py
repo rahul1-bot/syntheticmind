@@ -1,3 +1,30 @@
+# This module:
+# 1. Defines CheckpointIO, the interchangeable transport contract for complete
+#    checkpoint dictionaries
+# 2. Implements local and fsspec-backed torch persistence with atomic local
+#    publication and remote transaction boundaries
+# 3. Implements wrapper composition and asynchronous snapshot persistence
+#
+# Design decisions:
+# - CheckpointIO owns bytes and storage transport only; Trainer assembles the
+#   trajectory, Strategy owns model and optimizer representation, and callbacks
+#   own cadence, ranking, and retention
+# - Local saves write a same-directory temporary file and atomically replace the
+#   destination, so readers observe the previous complete artifact or the new
+#   complete artifact rather than a partially written checkpoint
+# - Remote saves serialize into a temporary local file, then copy within the
+#   fsspec transaction exposed by the resolved backend
+# - Wrapping implementations receive their concrete base after Trainer resolves
+#   plugins, allowing AsyncCheckpointIO to decorate default or custom storage
+#   without claiming another persistence format
+# - AsyncCheckpointIO clones the complete payload on the calling thread before
+#   submission; later model or optimizer mutation cannot change the background
+#   artifact
+# - One background worker preserves save order, and load, remove, or teardown
+#   waits for pending work and re-raises the original asynchronous failure
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -27,6 +54,11 @@ type CheckpointStorageOptions = Mapping[str, CheckpointValue] | None
 
 @runtime_checkable
 class CheckpointIO(Protocol):
+    # Structural checkpoint transport supplied through Trainer plugins. A custom
+    # client implementation persists complete CheckpointDict values and owns any
+    # storage-specific options, resources, and teardown it introduces.
+    # Persists one complete snapshot to the requested path. Implementations must
+    # either honor storage_options or reject them explicitly.
     def save_checkpoint(
         self,
         checkpoint: CheckpointDict,
@@ -34,6 +66,8 @@ class CheckpointIO(Protocol):
         storage_options: CheckpointStorageOptions = None
     ) -> None: ...
 
+    # Loads one complete checkpoint mapping under the requested device and
+    # weights-only policy.
     def load_checkpoint(
         self,
         path: CheckpointPath,
@@ -41,12 +75,17 @@ class CheckpointIO(Protocol):
         weights_only: bool | None = None
     ) -> CheckpointDict: ...
 
+    # Removes the artifact represented by path; retention policy remains outside.
     def remove_checkpoint(self, path: CheckpointPath) -> None: ...
 
+    # Releases transport-owned workers, sessions, handles, or deferred failures.
     def teardown(self) -> None: ...
 
 
 class TorchCheckpointIO(CheckpointIO):
+    # Default torch.save and torch.load transport for local files and fsspec
+    # resources. It accepts no storage-specific option mapping because silent
+    # option dropping would misrepresent a custom backend contract.
     @override
     def save_checkpoint(
         self,
@@ -54,6 +93,8 @@ class TorchCheckpointIO(CheckpointIO):
         path: CheckpointPath,
         storage_options: CheckpointStorageOptions = None
     ) -> None:
+        # Selects atomic local publication or transaction-scoped remote copying
+        # after rejecting unsupported storage options.
         if storage_options is not None:
             raise TypeError(
                 "storage_options are unsupported by TorchCheckpointIO. "
@@ -71,6 +112,8 @@ class TorchCheckpointIO(CheckpointIO):
         map_location: MapLocation = None,
         weights_only: bool | None = None
     ) -> CheckpointDict:
+        # Loads a complete mapping on CPU by default and honors explicit
+        # map_location and weights_only controls for both local and remote paths.
         if not StoragePath(path).exists():
             raise FileNotFoundError(f"Checkpoint not found: {path}")
         resolved_map_location: MapLocation = (
@@ -99,13 +142,18 @@ class TorchCheckpointIO(CheckpointIO):
 
     @override
     def remove_checkpoint(self, path: CheckpointPath) -> None:
+        # Removes a file or checkpoint directory through StoragePath. The caller
+        # owns retention and rank policy.
         StoragePath(path).remove(recursive=True)
 
     @override
     def teardown(self) -> None:
+        # Default transport owns no persistent resource.
         pass
 
     def _save_local(self, checkpoint: CheckpointDict, path: CheckpointPath) -> None:
+        # Serializes beside the destination and publishes through atomic replace;
+        # any failed temporary file is removed before the causal error propagates.
         local_path: Path = Path(StoragePath(path).normalized)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_file: tuple[int, str] = tempfile.mkstemp(
@@ -125,6 +173,8 @@ class TorchCheckpointIO(CheckpointIO):
             raise
 
     def _save_remote(self, checkpoint: CheckpointDict, path: CheckpointPath) -> None:
+        # Serializes once into a seekable temporary file and copies it inside the
+        # resolved fsspec transaction.
         storage_path: StoragePath = StoragePath(path)
         StoragePath(storage_path.parent).make_directory()
         filesystem: AbstractFileSystem = storage_path.filesystem
@@ -144,6 +194,8 @@ class TorchCheckpointIO(CheckpointIO):
         map_location: MapLocation,
         weights_only: bool | None
     ) -> CheckpointValue:
+        # Stages remote bytes into a seekable temporary file required by
+        # torch.load, then returns the deserialized value for mapping validation.
         storage_path: StoragePath = StoragePath(path)
         with (
             storage_path.open_binary("rb") as source,
@@ -162,7 +214,12 @@ class TorchCheckpointIO(CheckpointIO):
 
 
 class _WrappingCheckpointIO(CheckpointIO):
+    # Delegating checkpoint transport whose concrete base may be supplied at
+    # construction or injected by the Trainer connector. Nested wrappers accept
+    # one eventual base without forming wrapper cycles.
     def __init__(self, checkpoint_io: CheckpointIO | None = None) -> None:
+        # Records whether a client explicitly selected the base so default
+        # injection cannot overwrite intentional composition.
         self._checkpoint_io: CheckpointIO | None = checkpoint_io
         self._base_checkpoint_io_configured: bool = checkpoint_io is not None
         if isinstance(checkpoint_io, _WrappingCheckpointIO):
@@ -211,6 +268,8 @@ class _WrappingCheckpointIO(CheckpointIO):
 
     @checkpoint_io.setter
     def checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
+        # Installs the first concrete base or forwards it into an unresolved
+        # nested wrapper; a wrapper cannot install itself as its own base.
         if isinstance(checkpoint_io, _WrappingCheckpointIO):
             raise TypeError("A wrapping CheckpointIO cannot be installed as its own base.")
         if self._checkpoint_io is None:
@@ -225,12 +284,16 @@ class _WrappingCheckpointIO(CheckpointIO):
             self._base_checkpoint_io_configured: bool = True
 
     def _require_checkpoint_io(self) -> CheckpointIO:
+        # Resolves the concrete transport before a delegated operation begins.
         if self._checkpoint_io is None:
             raise RuntimeError("The wrapping CheckpointIO has no base implementation.")
         return self._checkpoint_io
 
 
 class AsyncCheckpointIO(_WrappingCheckpointIO):
+    # Single-worker asynchronous checkpoint decorator. Client code supplies it
+    # through Trainer plugins; the connector injects TorchCheckpointIO when no
+    # explicit base transport was provided.
     @override
     def __init__(self, checkpoint_io: CheckpointIO | None = None) -> None:
         super().__init__(checkpoint_io)
@@ -244,6 +307,9 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
         path: CheckpointPath,
         storage_options: CheckpointStorageOptions = None
     ) -> None:
+        # Raises any prior background failure, clones the complete payload in the
+        # caller, schedules one ordered save, and rechecks synchronous submission
+        # errors before returning.
         self._raise_error()
         snapshot: CheckpointDict = {}
         checkpoint_name: str
@@ -267,16 +333,22 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
         map_location: MapLocation = None,
         weights_only: bool | None = None
     ) -> CheckpointDict:
+        # Waits for pending saves before reading so the returned artifact cannot
+        # race an earlier asynchronous publication.
         self._wait()
         return super().load_checkpoint(path, map_location, weights_only)
 
     @override
     def remove_checkpoint(self, path: CheckpointPath) -> None:
+        # Waits for pending saves before removal to preserve operation order.
         self._wait()
         super().remove_checkpoint(path)
 
     @override
     def teardown(self) -> None:
+        # Joins the worker, tears down the base transport, preserves the original
+        # asynchronous error, and attaches any secondary teardown failure as a
+        # causal note.
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor: ThreadPoolExecutor | None = None
@@ -297,6 +369,8 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
             raise asynchronous_error
 
     def _ensure_setup(self) -> ThreadPoolExecutor:
+        # Lazily creates one worker so unused asynchronous plugins allocate no
+        # thread and all saves retain submission order.
         if self._executor is None:
             self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(
                 max_workers=1
@@ -308,6 +382,7 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
             raise self._error
 
     def _wait(self) -> None:
+        # Joins and releases the current executor, then propagates stored failure.
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor: ThreadPoolExecutor | None = None
@@ -319,6 +394,8 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
         path: CheckpointPath,
         storage_options: CheckpointStorageOptions
     ) -> None:
+        # Background operation that stores the causal failure for deterministic
+        # propagation at the next public boundary.
         try:
             self._require_checkpoint_io().save_checkpoint(
                 snapshot,
@@ -329,6 +406,8 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
             self._error: BaseException | None = exception
 
     def _clone_value(self, value: CheckpointValue) -> CheckpointValue:
+        # Recursively snapshots tensors, NumPy arrays, and containers while
+        # retaining immutable scalar values directly.
         if isinstance(value, torch.Tensor):
             return value.detach().clone()
         if isinstance(value, np.ndarray):

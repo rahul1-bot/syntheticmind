@@ -1,3 +1,26 @@
+# This module:
+# 1. Converts complete Trainer checkpoints into model-parallel distributed model
+#    and optimizer state plus ordinary trajectory metadata
+# 2. Persists and restores full single-file or sharded distributed formats
+# 3. Reconciles PyTorch optimizer key formats for composable FSDP2 restoration
+#
+# Design decisions:
+# - Full and sharded formats share one semantic owner because both split the same
+#   trajectory and use the same PyTorch distributed state-dict APIs
+# - Full state dictionaries use CPU offload and rank-zero file publication;
+#   sharded state initializes against live model and optimizer structures on every
+#   rank before torch.distributed.checkpoint loads partitions
+# - Trainer metadata remains an ordinary CheckpointDict independent from model
+#   shards so callbacks, progress, RNG, and configuration restore uniformly
+# - A path cannot silently switch between full-file and sharded-directory formats;
+#   collisions fail before deleting or replacing the existing artifact
+# - Resumable restore validates one distributed optimizer state per configured
+#   optimizer before applying model state
+# - Integer-keyed optimizer state from a full checkpoint is rekeyed by parameter
+#   name when FSDP2 requires name-based mapping
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, cast
@@ -35,6 +58,8 @@ type ModelParallelCheckpointFormat = Literal["full", "sharded"]
 
 
 class _ModelParallelCheckpointIO:
+    # Internal format owner over PyTorch distributed state-dict APIs, ordinary
+    # TorchCheckpointIO, and atomic sharded generations.
     def __init__(self, checkpoint_format: ModelParallelCheckpointFormat) -> None:
         self._checkpoint_format: ModelParallelCheckpointFormat = checkpoint_format
         self._checkpoint_io: TorchCheckpointIO = TorchCheckpointIO()
@@ -48,6 +73,8 @@ class _ModelParallelCheckpointIO:
         path: str | Path,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Detects sharded or full format from storage and loads trajectory metadata
+        # without applying live model state.
         if self._sharded_store.is_checkpoint(path):
             return self._sharded_store.load_metadata(path, weights_only)
         if StoragePath(path).is_file():
@@ -64,6 +91,8 @@ class _ModelParallelCheckpointIO:
         barrier: Callable[[], None],
         broadcast: CheckpointBroadcast
     ) -> None:
+        # Selects sharded all-rank persistence or rank-zero full publication from
+        # the configured format.
         if self._checkpoint_format == "sharded":
             self._save_sharded(
                 checkpoint,
@@ -84,6 +113,8 @@ class _ModelParallelCheckpointIO:
         weights_only: bool | None,
         preloaded_checkpoint: CheckpointDict | None = None
     ) -> CheckpointDict:
+        # Restores detected distributed state into live participants and returns
+        # the ordinary metadata consumed by Trainer.
         if self._sharded_store.is_checkpoint(path):
             return self._load_sharded(
                 path,
@@ -110,6 +141,8 @@ class _ModelParallelCheckpointIO:
         return metadata
 
     def model_state(self, model: nn.Module) -> ModelState:
+        # Extracts model state under full or sharded options matching the selected
+        # save format.
         options: StateDictOptions = self._state_dict_options()
         return cast(ModelState, get_model_state_dict(model, options=options))
 
@@ -118,6 +151,7 @@ class _ModelParallelCheckpointIO:
         model: nn.Module,
         optimizer: torch.optim.Optimizer
     ) -> OptimizerState:
+        # Extracts optimizer state through the model-aware distributed API.
         options: StateDictOptions = self._state_dict_options()
         return cast(
             OptimizerState,
@@ -135,6 +169,8 @@ class _ModelParallelCheckpointIO:
         barrier: Callable[[], None],
         broadcast: CheckpointBroadcast
     ) -> None:
+        # Splits distributed participant state from metadata and commits both
+        # through the sharded generation store.
         split_state: tuple[DistributedCheckpointState, CheckpointDict] = (
             self._split_checkpoint(checkpoint)
         )
@@ -155,6 +191,8 @@ class _ModelParallelCheckpointIO:
         path: str | Path,
         global_rank: int
     ) -> None:
+        # Rejects directory or sharded collisions before rank-zero single-file
+        # publication.
         if StoragePath(path).is_directory():
             if self._sharded_store.is_checkpoint(path):
                 raise FileExistsError(
@@ -173,6 +211,8 @@ class _ModelParallelCheckpointIO:
         strict: bool,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Creates state placeholders from live participants, loads rank shards,
+        # applies strict state, then returns separately stored Trainer metadata.
         state: DistributedCheckpointState = {
             "state_dict": cast(ModelState, get_model_state_dict(model))
         }
@@ -204,6 +244,8 @@ class _ModelParallelCheckpointIO:
         optimizers: list[torch.optim.Optimizer],
         strict: bool
     ) -> None:
+        # Validates complete optimizer cardinality, applies full model state, and
+        # restores each optimizer through PyTorch's model-aware API.
         options: StateDictOptions = StateDictOptions(
             full_state_dict=True,
             strict=strict
@@ -238,6 +280,8 @@ class _ModelParallelCheckpointIO:
         self,
         checkpoint: CheckpointDict
     ) -> tuple[DistributedCheckpointState, CheckpointDict]:
+        # Removes model and optimizer entries from an owned metadata copy and
+        # assigns stable distributed state names without mutating the caller.
         metadata: CheckpointDict = dict(checkpoint)
         model_state: CheckpointValue | None = metadata.pop("state_dict", None)
         if not isinstance(model_state, dict):
@@ -267,6 +311,8 @@ class _ModelParallelCheckpointIO:
         optimizer_state: OptimizerState,
         model: nn.Module
     ) -> OptimizerState:
+        # Converts integer parameter IDs to parameter names only when the incoming
+        # state still uses the ordinary optimizer representation.
         state: OptimizerStateValue | None = optimizer_state.get("state")
         if not isinstance(state, dict) or not state:
             return optimizer_state
@@ -283,6 +329,7 @@ class _ModelParallelCheckpointIO:
         )
 
     def _state_dict_options(self) -> StateDictOptions:
+        # Selects full aggregation or sharded extraction with CPU offload.
         return StateDictOptions(
             full_state_dict=self._checkpoint_format == "full",
             cpu_offload=True

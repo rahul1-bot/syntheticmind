@@ -1,3 +1,23 @@
+# This module:
+# 1. Implements StrategyCheckpoint for ModelParallelStrategy and coordinates
+#    all-rank path agreement, metadata preload, deferred live-state restoration,
+#    and full or sharded format ownership
+#
+# Design decisions:
+# - Every rank broadcasts and uses one normalized path before distributed state
+#   operations, preventing divergent filesystem targets across workers
+# - Metadata may load before model and optimizers exist, but distributed state is
+#   deferred until restore; pending path, payload, and weights-only policy bridge
+#   those lifecycle phases without duplicate reads
+# - Full-file metadata remains cached because it already contains distributed
+#   state, while sharded metadata is separate from rank-partitioned storage
+# - ModelParallelStrategy owns its checkpoint representation and rejects an
+#   external CheckpointIO plugin that could not preserve all-rank semantics
+# - Pending and preload state clear after restore or teardown so sequential stages
+#   cannot consume a prior artifact accidentally
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Callable, Mapping
 from typing import override
 
@@ -28,12 +48,16 @@ __all__: list[str] = []
 
 
 class _ModelParallelCheckpoint(StrategyCheckpoint):
+    # Model-parallel state coordinator connecting Trainer checkpoint lifecycle to
+    # distributed full or sharded representation.
     def __init__(
         self,
         checkpoint_format: ModelParallelCheckpointFormat,
         barrier: Callable[[], None],
         broadcast: CheckpointBroadcast
     ) -> None:
+        # Binds format, collective operations, participant slots, and empty
+        # preload and pending-restore state.
         self._checkpoint_io: _ModelParallelCheckpointIO = _ModelParallelCheckpointIO(
             checkpoint_format
         )
@@ -71,6 +95,8 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         storage_options: CheckpointStorageOptions,
         global_rank: int
     ) -> None:
+        # Rejects unsupported transport options, synchronizes the path, and
+        # delegates all-rank state persistence to the format owner.
         if storage_options is not None:
             raise TypeError("Model-parallel checkpoints do not accept storage_options.")
         path: str = self._synchronize_path(filepath)
@@ -88,6 +114,8 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Consumes preloaded metadata or reads it, then records the path and
+        # restore policy required when live model and optimizers are ready.
         path: str = self._synchronize_path(checkpoint_path)
         checkpoint: CheckpointDict | None = (
             self._preloaded_checkpoint
@@ -114,6 +142,7 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Reads schema metadata once and caches it for the subsequent load phase.
         path: str = self._synchronize_path(checkpoint_path)
         checkpoint: CheckpointDict = self._checkpoint_io.load_metadata(
             path,
@@ -148,6 +177,8 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         strict: bool,
         restore_optimizers: bool
     ) -> None:
+        # Applies distributed model and optional optimizer state from the pending
+        # artifact and clears every pending reference in finally.
         del checkpoint
         path: str | None = self._pending_path
         if path is None:
@@ -182,6 +213,8 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
 
     @override
     def attach_checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
+        # Rejects external transport because model-parallel publication and
+        # representation are Strategy-owned collective algorithms.
         del checkpoint_io
         raise MisconfigurationError(
             "ModelParallelStrategy owns its checkpoint implementation."
@@ -193,6 +226,8 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         return None
 
     def _synchronize_path(self, checkpoint_path: CheckpointPath) -> str:
+        # Broadcasts global-rank-zero normalized path and validates the collective
+        # result before any rank touches storage.
         path: str | None = self._broadcast(
             StoragePath(checkpoint_path).normalized,
             0

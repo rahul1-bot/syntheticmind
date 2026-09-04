@@ -1,3 +1,27 @@
+# This module:
+# 1. Persists distributed model and optimizer shards plus Trainer metadata into
+#    immutable checkpoint generations
+# 2. Coordinates rank-zero preparation, metadata, publication, failure broadcast,
+#    active-generation loading, legacy flat layout, and safe generation pruning
+#
+# Design decisions:
+# - Save order is prepare generation, all-rank shard write, rank-zero metadata,
+#   pointer publication, stale-generation pruning, and final barrier; no reader
+#   can observe a generation before every required artifact exists
+# - Rank-zero filesystem failures are broadcast as text and reconstructed as
+#   CheckpointError on every rank, preserving collective order and causal chaining
+# - A generation is complete only when PyTorch distributed metadata and
+#   SyntheticMind Trainer metadata both exist
+# - Legacy flat sharded directories remain readable when complete and migrate to
+#   generation layout on the next successful save
+# - Pruning retains the active and explicitly recorded previous generation;
+#   cleanup failure warns after successful publication rather than invalidating
+#   the new checkpoint
+# - Local and fsspec backends select the corresponding PyTorch distributed
+#   StorageReader and StorageWriter without changing publication semantics
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Callable
 from functools import partial
@@ -22,6 +46,7 @@ from syntheticmind.primitives.types import CheckpointDict, DistributedCheckpoint
 __all__: list[str] = []
 
 class _ShardedCheckpointStore:
+    # Atomic-generation storage owner beneath model-parallel checkpoint format.
     def __init__(self) -> None:
         self._checkpoint_io: TorchCheckpointIO = TorchCheckpointIO()
         self._distributed_metadata_filename: str = ".metadata"
@@ -32,6 +57,7 @@ class _ShardedCheckpointStore:
         self._metadata_filename: str = "meta.pt"
 
     def is_checkpoint(self, path: str | Path) -> bool:
+        # Recognizes a pointer-backed checkpoint or complete legacy flat layout.
         if not StoragePath(path).is_directory():
             return False
         return self._generation_index.exists(path) or self._is_complete_generation(path)
@@ -56,6 +82,8 @@ class _ShardedCheckpointStore:
         barrier: Callable[[], None],
         broadcast: CheckpointBroadcast
     ) -> None:
+        # Executes the complete collective generation transaction and publishes
+        # only after shards and metadata succeed on every required boundary.
         generation_name: str = self._generation_index.create_generation_id(
             global_rank,
             broadcast
@@ -107,6 +135,8 @@ class _ShardedCheckpointStore:
         barrier()
 
     def load_state(self, state: DistributedCheckpointState, path: str | Path) -> None:
+        # Loads rank-local shards from the resolved active or legacy generation
+        # into caller-provided live state placeholders.
         generation_path: str = self._active_generation_path(path)
         reader: StorageReader = self._storage_reader(generation_path)
         distributed_checkpoint.load(state, storage_reader=reader)
@@ -119,6 +149,8 @@ class _ShardedCheckpointStore:
         checkpoint_path: str | Path,
         generation_path: str | Path
     ) -> None:
+        # Rejects collision with a full checkpoint file and creates the immutable
+        # generation directory before collective shard writing.
         if StoragePath(checkpoint_path).is_file():
             raise FileExistsError(
                 f"A full checkpoint file already exists at {checkpoint_path}."
@@ -130,6 +162,7 @@ class _ShardedCheckpointStore:
         checkpoint_path: str | Path,
         generation_name: str
     ) -> None:
+        # Verifies both metadata artifacts, then commits pointer visibility.
         generation_path: str = self._generation_path(
             checkpoint_path,
             generation_name
@@ -147,6 +180,8 @@ class _ShardedCheckpointStore:
         broadcast: CheckpointBroadcast,
         operation_name: str
     ) -> None:
+        # Runs one filesystem operation on rank zero, broadcasts normalized
+        # failure, and raises a matching CheckpointError on every rank.
         local_error: BaseException | None = None
         local_message: str | None = None
         if global_rank == 0:
@@ -175,6 +210,8 @@ class _ShardedCheckpointStore:
         raise error
 
     def _active_generation_path(self, path: str | Path) -> str:
+        # Resolves and validates the published generation or a complete legacy
+        # flat checkpoint without guessing from directory timestamps.
         pointer: _CheckpointGenerationPointer | None = self._generation_index.read(path)
         if pointer is None:
             if self._is_complete_generation(path):
@@ -201,6 +238,7 @@ class _ShardedCheckpointStore:
         )
 
     def _is_complete_generation(self, path: str | Path) -> bool:
+        # Requires both PyTorch shard metadata and SyntheticMind trajectory metadata.
         distributed_metadata_path: str = StoragePath(path).join(
             self._distributed_metadata_filename
         )
@@ -215,6 +253,8 @@ class _ShardedCheckpointStore:
         self,
         checkpoint_path: str | Path
     ) -> None:
+        # Removes only directories outside the pointer's retained set and converts
+        # cleanup failure into a post-publication warning.
         try:
             pointer: _CheckpointGenerationPointer | None = (
                 self._generation_index.read(checkpoint_path)

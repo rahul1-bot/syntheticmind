@@ -71,23 +71,23 @@
     5. `Strategy` is a stateful execution-policy hierarchy rather than a behaviorless Protocol. `ParallelStrategy` is the shared distributed execution concept; DDP and model-parallel strategies inherit it and contain only algorithm-specific deltas.
     6. This decision supersedes the Protocol-only Strategy conclusion recorded at 07:05 AM. The earlier runtime evidence remains valid, but its decomposition judgment was rejected after source-level comparison exposed duplicated concrete behavior.
 
-| Architecture Decision | Stateful Strategy and Model Initialization | Date: 04 September 2026 | Time: 06:23 PM | Name: Ghost |
+| Architecture Decision | Stateful Strategy and Model Initialization | Date: 04 September 2026 | Time: 10:33 PM | Name: Ghost |
 
     1. `Strategy` now owns universal model connection, wrapped-step dispatch, precision-mediated backward and optimizer stepping, single-process collective defaults, initialization context, and ordinary checkpoint collaboration without using an ABC.
     2. `ParallelStrategy` now owns the cluster environment, process-group lifecycle, rank topology, process launcher, distributed collectives, sampler coordinates, and distributed tail-gradient synchronization directly.
     3. `SingleDeviceStrategy` is a named execution policy with inherited single-device semantics; `DDPStrategy` contains only DDP wrapping, layer synchronization, and manual-optimization forward behavior; `ModelParallelStrategy` exposes named data and tensor mesh axes for researcher-owned tensor-parallel, composable FSDP2, or hybrid plans and rejects legacy FSDP1.
     4. The strategy-owned ModuleInitializer now intercepts the dynamic PyTorch override contract through a named recursive torch-function value schema, validates mode state, preserves RNG under empty initialization, and materializes meta parameters through explicit reset operations without `object` escape hatches.
     5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
-    6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, nonzero-node multiprocessing rank derivation, tensor-parallel resume, and composable FSDP2 distributed-checkpoint resume pass.
+    6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, nonzero-node multiprocessing rank derivation, tensor-parallel resume, and composable FSDP2 distributed-checkpoint resume pass; Strategy, launcher, and model-parallel checkpoint comments plus package READMEs now expose these client and all-rank contracts explicitly.
 
-| Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 06:37 PM | Name: Ghost |
+| Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 10:33 PM | Name: Ghost |
 
     1. Runtime-checkable Accelerator and ClusterEnvironment contracts define type-level discovery, parsing, topology, availability, naming, and detection through `@classmethod`; concrete implementations explicitly inherit the Protocols and mark every implementation with `@override`.
     2. Trainer accelerator composition belongs to one internal `AcceleratorConnector` covering backend and device parsing, nodes, Strategy, precision, cluster environment, checkpoint I/O, and layer synchronization.
     3. The former temporary topology, plugin-configuration, and resolver objects were removed; a stateful GPU parser owns count, identifier, uniqueness, and availability invariants.
     4. Accelerators own backend discovery, binding, and device-local questions; Strategies own execution semantics; the connector validates their compatibility and injects plugins in deterministic order.
     5. Precision construction covers CPU float16 fallback, model-parallel restrictions, recursive conversion, and the NVIDIA Transformer Engine 2.18 autocast and strict delayed-scaling boundary.
-    6. Trainer remains the sole public composition surface. Neither invalid overrides nor ABC inheritance remain, dtype context rollback passes under failure, CPU float64 and bfloat16 plus live MPS float16 true and mixed training pass, and unavailable CUDA, layer synchronization, DDP, model parallelism, and Transformer Engine boundaries remain explicit.
+    6. Trainer remains the sole public composition surface. Neither invalid overrides nor ABC inheritance remain, dtype context rollback passes under failure, CPU float64 and bfloat16 plus live MPS float16 true and mixed training pass, and unavailable CUDA, layer synchronization, DDP, model parallelism, and Transformer Engine boundaries remain explicit; accelerator, storage, plugin, and precision source comments and READMEs document current substitution and failure semantics.
 
 | Architecture Decision | Callback Contract, Monitoring, and Connector Ownership | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
@@ -165,13 +165,13 @@
     7. Module, TrainingEpochLoop, CombinedLoader, LoggedMetric, and MetricAccumulator retain Rahul's explicit SyntheticMind concept-integrity size exception because splitting their extension, epoch, loader-tree, observation, or reduction state would create forwarding fragments; the documentation phase increases physical prose lines but creates no new code responsibility and every method remains within its hard limit.
     8. Package import, hook dispatch, log failures, scalar and TorchMetrics views, differentiable gather, runtime access, CPU, MPS, DDP, spawn, model and DataModule local, file-like, and remote hydration, optimization, exact continuation, and model parallelism pass; `core/README.md` records current client contracts and no obsolete VOCODE API is presented as current behavior.
 
-| Architecture Decision | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
+| Architecture Decision | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 10:33 PM | Name: Ghost |
 
     1. Numerical precision is now located under `plugins/precision/` because full, half, mixed, and Transformer Engine policies are interchangeable Trainer plugins controlling numerical execution rather than a peer training lifecycle.
     2. Checkpoint transport moved from the vague `plugins/io.py` name to `plugins/checkpoint_io.py`. The current plugin family owns only checkpoint persistence, so a generic I/O package would imply unsupported transport concepts and reproduce upstream baggage.
     3. The process launcher moved from `strategies/launcher.py` into `strategies/launchers/launcher.py`, placing start-method selection, process launch delegation, state transfer, environment reconstruction, child observation, and termination under one distributed-launch concept.
-    4. Public class identities and Trainer configuration meanings remain unchanged, but obsolete import paths were removed without compatibility façades. Precision now explicitly inherits the checkpoint-hook contract and marks its checkpoint hook implementations as overrides.
-    5. Full, half, mixed, and Transformer Engine precision execution, asynchronous checkpoint I/O, local optimizer execution, spawned DDP runtime state, subprocess DDP forward and consensus behavior, and sharded two-rank model parallelism pass through the new canonical paths.
+    4. Public class identities and Trainer configuration meanings remain unchanged, but obsolete import paths were removed without compatibility façades. Precision explicitly inherits the checkpoint-hook contract, and the authorized documentation now explains every plugin and launcher owner without introducing a generic plugin manager or process API.
+    5. Full, half, mixed, and Transformer Engine precision execution, asynchronous checkpoint I/O, local optimizer execution, spawned DDP runtime state, subprocess DDP forward and consensus behavior, exact sharded model-parallel resume, and injected shard, metadata, and pointer failure preservation pass through the documented canonical paths.
 
 | Architecture Decision | Cross-Cutting Contract, Override, and Storage Ownership | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 

@@ -1,3 +1,27 @@
+# This module:
+# 1. Defines StrategyCheckpoint, the model and optimizer state-representation
+#    contract selected by an execution Strategy
+# 2. Implements ordinary single-file representation over interchangeable
+#    CheckpointIO transport
+#
+# Design decisions:
+# - Strategy checkpointing owns how live model and optimizer state becomes a
+#   checkpoint representation; Trainer owns trajectory assembly and CheckpointIO
+#   owns bytes and storage transport
+# - Model and optimizers connect before save or restore, preventing serialized
+#   values from selecting live runtime participants
+# - Single-file save and remove are rank-zero effects, while distributed
+#   model-parallel implementations may require all-rank participation
+# - Metadata preload caches one path between schema inspection and live restore,
+#   avoiding duplicate storage reads without applying state before model and
+#   optimizers exist
+# - Wrapper CheckpointIO receives the default TorchCheckpointIO only when the
+#   client did not already configure a concrete base transport
+# - Resumable restoration requires exactly one optimizer state per configured
+#   optimizer and validates this before partial optimizer mutation
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Mapping
 from typing import Protocol, cast, override, runtime_checkable
@@ -25,10 +49,16 @@ __all__: list[str] = ["StrategyCheckpoint"]
 
 @runtime_checkable
 class StrategyCheckpoint(Protocol):
+    # Interchangeable state-representation contract composed by Strategy. Custom
+    # implementations must preserve model, optimizer, rank, and restore ordering
+    # semantics rather than merely wrapping checkpoint transport.
+    # Connects the live execution model before state extraction or restoration.
     def connect_model(self, model: nn.Module) -> None: ...
 
+    # Connects the complete ordered optimizer list for resumable state.
     def connect_optimizers(self, optimizers: list[torch.optim.Optimizer]) -> None: ...
 
+    # Persists an assembled trajectory under the implementation's rank policy.
     def save(
         self,
         checkpoint: CheckpointDict,
@@ -37,27 +67,33 @@ class StrategyCheckpoint(Protocol):
         global_rank: int
     ) -> None: ...
 
+    # Loads metadata and prepares any deferred distributed state restoration.
     def load(
         self,
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict: ...
 
+    # Reads schema and trajectory metadata before live participants are restored.
     def load_metadata(
         self,
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict: ...
 
+    # Whether a path represents this implementation's checkpoint format.
     def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool: ...
 
+    # Model state representation compatible with the selected Strategy.
     def model_state_dict(self) -> ModelState: ...
 
+    # Optimizer state representation compatible with the selected Strategy.
     def optimizer_state(
         self,
         optimizer: torch.optim.Optimizer
     ) -> OptimizerState: ...
 
+    # Applies model and optional optimizer state after every participant exists.
     def restore(
         self,
         checkpoint: Mapping[str, CheckpointValue],
@@ -65,10 +101,13 @@ class StrategyCheckpoint(Protocol):
         restore_optimizers: bool
     ) -> None: ...
 
+    # Removes one artifact under the implementation's rank policy.
     def remove(self, filepath: CheckpointPath, global_rank: int) -> None: ...
 
+    # Releases preload caches and transport-owned resources.
     def teardown(self) -> None: ...
 
+    # Attaches the resolved storage transport where the format permits it.
     def attach_checkpoint_io(self, checkpoint_io: CheckpointIO) -> None: ...
 
     @property
@@ -76,7 +115,11 @@ class StrategyCheckpoint(Protocol):
 
 
 class _SingleFileCheckpoint(StrategyCheckpoint):
+    # Ordinary unsharded model and optimizer representation persisted through one
+    # CheckpointIO. Used by single-device and DDP strategies.
     def __init__(self, checkpoint_io: CheckpointIO | None) -> None:
+        # Records explicit transport identity, live participant slots, and an
+        # empty one-read metadata preload cache.
         if checkpoint_io is not None:
             self._validate_checkpoint_io(checkpoint_io)
         self._checkpoint_io: CheckpointIO | None = checkpoint_io
@@ -88,12 +131,14 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
 
     @override
     def connect_model(self, model: nn.Module) -> None:
+        # Validates and stores the live model used for state extraction and restore.
         if not isinstance(model, nn.Module):
             raise TypeError("Checkpoint model must be a torch.nn.Module.")
         self._model: nn.Module | None = model
 
     @override
     def connect_optimizers(self, optimizers: list[torch.optim.Optimizer]) -> None:
+        # Validates and copies the ordered optimizer list.
         if not isinstance(optimizers, list):
             raise TypeError("Checkpoint optimizers must be a list.")
         optimizer: torch.optim.Optimizer
@@ -110,6 +155,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         storage_options: CheckpointStorageOptions,
         global_rank: int
     ) -> None:
+        # Delegates transport only on global rank zero; every other rank returns
+        # after participating in earlier trajectory collectives.
         if global_rank == 0:
             self._resolve_checkpoint_io().save_checkpoint(
                 checkpoint,
@@ -123,6 +170,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Consumes a matching preloaded payload once or reads the path directly,
+        # then clears the cache regardless of the branch.
         normalized_path: str = StoragePath(checkpoint_path).normalized
         checkpoint: CheckpointDict | None = (
             self._preloaded_checkpoint
@@ -141,6 +190,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Reads and caches one payload so later live restoration avoids a second
+        # storage access.
         checkpoint: CheckpointDict = self._read(checkpoint_path, weights_only)
         self._preloaded_path: str | None = StoragePath(checkpoint_path).normalized
         self._preloaded_checkpoint: CheckpointDict | None = checkpoint
@@ -168,6 +219,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         strict: bool,
         restore_optimizers: bool
     ) -> None:
+        # Applies strict or relaxed model state, reports relaxed key differences,
+        # and optionally restores the complete optimizer list.
         state_dict: CheckpointValue | None = checkpoint.get("state_dict")
         if not isinstance(state_dict, Mapping):
             raise KeyError("Checkpoint is missing a model `state_dict`.")
@@ -192,6 +245,7 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
 
     @override
     def teardown(self) -> None:
+        # Clears preload references and releases the resolved transport.
         self._preloaded_path: str | None = None
         self._preloaded_checkpoint: CheckpointDict | None = None
         if self._checkpoint_io is not None:
@@ -199,6 +253,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
 
     @override
     def attach_checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
+        # Installs the connector-selected transport while preserving the original
+        # explicitly configured identity for conflict detection.
         self._validate_checkpoint_io(checkpoint_io)
         self._checkpoint_io: CheckpointIO | None = checkpoint_io
 
@@ -221,6 +277,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         self,
         checkpoint: Mapping[str, CheckpointValue]
     ) -> None:
+        # Validates complete optimizer-state cardinality and mapping shape before
+        # applying each state in configured order.
         optimizer_states: CheckpointValue | None = checkpoint.get("optimizer_states")
         if isinstance(optimizer_states, list):
             if len(optimizer_states) != len(self._optimizers):
@@ -247,6 +305,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         return self._model
 
     def _resolve_checkpoint_io(self) -> CheckpointIO:
+        # Materializes default torch transport directly or at the unresolved base
+        # of a wrapper chain.
         if self._checkpoint_io is None:
             self._checkpoint_io: CheckpointIO | None = TorchCheckpointIO()
         elif isinstance(self._checkpoint_io, _WrappingCheckpointIO):
@@ -262,6 +322,7 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         missing_keys: list[str],
         unexpected_keys: list[str]
     ) -> None:
+        # Emits relaxed model-state differences without suppressing strict errors.
         if missing_keys:
             warnings.warn(
                 "Found keys that are in the model state dict but not in the "

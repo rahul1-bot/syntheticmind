@@ -1,3 +1,22 @@
+# This module:
+# 1. Defines process start methods and the typed stage argument and result domains
+#    transported through distributed launchers
+# 2. Defines strict immutable snapshots for process-global execution state and
+#    the complete rank-zero worker outcome reconciled into a dormant parent
+#
+# Design decisions:
+# - Spawn and fork workers own live execution; the parent receives an explicit
+#   snapshot rather than pretending its pre-launch Trainer ran the stage
+# - WorkerOutput separates model, Trainer, callback, DataModule, precision,
+#   metric, loader, optimizer, scheduler, signal, and global process state so
+#   every continuation-critical participant crosses process ownership
+# - Tensor values are permitted explicitly by strict Pydantic arbitrary-type
+#   handling, while unknown fields and coercion remain forbidden
+# - Random streams and deterministic backend settings travel together only as
+#   process-global launch state; their runtime owners remain separate
+#
+# Author: Rahul Sawhney
+
 from pathlib import Path
 from typing import ClassVar, Literal
 
@@ -31,6 +50,8 @@ type StageArguments = dict[str, StageArgument]
 
 
 class _GlobalState(BaseModel):
+    # Process-global stochastic and deterministic state restored before a worker
+    # enters Trainer execution and reconciled back into the parent afterward.
     schema_version: Literal[1] = 1
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
@@ -47,6 +68,8 @@ class _GlobalState(BaseModel):
     cudnn_deterministic: bool
 
 class _WorkerOutput(BaseModel):
+    # Complete rank-zero result of one multiprocessing-owned stage. Nonzero ranks
+    # participate in collectives but do not publish a competing parent snapshot.
     schema_version: Literal[1] = 1
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,

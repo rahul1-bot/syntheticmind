@@ -1,3 +1,18 @@
+# This module:
+# 1. Isolates dynamic imports, version detection, recipe construction, autocast,
+#    and layer constructors for the optional NVIDIA Transformer Engine package
+#
+# Design decisions:
+# - Ordinary SyntheticMind import never imports Transformer Engine; availability
+#   requires a discoverable package at version 2.18.0 or newer
+# - All dynamically acquired values are narrowed at this boundary so the
+#   precision policy does not depend on broad optional-package objects
+# - Layer replacement uses a reversible patch context during configure_model,
+#   while post-construction recursive replacement consumes the same constructor
+#   properties directly
+#
+# Author: Rahul Sawhney
+
 import importlib
 import importlib.util
 import sys
@@ -23,6 +38,7 @@ type _ModuleConstructor = Callable[..., nn.Module]
 
 
 class _TransformerEngineAdapter:
+    # Optional dependency boundary constructed only after availability succeeds.
     def __init__(self) -> None:
         self._recipe_module: ModuleType = importlib.import_module(
             "transformer_engine.common.recipe"
@@ -33,6 +49,8 @@ class _TransformerEngineAdapter:
 
     @classmethod
     def is_available(cls: type[_TransformerEngineAdapter]) -> bool:
+        # Detects an already imported package or verifies installed metadata and
+        # minimum supported version without raising optional-dependency errors.
         del cls
         if "transformer_engine" in sys.modules:
             return True
@@ -53,6 +71,8 @@ class _TransformerEngineAdapter:
         self,
         configuration: DelayedScalingConfiguration
     ) -> DelayedScalingRecipe:
+        # Converts strict SyntheticMind configuration into the current NVIDIA
+        # Format enum and DelayedScaling constructor contract.
         format_type: type[Enum] = cast(
             type[Enum],
             getattr(self._recipe_module, "Format")
@@ -73,6 +93,8 @@ class _TransformerEngineAdapter:
         self,
         recipe: DelayedScalingRecipe
     ) -> AbstractContextManager[None]:
+        # Creates the Transformer Engine FP8 autocast context with the resolved
+        # delayed-scaling recipe.
         autocast_factory: Callable[..., AbstractContextManager[None]] = cast(
             Callable[..., AbstractContextManager[None]],
             getattr(self._pytorch_module, "autocast")
@@ -82,6 +104,8 @@ class _TransformerEngineAdapter:
     def replacement_context(
         self
     ) -> AbstractContextManager[dict[str, _ModuleConstructor]]:
+        # Temporarily redirects torch.nn Linear and LayerNorm construction to
+        # Transformer Engine implementations during configure_model.
         return cast(
             AbstractContextManager[dict[str, _ModuleConstructor]],
             patch.multiple(

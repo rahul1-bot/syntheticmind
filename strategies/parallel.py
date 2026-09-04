@@ -1,3 +1,30 @@
+# This module:
+# 1. Defines ParallelStrategy, the shared distributed execution concept for
+#    process launch, cluster topology, process-group lifetime, ranks,
+#    collectives, distributed sampling, and deferred-gradient synchronization
+#
+# Design decisions:
+# - DDP and model parallelism inherit this class because they share real process
+#   coordination behavior while retaining independent model-wrapping semantics
+# - Global rank is derived as node_rank times local process count plus local rank
+#   before process-group initialization, keeping torchrun, subprocess, spawn,
+#   fork, and multi-node topology consistent
+# - An existing process group is validated and reused; a group created by this
+#   Strategy persists across sequential stages and is destroyed on failure or
+#   process exit, preserving live distributed tensor and stage reuse
+# - Every collective is an unconditional Strategy operation. All participating
+#   ranks must enter matching calls before rank-specific presentation or
+#   persistence returns
+# - Boolean consensus supports all-rank and any-rank semantics explicitly,
+#   preventing early stopping, signal, and failure decisions from diverging
+# - Differentiable gather uses torch.distributed.nn, while ordinary gather uses
+#   detached buffers and adds no unnecessary barrier
+# - Tail-gradient synchronization handles ranks with missing gradients, averages
+#   dense values once per shared Parameter, and rejects sparse gradients because
+#   that recovery algorithm is not implemented
+#
+# Author: Rahul Sawhney
+
 import atexit
 import os
 from datetime import timedelta
@@ -21,6 +48,9 @@ __all__: list[str] = ["ParallelStrategy"]
 
 
 class ParallelStrategy(Strategy, LaunchStrategy):
+    # Shared process and collective policy for distributed Strategies. Concrete
+    # subclasses add only model wrapping, mesh, checkpoint, or synchronization
+    # behavior specific to their algorithm.
     @override
     def __init__(
         self,
@@ -33,6 +63,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         timeout: timedelta | None = None,
         start_method: ProcessStartMethod = "popen"
     ) -> None:
+        # Validates process-group options, installs the cluster environment and
+        # selected launcher, and starts without owning a process group.
         super().__init__(
             accelerator,
             parallel_devices,
@@ -73,6 +105,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         parallel_devices: list[torch.device],
         num_nodes: int
     ) -> None:
+        # Binds accelerator, local device list, and node count, then derives
+        # parent-side environment coordinates for locally launched workers.
         if not parallel_devices or num_nodes < 1:
             raise ValueError("Parallel execution requires devices and positive nodes.")
         self.accelerator: Accelerator | None = accelerator
@@ -82,6 +116,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
 
     @override
     def setup_environment(self) -> None:
+        # Validates cluster and rank topology, reuses a compatible active process
+        # group or initializes the selected backend, and registers owned cleanup.
         self._cluster_environment.validate_settings(
             self.num_processes,
             self.num_nodes
@@ -125,16 +161,21 @@ class ParallelStrategy(Strategy, LaunchStrategy):
 
     @override
     def on_exception(self, exception: BaseException) -> None:
+        # Destroys an owned process group immediately on failure so unmatched
+        # collectives cannot survive into outer cleanup.
         del exception
         self._destroy_process_group()
 
     @override
     def barrier(self) -> None:
+        # Blocks until every process in the active world reaches this boundary.
         if dist.is_initialized():
             dist.barrier()
 
     @override
     def broadcast[T](self, value: T, source_rank: int = 0) -> T:
+        # Broadcasts one picklable value through object collective semantics,
+        # preserving its concrete type on every rank.
         if not dist.is_initialized():
             return value
         values: list[T] = [value]
@@ -151,6 +192,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         decision: bool,
         all: bool = True
     ) -> bool:
+        # Sums boolean votes and resolves either unanimous all-rank consent or an
+        # any-rank request according to ``all``.
         if type(all) is not bool:
             raise TypeError("`all` must be a bool.")
         if not dist.is_initialized():
@@ -170,6 +213,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         group: dist.ProcessGroup | None = None,
         reduce_op: Reduction = "mean"
     ) -> torch.Tensor:
+        # Applies sum, mean, minimum, or maximum across the selected process group;
+        # mean divides by that group's actual world size.
         if not dist.is_initialized():
             return tensor
         match reduce_op:
@@ -195,6 +240,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         group: dist.ProcessGroup | None = None,
         sync_grads: bool = False
     ) -> torch.Tensor:
+        # Gathers equal contiguous tensors in rank order. sync_grads selects the
+        # differentiable collective; ordinary gathering allocates detached buffers.
         if not dist.is_initialized():
             return tensor
         contiguous_tensor: torch.Tensor = tensor.contiguous()
@@ -218,6 +265,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         self,
         state: CheckpointDict
     ) -> list[CheckpointDict]:
+        # Gathers rank-local partial-epoch state as Python mappings and validates
+        # every participant before trajectory assembly.
         if not dist.is_initialized():
             return [state]
         gathered: list[CheckpointDict | None] = [None] * self.world_size
@@ -232,6 +281,9 @@ class ParallelStrategy(Strategy, LaunchStrategy):
 
     @override
     def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
+        # Reconciles deferred tail gradients when an accumulation window ends at
+        # loader exhaustion, including parameters missing on some ranks and
+        # parameters shared across optimizer groups.
         if not dist.is_initialized():
             return
         synchronized_parameters: set[int] = set()
@@ -278,6 +330,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         self,
         cluster_environment: ClusterEnvironment
     ) -> None:
+        # Installs an explicitly supplied topology provider and recomputes
+        # parent-side rank coordinates before process launch.
         if not isinstance(cluster_environment, ClusterEnvironment):
             raise TypeError("cluster_environment must be a ClusterEnvironment.")
         self._cluster_environment: ClusterEnvironment = cluster_environment
@@ -286,6 +340,7 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     @property
     @override
     def distributed_sampler_kwargs(self) -> dict[str, int] | None:
+        # Standard data-parallel sampler world and global rank.
         return {"num_replicas": self.world_size, "rank": self.global_rank}
 
     @property
@@ -330,6 +385,7 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     @property
     @override
     def root_device(self) -> torch.device:
+        # Local-rank device assignment from the configured parallel device list.
         if not self.parallel_devices:
             return torch.device("cpu")
         return self.parallel_devices[self.local_rank]
@@ -344,6 +400,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         return self._configured_cluster_environment
 
     def _configure_environment(self) -> None:
+        # Populates world size and global rank only for locally created processes;
+        # externally launched environments remain authoritative.
         self._cluster_environment.validate_settings(
             self.num_processes,
             self.num_nodes
@@ -365,6 +423,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         global_rank: int,
         node_rank: int
     ) -> None:
+        # Proves configured and launched worlds, node rank, local rank, and global
+        # rank describe the same rectangular topology before rendezvous.
         if launched_world_size != configured_world_size:
             raise MisconfigurationError(
                 f"world_size={launched_world_size} does not match "
@@ -381,6 +441,7 @@ class ParallelStrategy(Strategy, LaunchStrategy):
             )
 
     def _validate_process_group(self, world_size: int, backend: str) -> None:
+        # Rejects reuse of an active group with incompatible world size or backend.
         if dist.get_world_size() != world_size:
             raise MisconfigurationError("The active process group has the wrong world size.")
         active_backend: str = str(dist.get_backend()).lower()
@@ -390,12 +451,15 @@ class ParallelStrategy(Strategy, LaunchStrategy):
             )
 
     def _register_process_group_cleanup(self) -> None:
+        # Registers one process-exit cleanup callback for groups this Strategy owns.
         if self._process_group_cleanup_registered:
             return
         atexit.register(self._destroy_process_group)
         self._process_group_cleanup_registered: bool = True
 
     def _destroy_process_group(self) -> None:
+        # Destroys only a group created by this instance and clears ownership
+        # even when no active group remains.
         if self._owns_process_group and dist.is_initialized():
             dist.destroy_process_group()
         self._owns_process_group: bool = False

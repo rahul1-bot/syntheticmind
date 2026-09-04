@@ -1,3 +1,24 @@
+# This module:
+# 1. Defines LayerSync, the reversible model-transformation contract applied
+#    around distributed fitting
+# 2. Implements conversion between ordinary BatchNorm layers and PyTorch
+#    SyncBatchNorm while preserving parameters, buffers, modes, children, and
+#    quantization configuration
+#
+# Design decisions:
+# - Layer synchronization is a plugin because it transforms model structure but
+#   remains independent from DDP process and collective ownership
+# - apply delegates to PyTorch's recursive conversion; revert reconstructs
+#   ordinary batch normalization so the client model returned after fitting does
+#   not retain a distributed-only layer type
+# - Reversion preserves live Parameter identities and running buffers rather than
+#   copying values into unrelated state, keeping optimizer and checkpoint links
+#   coherent
+# - _BatchNormXd disables dimensionality specialization because the original
+#   concrete BatchNorm rank is not recoverable from SyncBatchNorm alone
+#
+# Author: Rahul Sawhney
+
 from typing import Protocol, cast, override, runtime_checkable
 
 import torch
@@ -9,18 +30,23 @@ __all__: list[str] = ["LayerSync", "TorchSyncBatchNorm"]
 
 @runtime_checkable
 class LayerSync(Protocol):
+    # Structural reversible transformation supplied through Trainer plugins.
     def apply(self, model: nn.Module) -> nn.Module: ...
 
     def revert(self, model: nn.Module) -> nn.Module: ...
 
 
 class TorchSyncBatchNorm(LayerSync):
+    # PyTorch synchronized-batch-normalization policy used with DDP.
     @override
     def apply(self, model: nn.Module) -> nn.Module:
+        # Converts every eligible batch-normalization layer before DDP wrapping.
         return nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     @override
     def revert(self, model: nn.Module) -> nn.Module:
+        # Recursively reconstructs ordinary batch normalization while retaining
+        # learned affine parameters, running statistics, modes, and child modules.
         converted_model: nn.Module = model
         if isinstance(model, nn.SyncBatchNorm):
             converted_batch_norm: _BatchNormXd = _BatchNormXd(
@@ -52,6 +78,7 @@ class TorchSyncBatchNorm(LayerSync):
 
 
 class _BatchNormXd(nn.modules.batchnorm._BatchNorm):
+    # Dimension-agnostic ordinary BatchNorm used only for reversible conversion.
     @override
     def _check_input_dim(self, input: torch.Tensor) -> None:
         del input

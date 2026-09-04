@@ -1,3 +1,19 @@
+# This module:
+# 1. Implements Accelerator for Apple Metal Performance Shaders discovery,
+#    binding, selection, and memory statistics
+#
+# Design decisions:
+# - Apple hosts expose one usable MPS accelerator to torch, so automatic count is
+#   one and distributed MPS compatibility is rejected later by Trainer topology
+# - setup_device records placement without a process-global selection API because
+#   MPS has no torch.cuda.set_device equivalent
+# - Device parsing still uses the shared GPU-style parser, making unavailable or
+#   duplicate identifiers fail consistently with CUDA
+# - Statistics retain Apple's current, driver, and recommended maximum memory
+#   counters as raw bytes
+#
+# Author: Rahul Sawhney
+
 from typing import override
 
 import torch
@@ -10,11 +26,14 @@ __all__: list[str] = ["MPSAccelerator"]
 
 
 class MPSAccelerator(Accelerator):
+    # Apple Silicon execution backend used for local macOS training and
+    # evaluation when selected explicitly or through automatic resolution.
     def __init__(self) -> None:
         self._device: torch.device = torch.device("mps")
 
     @override
     def setup_device(self, device: torch.device) -> None:
+        # Binds only MPS devices without process-global backend mutation.
         if device.type != "mps":
             raise MisconfigurationError(f"MPSAccelerator cannot bind {device}.")
         self._device: torch.device = device
@@ -25,6 +44,8 @@ class MPSAccelerator(Accelerator):
 
     @override
     def get_device_stats(self, device: torch.device) -> dict[str, float]:
+        # Reads the live MPS allocator, driver allocation, and recommended
+        # working-set ceiling in bytes.
         if device.type != "mps":
             raise MisconfigurationError(f"MPSAccelerator cannot inspect {device}.")
         return {
@@ -36,6 +57,8 @@ class MPSAccelerator(Accelerator):
     @classmethod
     @override
     def parse_devices(cls, devices: DeviceInput) -> int | list[int]:
+        # Resolves GPU-style public device input against the single visible MPS
+        # slot.
         parser: _AcceleratorDeviceParser = _AcceleratorDeviceParser(
             cls.auto_device_count(),
             cls.__name__
@@ -48,6 +71,7 @@ class MPSAccelerator(Accelerator):
         cls,
         devices: int | list[int]
     ) -> list[torch.device]:
+        # Converts validated identifiers into MPS torch.device objects.
         del cls
         if not isinstance(devices, list):
             raise TypeError("MPSAccelerator requires parsed device IDs.")
