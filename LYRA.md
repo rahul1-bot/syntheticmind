@@ -245,9 +245,9 @@
     4. Teardown continues across all cleanup failures, preserves the original stage exception, and records secondary failures as causal notes; the currently attached Module is used after strategy or precision replacement.
     5. Local, MPS, direct DDP, spawn, multi-loader, observability, callback, checkpoint, failure, and model-parallel paths verify the transaction boundaries.
 
-| Strategic Note | Batch-Limit Configuration Ownership | Date: 04 September 2026 | Time: 03:28 PM | Name: Ghost |
+| Strategic Note | Trainer Configuration Boundary | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
 
-    1. Trainer owns validation and normalization of user-supplied run limits because they alter the complete stage plan before runtime composition.
-    2. DataConnector owns applying a resolved stage limit because sized, unsized, nested, and distributed loader cardinality is known only at the data boundary.
-    3. Fast-development and overfit modes rewrite the resolved Trainer plan explicitly rather than hiding limit behavior in loop utilities.
-    4. The former function module was deleted without replacing pure calculations with a fake service or namespace class.
+    1. One private frozen configuration represents scalar Trainer run policy after strict validation and deterministic resolution; it is a real constructor boundary rather than a universal runtime object.
+    2. Fast-development, overfit, barebones, limit, validation, gradient, logging, deterministic, sampling, and reload interactions now have one owner before connectors and loops are composed.
+    3. Live accelerators, Strategies, precision plugins, callbacks, loggers, profilers, dataloaders, optimizers, modules, and devices remain outside Pydantic and retain their behavioral lifecycle owners.
+    4. DataConnector still applies resolved batch limits because loader cardinality is known only at the data boundary, while Trainer retains side-effectful torch flags, seeding, and runtime construction.

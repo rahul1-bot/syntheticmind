@@ -140,11 +140,11 @@
     3. ✅ Standard and plateau scheduler operations are explicit, manual clipping avoids configuration mutation, dead precision and scaler state is gone, and every modified assignment is locally typed.
     4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, multi-loader DDP, transfer precedence, stateful continuation, plateau scheduling, and sharded model-parallel resume paths pass.
 
-| Progress Complete | Canonical Trainer Package Migration | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
+| Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
 
-    1. ✅ Trainer and Trainer state moved to their canonical `trainer/` modules, while the former core Trainer module and top-level state package were removed without compatibility façades.
-    2. ✅ All production and verification imports now use the canonical paths, including every existing conditional annotation block and serialized launcher dependency.
-    3. ✅ Direct imports, callbacks, metrics, subprocess DDP, spawn, fork, stateful checkpoint continuation, and sharded model parallelism pass after relocation.
+    1. ✅ One private frozen Pydantic configuration now validates and resolves scalar Trainer run policy without accepting live runtime objects or creating a public configuration API.
+    2. ✅ Training limits, batch limits, fast-development, overfit, barebones, gradient, validation, logging, deterministic, sampling, and reload policies have one configuration owner; four duplicate Trainer normalization methods were deleted.
+    3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition, while every Trainer assignment is now explicitly annotated.
 
 | Progress Complete | Core Research Surface Reconstruction | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
 

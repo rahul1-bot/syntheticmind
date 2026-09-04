@@ -144,13 +144,13 @@
     6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; evaluation and prediction loops plus the Trainer still require separate decomposition, and existing conditional annotation imports remain unresolved until that dependency slice is reconstructed.
     7. CPU and MPS execution, automatic and multi-optimizer manual optimization, two-rank deferred accumulation, manual DDP, transfer precedence across every stage, multiple-loader DDP, exact stateful continuation, plateau cadence, and sharded model-parallel exact resume pass.
 
-| Architecture Decision | Canonical Trainer Package | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
+| Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
 
-    1. `trainer/trainer.py` is the sole implementation and canonical import path for `Trainer`; `trainer/__init__.py` exposes the same class for the concise public package import.
-    2. `TrainerState` moved to `trainer/states.py`, and the former top-level `state/` package was removed because Trainer status and progress are Trainer lifecycle concepts rather than a cross-cutting state subsystem.
-    3. Every production dependency and verification program now imports the canonical Trainer and Trainer state paths directly. No compatibility module, forwarding alias, or duplicate import surface remains under `core/` or `state/`.
-    4. Existing conditional annotation blocks changed only their Trainer import target under the explicit project topology authority; no new `TYPE_CHECKING` block was introduced.
-    5. Canonical imports, Module and DataModule back-references, callback composition, metric views, subprocess DDP, spawn, fork, stateful checkpoint continuation, and sharded model parallelism pass after relocation.
+    1. The private `_TrainerConfiguration` Pydantic model represents resolved scalar run policy at Trainer construction and is the sole owner of training-limit validation, batch-limit normalization, debugging-mode rewrites, barebones conflicts, validation cadence inputs, and execution flags.
+    2. The model contains no live model, optimizer, scheduler, dataloader, logger, profiler, accelerator, Strategy, callback, plugin, device, path handle, or external resource; those remain with their runtime connectors and owners.
+    3. Mutable validation-duration dictionaries become owned immutable tuples inside the frozen configuration and are reconstructed as fresh dictionaries only when handed to ValidationSchedule.
+    4. Trainer remains responsible for composition and side effects, including accelerator selection, torch flag application, seeding, logger and profiler construction, callbacks, loops, and live stage state; four duplicate normalization methods were deleted.
+    5. Defaults, invalid types and ranges, fast-development and overfit precedence, barebones policy, duration input, CPU and MPS execution, accumulated spawn, exact stateful continuation, rank-zero DDP logging, callback policy, and sharded model-parallel exact resume pass.
 
 | Architecture Decision | Core Research and Hook Surface | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
 

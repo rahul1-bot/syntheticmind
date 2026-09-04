@@ -5,7 +5,7 @@
 | Subpackage | Contents |
 |---|---|
 | `core/` | The `Module` and `DataModule` contracts, hook interfaces, model-facing optimizer contract, checkpoint hooks, and hyperparameter surface. |
-| `trainer/` | The `Trainer`, live Trainer state, and accelerator, callback, checkpoint, data, logger, and signal connectors. |
+| `trainer/` | The `Trainer`, validated run configuration, live Trainer state, and accelerator, callback, checkpoint, data, logger, and signal connectors. |
 | `loops/` | The fit, training-epoch, evaluation, and prediction loops the trainer dispatches to. |
 | `accelerators/` | The device abstraction covering CPU, CUDA, and Apple MPS. |
 | `strategies/` | The stateful execution-policy hierarchy for single-device, distributed data-parallel, tensor-parallel, and composable fully sharded execution. |

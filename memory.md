@@ -142,14 +142,14 @@
     3. Model callback replacement must remove callbacks by compatible parent type, not merely exact class identity, while preserving unrelated Trainer callbacks and placing checkpoint callbacks last.
     4. Connector state must clear after configuration failure and after every stage so a rejected callback declaration cannot poison later validation, testing, or prediction.
 
-| Memory | Data Composition and Limit Resolution | Date: 04 September 2026 | Time: 03:28 PM | Name: Ghost |
+| Memory | Data Composition and Validated Run Policy | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
 
     1. A training data boundary includes source selection, factory invocation, nested loader combination, finite or unknown length, limits, sampler policy, reload state, and worker-preserving reconstruction; separating these by implementation technique creates contradictory owners.
     2. Direct loaders, model-owned factories, and DataModule-owned factories are alternative sources for the same stage input and must converge before combination, limits, sampling, and loop consumption.
     3. Distributed prediction cannot use padded training partitions because duplicated samples corrupt output identity; an unrepeated rank-strided sampler is a distinct evaluation contract.
     4. Sampler replacement must reconstruct DataLoader subclasses with their required constructor attributes. Replacing only the sampler on a generic base DataLoader can silently discard stateful-loader behavior and checkpoint continuation.
-    5. Raw run-limit normalization belongs to Trainer construction, while applying a stage limit belongs to DataConnector because only that owner knows whether the resolved loader is sized, unsized, nested, or distributed.
-    6. A function module is unjustified when each operation has one existing behavioral owner; deleting it is stronger than wrapping the same calculations in a static namespace or ceremonial manager.
+    5. Scalar run-policy validation and resolution belong to one immutable Trainer configuration boundary, while applying a resolved stage limit belongs to DataConnector because only that owner knows whether the loader is sized, unsized, nested, or distributed.
+    6. Configuration must not absorb live runtime objects merely to shorten a constructor; accelerators, strategies, loggers, profilers, callbacks, dataloaders, and optimizers retain behavioral owners and are composed after scalar policy resolution.
 
 | Memory | Metric Production, Routing, and Persistence | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
 

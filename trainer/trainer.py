@@ -61,6 +61,7 @@ from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
     _LoggerConnector
 )
 from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
+from syntheticmind.trainer.configuration import _TrainerConfiguration
 from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
@@ -150,123 +151,46 @@ class Trainer:
         resume_from_checkpoint: str | Path | None = None,
         seed: int | None = None
     ) -> None:
-        resolved_fast_dev_run: int | bool = self._normalize_fast_dev_run(
-            fast_dev_run
+        configuration: _TrainerConfiguration = _TrainerConfiguration(
+            fast_dev_run=fast_dev_run,
+            max_epochs=max_epochs,
+            min_epochs=min_epochs,
+            max_steps=max_steps,
+            min_steps=min_steps,
+            limit_train_batches=limit_train_batches,
+            limit_val_batches=limit_val_batches,
+            limit_test_batches=limit_test_batches,
+            limit_predict_batches=limit_predict_batches,
+            overfit_batches=overfit_batches,
+            val_check_interval=val_check_interval,
+            check_val_every_n_epoch=check_val_every_n_epoch,
+            num_sanity_val_steps=num_sanity_val_steps,
+            log_every_n_steps=log_every_n_steps,
+            enable_checkpointing=enable_checkpointing,
+            enable_progress_bar=enable_progress_bar,
+            enable_model_summary=enable_model_summary,
+            accumulate_grad_batches=accumulate_grad_batches,
+            gradient_clip_val=gradient_clip_val,
+            gradient_clip_algorithm=gradient_clip_algorithm,
+            deterministic=deterministic,
+            benchmark=benchmark,
+            inference_mode=inference_mode,
+            use_distributed_sampler=use_distributed_sampler,
+            detect_anomaly=detect_anomaly,
+            barebones=barebones,
+            sync_batchnorm=sync_batchnorm,
+            reload_dataloaders_every_n_epochs=reload_dataloaders_every_n_epochs,
+            enable_autolog_hparams=enable_autolog_hparams
         )
-        resolved_overfit_batches: int | float = self._normalize_batch_limit(
-            overfit_batches,
-            "overfit_batches"
-        )
-        fast_dev_run_enabled: bool = bool(resolved_fast_dev_run)
-        overfit_batches_enabled: bool = resolved_overfit_batches > 0
-        effective_max_epochs: int | None = max_epochs
-        effective_max_steps: int = max_steps
-        effective_val_check_interval: int | float | str | timedelta | dict[str, int] | None = (
-            val_check_interval
-        )
-        effective_check_val_every_n_epoch: int | None = check_val_every_n_epoch
-        if enable_progress_bar is not None and type(enable_progress_bar) is not bool:
-            raise TypeError(
-                "`enable_progress_bar` must be a bool or None, got "
-                f"{enable_progress_bar!r}."
-            )
-        if enable_checkpointing is not None and type(enable_checkpointing) is not bool:
-            raise TypeError(
-                "`enable_checkpointing` must be a bool or None, got "
-                f"{enable_checkpointing!r}."
-            )
-        if enable_model_summary is not None and type(enable_model_summary) is not bool:
-            raise TypeError(
-                "`enable_model_summary` must be a bool or None, got "
-                f"{enable_model_summary!r}."
-            )
-        if type(detect_anomaly) is not bool:
-            raise TypeError(
-                f"`detect_anomaly` must be a bool, got {detect_anomaly!r}."
-            )
-        if type(barebones) is not bool:
-            raise TypeError(f"`barebones` must be a bool, got {barebones!r}.")
-        if type(sync_batchnorm) is not bool:
-            raise TypeError(
-                f"`sync_batchnorm` must be a bool, got {sync_batchnorm!r}."
-            )
-        if type(reload_dataloaders_every_n_epochs) is not int:
-            raise TypeError(
-                "`reload_dataloaders_every_n_epochs` must be an int, got "
-                f"{reload_dataloaders_every_n_epochs!r}."
-            )
-        if reload_dataloaders_every_n_epochs < 0:
+        if configuration.barebones and logger is not None and logger is not False:
             raise MisconfigurationError(
-                "`reload_dataloaders_every_n_epochs` must be >= 0, got "
-                f"{reload_dataloaders_every_n_epochs}."
+                "Trainer barebones mode does not permit experiment loggers."
             )
-        if type(enable_autolog_hparams) is not bool:
-            raise TypeError(
-                "`enable_autolog_hparams` must be a bool, got "
-                f"{enable_autolog_hparams!r}."
-            )
-        if (
-            log_every_n_steps is not None
-            and (
-                type(log_every_n_steps) is not int
-                or log_every_n_steps < 0
-            )
-        ):
+        if configuration.barebones and profiler is not None:
             raise MisconfigurationError(
-                "`log_every_n_steps` must be a non-negative integer or None."
+                "Trainer barebones mode does not permit profiler instrumentation."
             )
-        if barebones:
-            if enable_checkpointing:
-                raise ValueError(
-                    f"`Trainer(barebones=True, enable_checkpointing={enable_checkpointing!r})` was passed. "
-                    "Checkpointing can impact raw speed and is disabled in barebones mode."
-                )
-            enable_checkpointing = False
-            if logger is not None and logger is not False:
-                raise ValueError(
-                    f"`Trainer(barebones=True, logger={logger!r})` was passed. "
-                    "Logging can impact raw speed and is disabled in barebones mode."
-                )
-            logger = False
-            if enable_progress_bar:
-                raise ValueError(
-                    f"`Trainer(barebones=True, enable_progress_bar={enable_progress_bar!r})` was passed. "
-                    "The progress bar can impact raw speed and is disabled in barebones mode."
-                )
-            enable_progress_bar = False
-            if log_every_n_steps is not None and log_every_n_steps != 0:
-                raise ValueError(
-                    f"`Trainer(barebones=True, log_every_n_steps={log_every_n_steps!r})` was passed. "
-                    "Logging can impact raw speed and is disabled in barebones mode."
-                )
-            log_every_n_steps = 0
-            if enable_model_summary:
-                raise ValueError(
-                    f"`Trainer(barebones=True, enable_model_summary={enable_model_summary!r})` was passed. "
-                    "Model summary can impact raw speed and is disabled in barebones mode."
-                )
-            enable_model_summary = False
-            if num_sanity_val_steps is not None and num_sanity_val_steps != 0:
-                raise ValueError(
-                    f"`Trainer(barebones=True, num_sanity_val_steps={num_sanity_val_steps!r})` was passed. "
-                    "Sanity checking can impact raw speed and is disabled in barebones mode."
-                )
-            num_sanity_val_steps = 0
-            if resolved_fast_dev_run is not False and resolved_fast_dev_run != 0:
-                raise ValueError(
-                    f"`Trainer(barebones=True, fast_dev_run={fast_dev_run!r})` was passed. "
-                    "Development runs are disabled in barebones mode."
-                )
-            if detect_anomaly:
-                raise ValueError(
-                    f"`Trainer(barebones=True, detect_anomaly={detect_anomaly!r})` was passed. "
-                    "Anomaly detection can impact raw speed and is disabled in barebones mode."
-                )
-            if profiler is not None:
-                raise ValueError(
-                    f"`Trainer(barebones=True, profiler={profiler!r})` was passed. "
-                    "Profiling can impact raw speed and is disabled in barebones mode."
-                )
+        self._configuration: _TrainerConfiguration = configuration
         self._accelerator_connector: _AcceleratorConnector = _AcceleratorConnector(
             accelerator,
             strategy,
@@ -274,7 +198,7 @@ class Trainer:
             num_nodes,
             precision,
             plugins,
-            sync_batchnorm
+            configuration.sync_batchnorm
         )
         self.accelerator: Accelerator = self._accelerator_connector.accelerator
         self.devices: int | list[int] = self._accelerator_connector.devices
@@ -285,18 +209,6 @@ class Trainer:
         self._precision_plugin: Precision = (
             self._accelerator_connector.precision_plugin
         )
-        resolved_log_every_n_steps: int = (
-            50 if log_every_n_steps is None else log_every_n_steps
-        )
-        resolved_enable_progress_bar: bool = (
-            True if enable_progress_bar is None else enable_progress_bar
-        )
-        resolved_enable_checkpointing: bool = (
-            True if enable_checkpointing is None else enable_checkpointing
-        )
-        resolved_enable_model_summary: bool = (
-            True if enable_model_summary is None else enable_model_summary
-        )
         if default_root_dir is None:
             self._default_root_dir: str = os.getcwd()
         else:
@@ -305,123 +217,75 @@ class Trainer:
                 raise TypeError("`default_root_dir` must resolve to a string path.")
             configured_root_dir: str = configured_root_value
             self._default_root_dir: str = configured_root_dir or os.getcwd()
-        resolved_training_limits: tuple[int, int] = self._resolve_training_limits(
-            effective_max_epochs,
-            min_epochs,
-            effective_max_steps,
-            min_steps
+        self.limit_train_batches: int | float = (
+            configuration.resolved_limit_train_batches
         )
-        resolved_min_epochs: int = resolved_training_limits[0]
-        resolved_max_epochs: int = resolved_training_limits[1]
-        resolved_num_sanity_val_steps: int | float = self._normalize_sanity_steps(
-            num_sanity_val_steps
+        self.limit_val_batches: int | float = (
+            configuration.resolved_limit_val_batches
         )
-        self.limit_train_batches: int | float = self._normalize_batch_limit(
-            limit_train_batches,
-            "limit_train_batches"
+        self.limit_test_batches: int | float = (
+            configuration.resolved_limit_test_batches
         )
-        self.limit_val_batches: int | float = self._normalize_batch_limit(
-            limit_val_batches,
-            "limit_val_batches"
+        self.limit_predict_batches: int | float = (
+            configuration.resolved_limit_predict_batches
         )
-        self.limit_test_batches: int | float = self._normalize_batch_limit(
-            limit_test_batches,
-            "limit_test_batches"
+        self.gradient_clip_val: int | float | None = configuration.gradient_clip_val
+        self.gradient_clip_algorithm: ClipAlgorithm | None = (
+            configuration.gradient_clip_algorithm
         )
-        self.limit_predict_batches: int | float = self._normalize_batch_limit(
-            limit_predict_batches,
-            "limit_predict_batches"
+        self.log_every_n_steps: int = configuration.resolved_log_every_n_steps
+        self.enable_progress_bar: bool = configuration.resolved_enable_progress_bar
+        self.enable_model_summary: bool = configuration.resolved_enable_model_summary
+        self.enable_autolog_hparams: bool = configuration.enable_autolog_hparams
+        self.barebones: bool = configuration.barebones
+        self.num_sanity_val_steps: int | float = (
+            configuration.resolved_num_sanity_val_steps
         )
-        if overfit_batches_enabled:
-            self.limit_train_batches = resolved_overfit_batches
-            self.limit_val_batches = resolved_overfit_batches
-        if fast_dev_run_enabled:
-            num_batches: int = int(resolved_fast_dev_run)
-            if not overfit_batches_enabled:
-                self.limit_train_batches = num_batches
-                self.limit_val_batches = num_batches
-            self.limit_test_batches = num_batches
-            self.limit_predict_batches = num_batches
-            effective_max_epochs = 1
-            effective_max_steps = num_batches
-            resolved_num_sanity_val_steps = 0
-            effective_val_check_interval = 1.0
-            effective_check_val_every_n_epoch = 1
-            resolved_training_limits: tuple[int, int] = self._resolve_training_limits(
-                effective_max_epochs,
-                min_epochs,
-                effective_max_steps,
-                min_steps
-            )
-            resolved_min_epochs: int = resolved_training_limits[0]
-            resolved_max_epochs: int = resolved_training_limits[1]
-        if gradient_clip_val is not None and not isinstance(gradient_clip_val, (int, float)):
-            raise TypeError(
-                f"`gradient_clip_val` should be an int or a float. Got {gradient_clip_val}."
-            )
-        resolved_gradient_clip_algorithm: ClipAlgorithm | None = None
-        if gradient_clip_algorithm is not None:
-            normalized_gradient_clip_algorithm: str = gradient_clip_algorithm.lower()
-            if normalized_gradient_clip_algorithm not in {"norm", "value"}:
-                raise MisconfigurationError(
-                    f"`gradient_clip_algorithm` {gradient_clip_algorithm} is invalid. "
-                    "Allowed algorithms: ('norm', 'value')."
-                )
-            resolved_gradient_clip_algorithm: ClipAlgorithm | None = (
-                "norm" if normalized_gradient_clip_algorithm == "norm" else "value"
-            )
+        self.fast_dev_run: int | bool = configuration.fast_dev_run
+        self.overfit_batches: int | float = configuration.overfit_batches
+        self.use_distributed_sampler: bool = configuration.use_distributed_sampler
+        self.sync_batchnorm: bool = configuration.sync_batchnorm
+        self._configure_torch_flags(
+            configuration.deterministic,
+            configuration.benchmark
+        )
 
-        self.gradient_clip_val: int | float | None = gradient_clip_val
-        self.gradient_clip_algorithm: ClipAlgorithm | None = resolved_gradient_clip_algorithm
-        self.log_every_n_steps: int = resolved_log_every_n_steps
-        self.enable_progress_bar: bool = resolved_enable_progress_bar
-        self.enable_model_summary: bool = resolved_enable_model_summary
-        self.enable_autolog_hparams: bool = enable_autolog_hparams
-        self.barebones: bool = barebones
-        self.num_sanity_val_steps: int | float = resolved_num_sanity_val_steps
-        self.fast_dev_run: int | bool = resolved_fast_dev_run
-        self.overfit_batches: int | float = resolved_overfit_batches
-        self.use_distributed_sampler: bool = use_distributed_sampler
-        self.sync_batchnorm: bool = sync_batchnorm
-        if type(inference_mode) is not bool:
-            raise TypeError(
-                f"`inference_mode` must be a bool, got {inference_mode!r}."
-            )
-        self._configure_torch_flags(deterministic, benchmark)
-
-        self.deterministic: bool | Literal["warn"] | None = deterministic
-        self.inference_mode: bool = inference_mode
-        self._detect_anomaly: bool = detect_anomaly
+        self.deterministic: bool | Literal["warn"] | None = (
+            configuration.deterministic
+        )
+        self.inference_mode: bool = configuration.inference_mode
+        self._detect_anomaly: bool = configuration.detect_anomaly
         self.resume_from_checkpoint: str | Path | None = (
             normalize_path(resume_from_checkpoint)
             if resume_from_checkpoint is not None
             else None
         )
 
-        if accumulate_grad_batches < 1:
-            raise MisconfigurationError("accumulate_grad_batches must be >= 1")
         if seed is not None:
             SeedManager.seed(seed)
 
         self._callback_connector: _CallbackConnector = _CallbackConnector(
             callbacks,
-            resolved_enable_checkpointing,
-            resolved_enable_progress_bar,
-            resolved_enable_model_summary,
+            configuration.resolved_enable_checkpointing,
+            configuration.resolved_enable_progress_bar,
+            configuration.resolved_enable_model_summary,
             max_time
         )
         self._checkpoint_connector: _CheckpointConnector = _CheckpointConnector(
             self.strategy,
             self._callback_connector,
-            fast_dev_run_enabled
+            configuration.fast_dev_run_enabled
         )
 
+        configured_logger: bool | Logger | Iterable[Logger] | None = (
+            False if configuration.barebones else logger
+        )
         self._logger_connector: _LoggerConnector = _LoggerConnector(
             self.strategy,
-            logger,
+            configured_logger,
             self.default_root_dir,
-            fast_dev_run_enabled,
-            enable_autolog_hparams
+            configuration.fast_dev_run_enabled,
+            configuration.enable_autolog_hparams
         )
         self.profiler: Profiler = self._resolve_profiler(profiler)
         self._data_connector: _DataConnector = _DataConnector(
@@ -433,14 +297,14 @@ class Trainer:
             self.limit_predict_batches,
             self.overfit_batches,
             self.use_distributed_sampler,
-            reload_dataloaders_every_n_epochs
+            configuration.reload_dataloaders_every_n_epochs
         )
         self.state: TrainerState = TrainerState()
         self._signal_connector: _SignalConnector = _SignalConnector(self.strategy)
         self._is_mid_epoch_validation: bool = False
         self._validation_schedule: ValidationSchedule = ValidationSchedule(
-            effective_val_check_interval,
-            effective_check_val_every_n_epoch
+            configuration.resolved_val_check_interval,
+            configuration.resolved_check_val_every_n_epoch
         )
         self.val_check_interval: int | float | str | timedelta | dict[str, int] = (
             self._validation_schedule.val_check_interval
@@ -451,27 +315,27 @@ class Trainer:
         self.val_check_batch: int | None = None
 
         self.fit_loop: FitLoop = FitLoop(
-            min_epochs=resolved_min_epochs,
-            max_epochs=resolved_max_epochs
+            min_epochs=configuration.resolved_min_epochs,
+            max_epochs=configuration.resolved_max_epochs
         )
-        self.fit_loop.epoch_loop = TrainingEpochLoop(
-            min_steps=min_steps,
-            max_steps=effective_max_steps,
-            accumulate_grad_batches=accumulate_grad_batches,
+        self.fit_loop.epoch_loop: TrainingEpochLoop | None = TrainingEpochLoop(
+            min_steps=configuration.min_steps,
+            max_steps=configuration.resolved_max_steps,
+            accumulate_grad_batches=configuration.accumulate_grad_batches,
             gradient_clip_val=self.gradient_clip_val,
             gradient_clip_algorithm=self.gradient_clip_algorithm,
-            log_every_n_steps=resolved_log_every_n_steps
+            log_every_n_steps=configuration.resolved_log_every_n_steps
         )
         self.validate_loop: EvaluationLoop = EvaluationLoop(
             stage="validate",
-            inference_mode=inference_mode
+            inference_mode=configuration.inference_mode
         )
         self.test_loop: EvaluationLoop = EvaluationLoop(
             stage="test",
-            inference_mode=inference_mode
+            inference_mode=configuration.inference_mode
         )
         self.predict_loop: PredictionLoop = PredictionLoop(
-            inference_mode=inference_mode
+            inference_mode=configuration.inference_mode
         )
 
         self._connect_loops()
@@ -1302,12 +1166,12 @@ class Trainer:
         module: Module,
         datamodule: DataModule | None
     ) -> None:
-        self.module = module
-        self.datamodule = datamodule
-        module.trainer = self
+        self.module: Module | None = module
+        self.datamodule: DataModule | None = datamodule
+        module.trainer: Trainer | None = self
         self.strategy.connect(module)
         if datamodule is not None:
-            datamodule.trainer = self
+            datamodule.trainer: Trainer | None = self
 
     def _attach_model_callbacks(
         self,
@@ -1316,8 +1180,8 @@ class Trainer:
     ) -> None:
         self.state.set_stage(stage)
         try:
-            self.module = module
-            module.trainer = self
+            self.module: Module | None = module
+            module.trainer: Trainer | None = self
             self.strategy.connect(module)
             self._callback_connector.configure_model_callbacks(
                 module,
@@ -1405,13 +1269,13 @@ class Trainer:
         )
         source_is_defined: bool = source is not None
         if isinstance(source, DataModule):
-            source_is_defined = self._hook_is_overridden(
+            source_is_defined: bool = self._hook_is_overridden(
                 "val_dataloader",
                 source,
                 DataModule
             )
         elif isinstance(source, Module):
-            source_is_defined = self._hook_is_overridden(
+            source_is_defined: bool = self._hook_is_overridden(
                 "val_dataloader",
                 source,
                 DataHooks
@@ -1423,7 +1287,7 @@ class Trainer:
             and source_is_defined
         )
         if validation_enabled and self._data_connector.total_val_batches is not None:
-            validation_enabled = any(
+            validation_enabled: bool = any(
                 self._data_connector.resolve_batch_limit(total, "val") != 0
                 for total in self._data_connector.total_val_batches
             )
@@ -1462,12 +1326,12 @@ class Trainer:
         return self._logger_connector.progress_bar_metrics(running_stage)
 
     def _connect_loops(self) -> None:
-        self.fit_loop.trainer = self
+        self.fit_loop.trainer: Trainer = self
         assert self.fit_loop.epoch_loop is not None
-        self.fit_loop.epoch_loop.trainer = self
-        self.validate_loop.trainer = self
-        self.test_loop.trainer = self
-        self.predict_loop.trainer = self
+        self.fit_loop.epoch_loop.trainer: Trainer = self
+        self.validate_loop.trainer: Trainer = self
+        self.test_loop.trainer: Trainer = self
+        self.predict_loop.trainer: Trainer = self
 
     def _announce_barebones_stage(self, stage: TrainerStage) -> None:
         if not self.barebones or not self.is_global_zero:
@@ -1475,107 +1339,6 @@ class Trainer:
         ConsoleRenderer().write_permanent(
             f"syntheticmind · {stage} · barebones"
         )
-
-    def _normalize_fast_dev_run(self, value: int | bool) -> int | bool:
-        if not isinstance(value, bool | int):
-            raise TypeError(
-                f"`fast_dev_run` must be a bool or an int, got {value!r}."
-            )
-        if value < 0:
-            raise MisconfigurationError(
-                f"`fast_dev_run={value!r}` is invalid. Expected a non-negative "
-                "integer or bool."
-            )
-        return True if value == 1 else value
-
-    def _normalize_batch_limit(
-        self,
-        value: int | float | None,
-        name: str
-    ) -> int | float:
-        if value is None:
-            return 1.0
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            raise TypeError(
-                f"`{name}` must be an int, a float, or None, got {value!r}."
-            )
-        if 0 <= value <= 1:
-            return value
-        if value > 1:
-            if isinstance(value, int):
-                return value
-            if value.is_integer():
-                return int(value)
-        raise MisconfigurationError(
-            f"Invalid value {value!r} for `{name}`. Expected a float in [0.0, 1.0] "
-            "or a non-negative integer."
-        )
-
-    def _normalize_sanity_steps(self, value: int | None) -> int | float:
-        if value is None:
-            return 2
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TypeError(
-                f"`num_sanity_val_steps` must be an int or None, got {value!r}."
-            )
-        if value < -1:
-            raise MisconfigurationError(
-                "`num_sanity_val_steps` must be a non-negative integer, -1, or None."
-            )
-        return float("inf") if value == -1 else value
-
-    def _resolve_training_limits(
-        self,
-        max_epochs: int | None,
-        min_epochs: int | None,
-        max_steps: int,
-        min_steps: int | None
-    ) -> tuple[int, int]:
-        if max_epochs is not None and (
-            isinstance(max_epochs, bool) or not isinstance(max_epochs, int)
-        ):
-            raise TypeError(
-                f"`max_epochs` must be an int or None, got {max_epochs!r}."
-            )
-        if min_epochs is not None and (
-            isinstance(min_epochs, bool) or not isinstance(min_epochs, int)
-        ):
-            raise TypeError(
-                f"`min_epochs` must be an int or None, got {min_epochs!r}."
-            )
-        if isinstance(max_steps, bool) or not isinstance(max_steps, int):
-            raise TypeError(f"`max_steps` must be an int, got {max_steps!r}.")
-        if min_steps is not None and (
-            isinstance(min_steps, bool) or not isinstance(min_steps, int)
-        ):
-            raise TypeError(
-                f"`min_steps` must be an int or None, got {min_steps!r}."
-            )
-        if max_epochs is not None and max_epochs < -1:
-            raise MisconfigurationError(
-                f"`max_epochs` must be a non-negative integer or -1, got {max_epochs}."
-            )
-        if min_epochs is not None and min_epochs < 0:
-            raise MisconfigurationError(
-                f"`min_epochs` must be a non-negative integer or None, got {min_epochs}."
-            )
-        if max_steps < -1:
-            raise MisconfigurationError(
-                f"`max_steps` must be a non-negative integer or -1, got {max_steps}."
-            )
-        if min_steps is not None and min_steps < 0:
-            raise MisconfigurationError(
-                f"`min_steps` must be a non-negative integer or None, got {min_steps}."
-            )
-        if max_epochs is None:
-            resolved_max_epochs: int = 1000 if max_steps == -1 else -1
-        else:
-            resolved_max_epochs: int = max_epochs
-        if min_epochs is None:
-            resolved_min_epochs: int = 1 if min_steps is not None else 0
-        else:
-            resolved_min_epochs: int = min_epochs
-        return resolved_min_epochs, resolved_max_epochs
 
     def _resolve_profiler(self, profiler: Profiler | str | None) -> Profiler:
         if profiler is None:
@@ -1827,17 +1590,20 @@ class Trainer:
                 getattr(unwrapped_hook, "__wrapped__", None)
             )
             if wrapped_hook is not None:
-                unwrapped_hook = wrapped_hook
+                unwrapped_hook: _HookCallable = wrapped_hook
                 continue
             mock_wrap: _HookCallable | None = cast(
                 _HookCallable | None,
                 getattr(unwrapped_hook, "_mock_wraps", None)
             )
             if mock_wrap is not None:
-                unwrapped_hook = mock_wrap
+                unwrapped_hook: _HookCallable = mock_wrap
                 continue
             if isinstance(unwrapped_hook, partial):
-                unwrapped_hook = cast(_HookCallable, unwrapped_hook.func)
+                unwrapped_hook: _HookCallable = cast(
+                    _HookCallable,
+                    unwrapped_hook.func
+                )
                 continue
             return unwrapped_hook
 
@@ -1866,7 +1632,7 @@ class Trainer:
         resolved_benchmark: bool | None = benchmark
         if deterministic:
             if resolved_benchmark is None:
-                resolved_benchmark = False
+                resolved_benchmark: bool | None = False
             elif resolved_benchmark:
                 warnings.warn(
                     "`deterministic` and `benchmark=True` were both requested. "
@@ -1874,13 +1640,13 @@ class Trainer:
                     stacklevel=3
                 )
         if resolved_benchmark is not None:
-            torch.backends.cudnn.benchmark = resolved_benchmark
+            torch.backends.cudnn.benchmark: bool = resolved_benchmark
         if deterministic == "warn":
             torch.use_deterministic_algorithms(True, warn_only=True)
         elif type(deterministic) is bool:
             torch.use_deterministic_algorithms(deterministic)
         if deterministic:
-            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+            os.environ.update({"CUBLAS_WORKSPACE_CONFIG": ":4096:8"})
 
     def _setup_model(self, module: Module, device: torch.device) -> Module:
         self.accelerator.setup_device(device)
@@ -1901,8 +1667,8 @@ class Trainer:
                 raise TypeError(
                     f"LayerSync.apply must return Module, got {type(synchronized_model).__name__}."
                 )
-            module = synchronized_model
-            self._layer_sync_model = synchronized_model
+            module: Module = synchronized_model
+            self._layer_sync_model: Module | None = synchronized_model
         converted_model: torch.nn.Module = self.precision_plugin.convert_module(module)
         if not isinstance(converted_model, Module):
             raise TypeError(
@@ -1910,9 +1676,9 @@ class Trainer:
             )
         resolved_module: Module = converted_model
         if self._layer_sync_model is not None:
-            self._layer_sync_model = resolved_module
-        resolved_module.trainer = self
-        self.module = resolved_module
+            self._layer_sync_model: Module | None = resolved_module
+        resolved_module.trainer: Trainer | None = self
+        self.module: Module | None = resolved_module
         self.strategy.connect(resolved_module)
         self.profiler._attach_module(resolved_module)
         self._call_strategy_hook(
@@ -1921,7 +1687,7 @@ class Trainer:
             resolved_module,
             device
         )
-        resolved_module._device = device
+        resolved_module._device: torch.device = device
         return resolved_module
 
     def _connect_precision_plugin[SchedulerT](
@@ -1979,25 +1745,25 @@ class Trainer:
         return self.strategy.root_device
 
     def _sanity_check_validation(self, module: Module) -> None:
-        self.sanity_checking = True
-        module._running_stage = "sanity_checking"
+        self.sanity_checking: bool = True
+        module._running_stage: RunningStage | None = "sanity_checking"
 
         try:
             self._ensure_val_dataloader()
             self._call_callback_hooks(module, "on_sanity_check_start")
             self.validate_loop.run()
             if not self._validation_schedule.is_epoch_eligible(self.current_epoch):
-                self._data_connector.last_val_reload_epoch = None
+                self._data_connector.last_val_reload_epoch: int | None = None
             self._validation_schedule.mark_validation_end()
-            self.validate_loop.epoch_metrics = {}
+            self.validate_loop.epoch_metrics: dict[str, float] = {}
             module._reset_logging_state()
             self._logger_connector.clear_metric_views()
             self._reset_progress_bar_metrics("validating")
             self._call_callback_hooks(module, "on_sanity_check_end")
         finally:
-            self.sanity_checking = False
-            self.training = True
-            module._running_stage = "training"
+            self.sanity_checking: bool = False
+            self.training: bool = True
+            module._running_stage: RunningStage | None = "training"
 
     def _restore_checkpoint(
         self,
@@ -2025,12 +1791,13 @@ class Trainer:
             strict=module.strict_loading,
             restore_optimizers=self.state.stage == "fit"
         )
-        epoch: int
-        global_step: int
-        completed_batches: int
-        total_batch_idx: int
-        epoch_rng_state: CheckpointDict | None
-        epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state = (
+        restored_training_state: tuple[
+            int,
+            int,
+            int,
+            int,
+            CheckpointDict | None
+        ] = (
             self._checkpoint_connector.restore_training_state(
                 checkpoint=loaded_checkpoint,
                 scheduler=(self.scheduler if self.state.stage == "fit" else None),
@@ -2040,6 +1807,11 @@ class Trainer:
                 restore_datamodule_state=restore_datamodule_state
             )
         )
+        epoch: int = restored_training_state[0]
+        global_step: int = restored_training_state[1]
+        completed_batches: int = restored_training_state[2]
+        total_batch_idx: int = restored_training_state[3]
+        epoch_rng_state: CheckpointDict | None = restored_training_state[4]
         combined_loader_states: list[DataLoaderState] = (
             self._checkpoint_connector.combined_loader_states(loaded_checkpoint)
             if self.state.stage == "fit"
@@ -2057,22 +1829,26 @@ class Trainer:
                     combined_loader_states
                 )
         self.state.load_state_dict({"current_epoch": epoch, "global_step": global_step})
-        module._current_epoch = epoch
-        module._global_step = global_step
+        module._current_epoch: int = epoch
+        module._global_step: int = global_step
         if self.fit_loop.epoch_loop is not None:
             loader_state_restored: bool = bool(
                 combined_loader_states
                 and self._data_connector.train_combined_loader is not None
             )
-            self.fit_loop.epoch_loop._combined_loader_state_restored = (
+            self.fit_loop.epoch_loop._combined_loader_state_restored: bool = (
                 loader_state_restored
             )
             if completed_batches > 0:
-                self.fit_loop.epoch_loop._completed_batches = completed_batches
+                self.fit_loop.epoch_loop._completed_batches: int = completed_batches
             if total_batch_idx >= 0:
-                self.fit_loop.epoch_loop._total_batches_processed = total_batch_idx + 1
+                self.fit_loop.epoch_loop._total_batches_processed: int = (
+                    total_batch_idx + 1
+                )
             if epoch_rng_state is not None and not loader_state_restored:
-                self.fit_loop.epoch_loop._resume_rng_state = epoch_rng_state
+                self.fit_loop.epoch_loop._resume_rng_state: CheckpointDict | None = (
+                    epoch_rng_state
+                )
             checkpoint_rng_state: CheckpointValue | None = loaded_checkpoint.get(
                 "rng_state"
             )
@@ -2080,9 +1856,8 @@ class Trainer:
                 (completed_batches > 0 or loader_state_restored)
                 and isinstance(checkpoint_rng_state, dict)
             ):
-                self.fit_loop.epoch_loop._resume_checkpoint_rng_state = cast(
-                    CheckpointDict,
-                    checkpoint_rng_state
+                self.fit_loop.epoch_loop._resume_checkpoint_rng_state: CheckpointDict | None = (
+                    cast(CheckpointDict, checkpoint_rng_state)
                 )
 
     def _select_checkpoint_path(
@@ -2114,7 +1889,7 @@ class Trainer:
                     raise RuntimeError(
                         "ModelCheckpoint directory synchronization returned no path."
                     )
-                callback.dirpath = synchronized_dirpath
+                callback.dirpath: str | None = synchronized_dirpath
 
     def _build_checkpoint(self, weights_only: bool = False) -> CheckpointDict:
         module: Module | None = self.module
@@ -2128,11 +1903,13 @@ class Trainer:
         epoch_rng_state: CheckpointDict | None = None
         has_entered_batch_loop: bool = False
         if self.state.stage == "fit" and epoch_loop is not None:
-            completed_batches = epoch_loop._completed_batches
-            total_batch_idx = epoch_loop._total_batches_processed - 1
-            has_entered_batch_loop = epoch_loop._has_entered_batch_loop
+            completed_batches: int = epoch_loop._completed_batches
+            total_batch_idx: int = epoch_loop._total_batches_processed - 1
+            has_entered_batch_loop: bool = epoch_loop._has_entered_batch_loop
             if completed_batches > 0 or has_entered_batch_loop:
-                epoch_rng_state = epoch_loop._epoch_start_rng_state
+                epoch_rng_state: CheckpointDict | None = (
+                    epoch_loop._epoch_start_rng_state
+                )
         has_batch_progress: bool = completed_batches > 0 or has_entered_batch_loop
         is_validation_checkpoint: bool = self.state.running_stage == "validating"
         is_mid_epoch: bool = has_batch_progress and (
@@ -2268,7 +2045,7 @@ class Trainer:
         datamodule: DataModule | None,
         exception: BaseException
     ) -> Never:
-        self._active_exception = exception
+        self._active_exception: BaseException | None = exception
         self._notify_exception(module, datamodule, exception)
         raise
 
@@ -2466,7 +2243,7 @@ class Trainer:
         exception_notified: bool = False
         if failures and self._active_exception is None:
             self._notify_exception(module, datamodule, failures[0][1])
-            exception_notified = True
+            exception_notified: bool = True
 
         if not failures:
             return None
@@ -2496,10 +2273,10 @@ class Trainer:
             raise TypeError(
                 f"LayerSync.revert must return Module, got {type(reverted_model).__name__}."
             )
-        reverted_model.trainer = self
-        self.module = reverted_model
-        self.strategy.model = reverted_model
-        self._layer_sync_model = None
+        reverted_model.trainer: Trainer | None = self
+        self.module: Module | None = reverted_model
+        self.strategy.model: torch.nn.Module | None = reverted_model
+        self._layer_sync_model: Module | None = None
 
     def _attempt_teardown[**Parameters](
         self,
@@ -2545,7 +2322,7 @@ class Trainer:
         detail: str = " ".join(str(secondary_exception).split())
         description: str = type(secondary_exception).__name__
         if detail:
-            description = f"{description}: {detail}"
+            description: str = f"{description}: {detail}"
         exception.add_note(f"{label} raised while handling the stage failure: {description}")
 
     def _resolve_total_scheduler_steps(
@@ -2609,7 +2386,7 @@ class Trainer:
 
     @callbacks.setter
     def callbacks(self, callbacks: list[Callback]) -> None:
-        self._callback_connector.callbacks = callbacks
+        self._callback_connector.callbacks: list[Callback] = callbacks
 
     @property
     def checkpoint_callback(self) -> Checkpoint | None:
@@ -2654,7 +2431,7 @@ class Trainer:
 
     @ckpt_path.setter
     def ckpt_path(self, ckpt_path: str | Path | None) -> None:
-        self._checkpoint_connector.path = ckpt_path
+        self._checkpoint_connector.path: str | Path | None = ckpt_path
 
     @property
     def logger(self) -> Logger | None:
@@ -2662,7 +2439,7 @@ class Trainer:
 
     @logger.setter
     def logger(self, logger: Logger | None) -> None:
-        self._logger_connector.logger = logger
+        self._logger_connector.logger: Logger | None = logger
 
     @property
     def loggers(self) -> list[Logger]:
@@ -2670,7 +2447,7 @@ class Trainer:
 
     @loggers.setter
     def loggers(self, loggers: list[Logger] | None) -> None:
-        self._logger_connector.loggers = loggers
+        self._logger_connector.loggers: list[Logger] | None = loggers
 
     @property
     def default_root_dir(self) -> str:
@@ -2819,7 +2596,7 @@ class Trainer:
             else self.received_sigterm
         )
         if received_sigterm:
-            self._signal_connector.received_sigterm = True
+            self._signal_connector.received_sigterm: bool = True
             raise SIGTERMException()
 
     @property
@@ -2897,7 +2674,7 @@ class Trainer:
 
     @should_stop.setter
     def should_stop(self, value: bool) -> None:
-        self.state.should_stop = value
+        self.state.should_stop: bool = value
 
     @property
     def enable_validation(self) -> bool:
