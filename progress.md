@@ -6,13 +6,13 @@
     4. ✅ Public terminology, inheritance, method, parameter, default, state, hook, and lifecycle compatibility are mandatory wherever SyntheticMind implements the same machine-learning concept.
     5. ✅ Fabric, public release or promotional documentation, upstream test-suite replication, new source comments, linters, and static type checkers remain excluded. Internal architecture references and mandatory ledgers remain active.
 
-| Progress Complete | Trainer Runtime Foundation | Date: 04 September 2026 | Time: 04:44 PM | Name: Ghost |
+| Progress Complete | Trainer Runtime Foundation | Date: 04 September 2026 | Time: 05:23 PM | Name: Ghost |
 
     1. ✅ Fit, validation, test, prediction, sanity, zero-batch, early-exit, interruption, exception, and teardown paths preserve lifecycle order, stage state, model modes, and causal failures.
     2. ✅ Standard epoch, step, validation, batch, sanity, wall-clock, stop, debug, overfit, reload, artifact-root, and barebones controls have executable meanings.
     3. ✅ CPU, CUDA, MPS, topology, precision, inference, deterministic execution, anomaly detection, clipping, accumulation, automatic optimization, manual optimization, and schedulers are integrated.
     4. ✅ Subprocess, spawn, fork, notebook-fork, external process groups, distributed samplers, signal coordination, rank ownership, and multiprocessing reconciliation are verified.
-    5. ✅ ProgressBarCallback owns one rank-zero stage presentation state machine while ConsoleRenderer owns terminal I/O; all-stage local and two-rank rendering, metric selection, enable or disable transitions, and Module printing pass after removing legacy annotation and prose debt.
+    5. ✅ ProgressBarCallback owns rank-zero stage presentation while ConsoleRenderer owns terminal I/O and metric ordering through a bound operation; all-stage local and two-rank rendering, selection, enable or disable, verbose results, and Module printing pass.
 
 | Progress Complete | Data, Continuation, and Metrics | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 

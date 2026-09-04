@@ -43,14 +43,14 @@
     4. CPU, MPS, distributed, subprocess, spawn, fork, notebook, persistence, and optional-dependency paths are exercised in proportion to the capability's real execution surface.
     5. Historical references to static-analysis evidence describe work performed before the prohibition and do not authorize any future invocation.
 
-| Architecture State | Verified Framework Runtime Baseline | Date: 04 September 2026 | Time: 04:44 PM | Name: Ghost |
+| Architecture State | Verified Framework Runtime Baseline | Date: 04 September 2026 | Time: 05:23 PM | Name: Ghost |
 
     1. ✅ Fit, validation, test, prediction, sanity, failure, and teardown lifecycles preserve standard hook order, module modes, stage state, causal exceptions, and run controls.
     2. ✅ CPU, CUDA, MPS, precision, automatic and manual optimization, scheduler cadence, distributed launchers, samplers, signals, and parent-state reconciliation form an executable training runtime.
     3. ✅ Model, DataModule, direct, multiple, nested, sized, unsized, stateful, and distributed data paths preserve ownership, identity, limits, ordering, and exact continuation.
     4. ✅ Metric production, graph state, reduction, TorchMetrics, callback views, progress views, logger output, scheduler monitoring, early stopping, and checkpoint ranking remain distinct and coherent.
     5. ✅ Model, data, checkpoint, and callback hooks; model-provided callbacks; logger access; rank-safe printing; nested gathering; and model checkpoint reconstruction preserve established extension semantics.
-    6. ✅ ConsoleRenderer owns terminal mechanics while one ProgressBarCallback owns rank-zero stage presentation state; its cohesive hook-rich class retains an explicit concept-integrity size exception and contains no conditional import, broad annotation, stale prose, static utility, or pass-through total method.
+    6. ✅ ConsoleRenderer owns terminal mechanics and owner-bound metric ordering without a lambda, while one ProgressBarCallback owns rank-zero stage presentation; the hook-rich callback retains an explicit concept-integrity size exception without annotation, prose, static, or pass-through debt.
 
 | Architecture Decision | Atomic Sharded Checkpoint Generations | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
 

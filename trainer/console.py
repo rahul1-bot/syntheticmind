@@ -145,7 +145,7 @@ class ConsoleRenderer:
             fields: list[str] = []
             for name, value in sorted(
                 result.items(),
-                key=lambda item: item[0].split("/dataloader_idx_", 1)[0]
+                key=self._metric_sort_key
             ):
                 display_name: str = " ".join(
                     name.split("/dataloader_idx_", 1)[0].split()
@@ -168,6 +168,9 @@ class ConsoleRenderer:
         if len(line) <= width:
             return line
         return f"{line[:width - 1]}…"
+
+    def _metric_sort_key(self, metric: tuple[str, float]) -> str:
+        return metric[0].split("/dataloader_idx_", 1)[0]
 
     def _terminal_width(self) -> int:
         return max(20, shutil.get_terminal_size(fallback=(100, 24)).columns)
