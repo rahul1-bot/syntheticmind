@@ -1,84 +1,118 @@
 from syntheticmind.utilities.exceptions import MisconfigurationError
 
+__all__: list[str] = ["DeviceInput"]
+
 type DeviceInput = int | str | list[int]
 
 
-def parse_gpu_devices(
-    devices: DeviceInput,
-    available_device_count: int,
-    accelerator_name: str
-) -> list[int]:
-    normalized_devices: int | list[int]
-    if isinstance(devices, bool):
-        raise TypeError(
-            f"`devices` selected with {accelerator_name} must be an int, a string, or a list of ints."
-        )
-    if isinstance(devices, str):
+class _AcceleratorDeviceParser:
+    def __init__(self, available_device_count: int, accelerator_name: str) -> None:
+        if (
+            isinstance(available_device_count, bool)
+            or not isinstance(available_device_count, int)
+            or available_device_count < 0
+        ):
+            raise ValueError("available_device_count must be a non-negative integer.")
+        if not accelerator_name.strip():
+            raise ValueError("accelerator_name must not be empty.")
+        self._available_device_count: int = available_device_count
+        self._accelerator_name: str = accelerator_name
+
+    def parse(self, devices: DeviceInput) -> list[int]:
+        normalized_devices: int | list[int]
+        if isinstance(devices, bool):
+            raise TypeError(self._type_error())
+        if isinstance(devices, str):
+            normalized_devices: int | list[int] = self._parse_string(devices)
+        elif isinstance(devices, int):
+            normalized_devices: int | list[int] = devices
+        elif isinstance(devices, list):
+            normalized_devices: int | list[int] = self._parse_identifiers(devices)
+        else:
+            raise TypeError(self._type_error())
+        device_ids: list[int] = self._expand_count(normalized_devices, devices)
+        self._validate_identifiers(device_ids, devices)
+        return device_ids
+
+    def _parse_string(self, devices: str) -> int | list[int]:
         stripped_devices: str = devices.strip()
         if not stripped_devices:
             raise TypeError(
-                f"`devices` selected with {accelerator_name} cannot be an empty string."
+                f"`devices` selected with {self._accelerator_name} cannot be empty."
             )
-        if "," in stripped_devices:
+        if stripped_devices == "-1":
+            return -1
+        device_ids: list[int] = []
+        device_token: str
+        for device_token in stripped_devices.split(","):
+            stripped_token: str = device_token.strip()
+            if not stripped_token:
+                continue
             try:
-                normalized_devices = [
-                    int(device_id.strip())
-                    for device_id in stripped_devices.split(",")
-                    if device_id.strip()
-                ]
+                device_ids.append(int(stripped_token))
             except ValueError as exception:
                 raise TypeError(
-                    f"`devices` selected with {accelerator_name} contains a non-integer device ID."
+                    f"`devices` selected with {self._accelerator_name} contains a "
+                    "non-integer device ID."
                 ) from exception
-        else:
-            try:
-                normalized_devices = int(stripped_devices)
-            except ValueError as exception:
+        return device_ids
+
+    def _parse_identifiers(self, devices: list[int]) -> list[int]:
+        device_id: int
+        for device_id in devices:
+            if type(device_id) is not int:
                 raise TypeError(
-                    f"`devices` selected with {accelerator_name} must be numeric or comma-separated IDs."
-                ) from exception
-    elif isinstance(devices, int):
-        normalized_devices = devices
-    elif isinstance(devices, list):
-        if any(type(device_id) is not int for device_id in devices):
-            raise TypeError(
-                f"`devices` selected with {accelerator_name} must contain only integer device IDs."
-            )
-        normalized_devices = list(devices)
-    else:
-        raise TypeError(
-            f"`devices` selected with {accelerator_name} must be an int, a string, or a list of ints."
+                    f"`devices` selected with {self._accelerator_name} must contain "
+                    "only integer device IDs."
+                )
+        return list(devices)
+
+    def _expand_count(
+        self,
+        devices: int | list[int],
+        original_devices: DeviceInput
+    ) -> list[int]:
+        if isinstance(devices, list):
+            return devices
+        if devices == -1:
+            return list(range(self._available_device_count))
+        if devices > 0:
+            return list(range(devices))
+        raise MisconfigurationError(
+            f"`devices={original_devices!r}` is invalid for {self._accelerator_name}; "
+            "expected -1 or a positive count."
         )
 
-    if isinstance(normalized_devices, int):
-        if normalized_devices == -1:
-            device_ids: list[int] = list(range(available_device_count))
-        elif normalized_devices > 0:
-            device_ids = list(range(normalized_devices))
-        else:
+    def _validate_identifiers(
+        self,
+        device_ids: list[int],
+        original_devices: DeviceInput
+    ) -> None:
+        if not device_ids:
             raise MisconfigurationError(
-                f"`devices={devices!r}` is invalid for {accelerator_name}; expected -1 or a positive count."
+                f"`devices={original_devices!r}` selected no devices for "
+                f"{self._accelerator_name}."
             )
-    else:
-        device_ids = normalized_devices
+        if len(device_ids) != len(set(device_ids)):
+            raise MisconfigurationError("Device IDs must be unique.")
+        unavailable_device_ids: list[int] = []
+        device_id: int
+        for device_id in device_ids:
+            if device_id < 0:
+                raise MisconfigurationError("Device IDs must be non-negative integers.")
+            if device_id >= self._available_device_count:
+                unavailable_device_ids.append(device_id)
+        if unavailable_device_ids:
+            available_device_ids: list[int] = list(
+                range(self._available_device_count)
+            )
+            raise MisconfigurationError(
+                f"Requested device IDs {device_ids} for {self._accelerator_name}, "
+                f"but available IDs are {available_device_ids}."
+            )
 
-    if not device_ids:
-        raise MisconfigurationError(
-            f"`devices={devices!r}` selected no devices for {accelerator_name}."
+    def _type_error(self) -> str:
+        return (
+            f"`devices` selected with {self._accelerator_name} must be an int, "
+            "a string, or a list of ints."
         )
-    if len(device_ids) != len(set(device_ids)):
-        raise MisconfigurationError("Device IDs must be unique.")
-    if any(device_id < 0 for device_id in device_ids):
-        raise MisconfigurationError("Device IDs must be non-negative integers.")
-    available_device_ids: list[int] = list(range(available_device_count))
-    unavailable_device_ids: list[int] = [
-        device_id
-        for device_id in device_ids
-        if device_id not in available_device_ids
-    ]
-    if unavailable_device_ids:
-        raise MisconfigurationError(
-            f"Requested device IDs {device_ids} for {accelerator_name}, but available IDs are "
-            f"{available_device_ids}."
-        )
-    return device_ids

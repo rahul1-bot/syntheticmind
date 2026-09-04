@@ -63,7 +63,7 @@ from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.accelerators.cpu import CPUAccelerator
 from syntheticmind.accelerators.cuda import CUDAAccelerator
 from syntheticmind.accelerators.mps import MPSAccelerator
-from syntheticmind.accelerators.topology import DeviceTopology, resolve_device_topology
+from syntheticmind.accelerators.topology import DeviceTopology
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
@@ -683,13 +683,17 @@ class Trainer:
         self.accelerator: Accelerator = self._resolve_accelerator(
             resolved_accelerator_input
         )
-        device_topology: DeviceTopology = resolve_device_topology(
+        device_topology: DeviceTopology = DeviceTopology.resolve(
             self.accelerator,
             devices,
             num_nodes,
             configured_parallel_devices
         )
-        self.devices: int | list[int] = device_topology.devices
+        self.devices: int | list[int] = (
+            device_topology.devices
+            if isinstance(device_topology.devices, int)
+            else list(device_topology.devices)
+        )
         self.parallel_devices: list[torch.device] = list(
             device_topology.parallel_devices
         )

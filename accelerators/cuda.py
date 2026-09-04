@@ -1,50 +1,27 @@
-# This module:
-# 1. Implements the accelerator contract for NVIDIA CUDA execution, including
-#    process-wide current-device selection and multi-device counting
-#
-# Design decisions:
-# - setup_device also calls torch.cuda.set_device so subsequent context-free
-#   CUDA allocations land on the bound device instead of device zero
-# - get_device falls back to cuda:0 before any binding, so early queries during
-#   trainer construction return a usable default instead of failing
-# - The device slot is Optional, distinguishing "not yet bound" from an actual
-#   binding; the other backends can bind eagerly because they have one device
-# - auto_device_count reports torch.cuda.device_count, backing multi-GPU
-#   configuration resolution
-#
-# Author: Rahul Sawhney
-
 from typing import override
 
 import torch
 
 from syntheticmind.accelerators.accelerator import Accelerator
-from syntheticmind.accelerators.device_parser import DeviceInput, parse_gpu_devices
+from syntheticmind.accelerators.device_parser import DeviceInput, _AcceleratorDeviceParser
 from syntheticmind.utilities.exceptions import MisconfigurationError
 
 __all__: list[str] = ["CUDAAccelerator"]
 
 
 class CUDAAccelerator(Accelerator):
-    # Accelerator for CUDA devices. Binding sets the process-wide current
-    # device; queries before binding degrade to the first CUDA device.
     def __init__(self) -> None:
-        # Starts unbound; the concrete device index arrives via setup_device
-        # once the strategy has resolved placement.
         self._device: torch.device | None = None
 
     @override
     def setup_device(self, device: torch.device) -> None:
-        # Binds the device and makes it the process-wide current CUDA device so
-        # context-free allocations follow the binding.
         if device.type != "cuda":
-            raise MisconfigurationError(f"Device should be CUDA, got {device} instead.")
+            raise MisconfigurationError(f"CUDAAccelerator cannot bind {device}.")
         self._device: torch.device | None = device
         torch.cuda.set_device(device)
 
     @override
     def get_device(self) -> torch.device:
-        # Returns the bound device, or cuda:0 when queried before binding.
         if self._device is None:
             return torch.device("cuda", 0)
         return self._device
@@ -52,33 +29,34 @@ class CUDAAccelerator(Accelerator):
     @staticmethod
     @override
     def parse_devices(devices: DeviceInput) -> int | list[int]:
-        return parse_gpu_devices(
-            devices,
+        parser: _AcceleratorDeviceParser = _AcceleratorDeviceParser(
             CUDAAccelerator.auto_device_count(),
             "CUDAAccelerator"
         )
+        return parser.parse(devices)
 
     @staticmethod
     @override
     def get_parallel_devices(devices: int | list[int]) -> list[torch.device]:
         if not isinstance(devices, list):
             raise TypeError("CUDAAccelerator requires parsed device IDs.")
-        return [torch.device("cuda", device_id) for device_id in devices]
+        parallel_devices: list[torch.device] = []
+        device_id: int
+        for device_id in devices:
+            parallel_devices.append(torch.device("cuda", device_id))
+        return parallel_devices
 
     @staticmethod
     @override
     def auto_device_count() -> int:
-        # Number of visible CUDA devices on this host.
         return torch.cuda.device_count()
 
     @staticmethod
     @override
     def is_available() -> bool:
-        # Whether a usable CUDA runtime and at least one device are present.
         return torch.cuda.is_available()
 
     @staticmethod
     @override
     def name() -> str:
-        # Canonical backend name used in configuration and log output.
         return "cuda"

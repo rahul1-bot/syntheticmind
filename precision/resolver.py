@@ -17,7 +17,7 @@ __all__: list[str] = ["PrecisionResolver"]
 class PrecisionResolver:
     @classmethod
     def resolve(
-        cls,
+        cls: type[PrecisionResolver],
         precision: PrecisionInput | None,
         device: str,
         plugins: Precision | list[Precision] | None = None,
@@ -26,7 +26,8 @@ class PrecisionResolver:
         plugin: Precision | None = cls._resolve_plugin(plugins)
         if plugin is not None and strategy_precision_plugin is not None:
             raise MisconfigurationError(
-                "A precision plugin was configured through both Trainer(plugins=...) and the strategy. "
+                "A precision plugin was configured through both Trainer plugins "
+                "and the strategy. "
                 "Configure it in exactly one place."
             )
         configured_plugin: Precision | None = plugin or strategy_precision_plugin
@@ -62,7 +63,7 @@ class PrecisionResolver:
 
     @classmethod
     def _resolve_plugin(
-        cls,
+        cls: type[PrecisionResolver],
         plugins: Precision | list[Precision] | None
     ) -> Precision | None:
         del cls
@@ -81,7 +82,7 @@ class PrecisionResolver:
             )
         if not plugins:
             return None
-        plugin: object = plugins[0]
+        plugin: Precision = plugins[0]
         if not isinstance(plugin, Precision):
             raise TypeError(
                 f"plugins must contain Precision instances, got {type(plugin).__name__}."
@@ -89,13 +90,17 @@ class PrecisionResolver:
         return plugin
 
     @classmethod
-    def _normalize(cls, precision: PrecisionInput | None) -> PrecisionType:
+    def _normalize(
+        cls: type[PrecisionResolver],
+        precision: PrecisionInput | None
+    ) -> PrecisionType:
         del cls
         if precision is None:
             return "32-true"
         if isinstance(precision, bool):
             raise ValueError(
-                f"Precision {precision!r} is invalid. Use 64, 32, 16, 'bf16', or an explicit precision mode."
+                f"Precision {precision!r} is invalid. Use 64, 32, 16, 'bf16', "
+                "or an explicit precision mode."
             )
         if not isinstance(precision, (int, str)):
             raise TypeError(

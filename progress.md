@@ -126,3 +126,20 @@
     2. The next bounded phase must trace device discovery and setup, precision conversion and optimization, cluster topology mutation, and layer synchronization through Trainer and Strategy before changing their contracts.
     3. Any Protocol must have current interchangeable implementations or current unrelated consumers; concrete behavior must remain on the natural accelerator or plugin owner rather than migrating into another generic runtime object.
     4. Verification must cover CPU and MPS device resolution, unavailable CUDA rejection, true and mixed precision contexts, optimizer scaling and clipping, plugin conflict detection, cluster rank topology, synchronized batch normalization, launch modes, checkpoints, and strategy regressions.
+
+| Progress Complete | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
+
+    1. ✅ Accelerator, cluster-environment, layer-synchronization, and checkpoint storage extension points use earned structural Protocols with explicit concrete implementations and no shared placeholder lifecycle.
+    2. ✅ GPU parsing owns count and identifier semantics, uniqueness, range, and availability validation; immutable `DeviceTopology` owns resolution from accelerator, device selection, configured devices, and node count.
+    3. ✅ Strict immutable `PluginConfiguration` owns the resolved plugin record, and plugin resolution rejects duplicate families, invalid synchronization combinations, and unsupported values.
+    4. ✅ Full, half, double, mixed, and Transformer Engine precision share one concrete lifecycle; recursive floating-point conversion no longer requires a stateless converter class.
+    5. ✅ Transformer Engine targets `transformer_engine>=2.18.0`, uses the current `autocast` recipe API, exposes strict delayed-scaling configuration, isolates dynamic imports, and passes a source-shaped optional-adapter probe while real CUDA execution remains unavailable on this host.
+    6. ✅ CPU topology, explicit and all-device GPU parsing, MPS training, unavailable CUDA rejection, CPU true and mixed precision, layer-sync state round trip, plugin conflicts, direct DDP, spawn DDP, and local model-parallel execution pass.
+    7. ✅ Accelerator, plugin, and precision modules remain within hard class and module limits and contain no `Any`, generic `object`, ABC, abstract method, module-level function, custom `__call__`, source prose, or terminal trailing comma.
+
+| Progress Active | Optimizer and Training Closure Ownership | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
+
+    1. `core/optimizer.py`, the training epoch loop, and manual-optimization entry points still contain a module-level no-op closure, a custom callable closure object, broad closure and keyword annotations, dynamic optimizer-class mutation, and duplicated step ownership.
+    2. The next bounded phase must preserve PyTorch optimizer and scheduler vocabulary while assigning closure execution, hook order, gradient scaling, manual stepping, scheduler compilation, and managed optimizer state to explicit natural owners.
+    3. Callable-object removal must not replace optimizer closures with raw functions; bound verb methods must satisfy PyTorch closure inputs while the owning object retains outputs and lifecycle state.
+    4. Verification must cover automatic and manual optimization, multiple optimizers, accumulation tails, gradient clipping, mixed precision, closure return semantics, scheduler intervals and plateau monitoring, checkpoint resume, DDP synchronization, and launcher transfer.

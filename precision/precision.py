@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from typing import cast
@@ -129,34 +129,6 @@ class Precision:
             optimizer.step(closure=wrapped_closure, **kwargs)
         )
 
-    def _wrap_closure(
-        self,
-        model: Module,
-        optimizer: torch.optim.Optimizer,
-        closure: OptimizerClosure
-    ) -> OptimizerClosureResult:
-        closure_result: OptimizerClosureResult = closure()
-        self._after_closure(model, optimizer)
-        return closure_result
-
-    def _clip_gradients(
-        self,
-        model: Module,
-        optimizer: torch.optim.Optimizer,
-        clip_val: int | float | None = None,
-        gradient_clip_algorithm: ClipAlgorithm | None = None
-    ) -> None:
-        if not model.automatic_optimization:
-            return
-        model.trainer._call_module_hook(
-            model,
-            "configure_gradient_clipping",
-            model.configure_gradient_clipping,
-            optimizer,
-            clip_val,
-            gradient_clip_algorithm
-        )
-
     def clip_gradients(
         self,
         optimizer: torch.optim.Optimizer,
@@ -232,6 +204,34 @@ class Precision:
     def teardown(self) -> None:
         pass
 
+    def _wrap_closure(
+        self,
+        model: Module,
+        optimizer: torch.optim.Optimizer,
+        closure: OptimizerClosure
+    ) -> OptimizerClosureResult:
+        closure_result: OptimizerClosureResult = closure()
+        self._after_closure(model, optimizer)
+        return closure_result
+
+    def _clip_gradients(
+        self,
+        model: Module,
+        optimizer: torch.optim.Optimizer,
+        clip_val: int | float | None = None,
+        gradient_clip_algorithm: ClipAlgorithm | None = None
+    ) -> None:
+        if not model.automatic_optimization:
+            return
+        model.trainer._call_module_hook(
+            model,
+            "configure_gradient_clipping",
+            model.configure_gradient_clipping,
+            optimizer,
+            clip_val,
+            gradient_clip_algorithm
+        )
+
     def _after_closure(
         self,
         model: Module,
@@ -254,3 +254,36 @@ class Precision:
             model.trainer.gradient_clip_val,
             model.trainer.gradient_clip_algorithm
         )
+
+    def _convert_floating_point(self, data: Batch, dtype: torch.dtype) -> Batch:
+        if isinstance(data, torch.Tensor):
+            return data.to(dtype=dtype) if data.is_floating_point() else data
+        if isinstance(data, dict):
+            converted_mapping: dict[str, Batch] = {}
+            key: str
+            value: Batch
+            for key, value in data.items():
+                converted_mapping[key]: Batch = self._convert_floating_point(
+                    value,
+                    dtype
+                )
+            return converted_mapping
+        if isinstance(data, tuple):
+            converted_items: list[Batch] = []
+            item: Batch
+            for item in data:
+                converted_items.append(self._convert_floating_point(item, dtype))
+            if hasattr(data, "_fields"):
+                namedtuple_factory: Callable[[list[Batch]], Batch] = cast(
+                    Callable[[list[Batch]], Batch],
+                    getattr(type(data), "_make")
+                )
+                return namedtuple_factory(converted_items)
+            return tuple(converted_items)
+        if isinstance(data, list):
+            converted_items: list[Batch] = []
+            item: Batch
+            for item in data:
+                converted_items.append(self._convert_floating_point(item, dtype))
+            return converted_items
+        return data

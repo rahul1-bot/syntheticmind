@@ -1,79 +1,25 @@
-import importlib
-import importlib.util
-import sys
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
-from importlib.metadata import PackageNotFoundError, version
-from types import ModuleType, TracebackType
-from typing import Literal, Protocol, cast, override
+from typing import override
 
 import torch
-from packaging.version import InvalidVersion, Version
+from torch import nn
 
-from syntheticmind.precision.conversion import _DtypeContext, _FloatingPointConverter
+from syntheticmind.precision.conversion import _DtypeContext
 from syntheticmind.precision.precision import Precision
+from syntheticmind.precision.transformer_engine_adapter import _TransformerEngineAdapter
+from syntheticmind.precision.transformer_engine_contracts import (
+    DelayedScalingConfiguration,
+    DelayedScalingRecipe
+)
 from syntheticmind.utilities.types import Batch, PrecisionType
 
-__all__: list[str] = ["TransformerEnginePrecision"]
-
-
-class _RecipeModule(Protocol):
-    DelayedScaling: Callable[..., object]
-    Format: object
-
-
-class DelayedScaling(Protocol):
-    margin: int
-    interval: int
-    fp8_format: object
-    amax_history_len: int
-    amax_compute_algo: object
-
-
-class _TransformerEngineModule(Protocol):
-    Linear: Callable[..., torch.nn.Module]
-    LayerNorm: Callable[..., torch.nn.Module]
-
-    def fp8_autocast(
-        self,
-        *,
-        enabled: bool,
-        fp8_recipe: object
-    ) -> AbstractContextManager[object]: ...
-
-
-class _ClassReplacementContext:
-    def __init__(
-        self,
-        replacements: list[tuple[object, str, object]]
-    ) -> None:
-        self._replacements: list[tuple[object, str, object]] = replacements
-        self._originals: list[tuple[object, str, object]] = [
-            (namespace, name, getattr(namespace, name))
-            for namespace, name, _ in replacements
-        ]
-
-    def __enter__(self) -> None:
-        namespace: object
-        name: str
-        replacement: object
-        for namespace, name, replacement in self._replacements:
-            setattr(namespace, name, replacement)
-
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None
-    ) -> Literal[False]:
-        del exception_type, exception, traceback
-        namespace: object
-        name: str
-        original: object
-        for namespace, name, original in self._originals:
-            setattr(namespace, name, original)
-        return False
+__all__: list[str] = [
+    "DelayedScalingConfiguration",
+    "DelayedScalingRecipe",
+    "TransformerEnginePrecision"
+]
 
 
 class TransformerEnginePrecision(Precision):
@@ -83,43 +29,52 @@ class TransformerEnginePrecision(Precision):
         self,
         *,
         weights_dtype: torch.dtype,
-        recipe: Mapping[str, object] | DelayedScaling | None = None,
+        recipe: DelayedScalingConfiguration | DelayedScalingRecipe | None = None,
         replace_layers: bool | None = None,
         fallback_compute_dtype: torch.dtype | None = None
     ) -> None:
-        if not self._dependency_available():
+        if not _TransformerEngineAdapter.is_available():
             raise ModuleNotFoundError(
-                "Transformer Engine precision requires transformer_engine>=0.11.0."
+                "Transformer Engine precision requires transformer_engine>=2.18.0."
             )
-        recipe_module: _RecipeModule = self._recipe_module()
-        resolved_recipe: object
+        if weights_dtype not in {torch.float16, torch.bfloat16}:
+            raise ValueError("Transformer Engine weights require float16 or bfloat16.")
+        if replace_layers is not None and type(replace_layers) is not bool:
+            raise TypeError("replace_layers must be a bool or None.")
+        resolved_compute_dtype: torch.dtype = fallback_compute_dtype or weights_dtype
+        if resolved_compute_dtype not in {torch.float16, torch.bfloat16}:
+            raise ValueError("Transformer Engine fallback compute requires float16 or bfloat16.")
+        self._adapter: _TransformerEngineAdapter = _TransformerEngineAdapter()
         if recipe is None:
-            resolved_recipe = recipe_module.DelayedScaling()
-        elif isinstance(recipe, Mapping):
-            recipe_configuration: dict[str, object] = dict(recipe)
-            fp8_format: object | None = recipe_configuration.get("fp8_format")
-            if isinstance(fp8_format, str):
-                recipe_configuration["fp8_format"] = getattr(
-                    recipe_module.Format,
-                    fp8_format
-                )
-            resolved_recipe = recipe_module.DelayedScaling(**recipe_configuration)
+            resolved_recipe: DelayedScalingRecipe = self._adapter.create_recipe(
+                DelayedScalingConfiguration()
+            )
+        elif isinstance(recipe, DelayedScalingConfiguration):
+            resolved_recipe: DelayedScalingRecipe = self._adapter.create_recipe(recipe)
+        elif isinstance(recipe, DelayedScalingRecipe):
+            resolved_recipe: DelayedScalingRecipe = recipe
         else:
-            resolved_recipe = recipe
-        self.weights_dtype: torch.dtype = weights_dtype
-        self.recipe: object = resolved_recipe
-        self.replace_layers: bool | None = replace_layers
-        self.fallback_compute_dtype: torch.dtype = (
-            fallback_compute_dtype or weights_dtype
+            raise TypeError(
+                "recipe must be DelayedScalingConfiguration, DelayedScalingRecipe, or None."
+            )
+        self.precision: PrecisionType = (
+            "transformer-engine-float16"
+            if weights_dtype == torch.float16
+            else "transformer-engine"
         )
-        self._converter: _FloatingPointConverter = _FloatingPointConverter()
+        self.weights_dtype: torch.dtype = weights_dtype
+        self.recipe: DelayedScalingRecipe = resolved_recipe
+        self.replace_layers: bool | None = replace_layers
+        self.fallback_compute_dtype: torch.dtype = resolved_compute_dtype
 
     @override
-    def convert_module(self, module: torch.nn.Module) -> torch.nn.Module:
-        has_transformer_engine_layer: bool = any(
-            "transformer_engine.pytorch" in child.__class__.__module__
-            for child in module.modules()
-        )
+    def convert_module(self, module: nn.Module) -> nn.Module:
+        has_transformer_engine_layer: bool = False
+        child: nn.Module
+        for child in module.modules():
+            if "transformer_engine.pytorch" in child.__class__.__module__:
+                has_transformer_engine_layer: bool = True
+                break
         if not has_transformer_engine_layer and self.replace_layers in {None, True}:
             self._replace_layers(module)
         return module.to(dtype=self.weights_dtype)
@@ -128,28 +83,21 @@ class TransformerEnginePrecision(Precision):
     def tensor_init_context(self) -> AbstractContextManager[None]:
         return _DtypeContext(self.weights_dtype)
 
-    @override
     @contextmanager
+    @override
     def module_init_context(self) -> Iterator[None]:
-        with ExitStack() as stack:
+        stack: ExitStack = ExitStack()
+        with stack:
             if self.replace_layers:
-                transformer_engine: _TransformerEngineModule = self._pytorch_module()
-                stack.enter_context(
-                    _ClassReplacementContext(
-                        [
-                            (torch.nn, "Linear", transformer_engine.Linear),
-                            (torch.nn, "LayerNorm", transformer_engine.LayerNorm)
-                        ]
-                    )
-                )
+                stack.enter_context(self._adapter.replacement_context())
             stack.enter_context(self.tensor_init_context())
             yield
 
-    @override
     @contextmanager
+    @override
     def forward_context(self) -> Iterator[None]:
-        transformer_engine: _TransformerEngineModule = self._pytorch_module()
-        with ExitStack() as stack:
+        stack: ExitStack = ExitStack()
+        with stack:
             stack.enter_context(_DtypeContext(self.weights_dtype))
             stack.enter_context(
                 torch.autocast(
@@ -157,80 +105,53 @@ class TransformerEnginePrecision(Precision):
                     dtype=self.fallback_compute_dtype
                 )
             )
-            stack.enter_context(
-                transformer_engine.fp8_autocast(
-                    enabled=True,
-                    fp8_recipe=self.recipe
-                )
-            )
+            stack.enter_context(self._adapter.autocast(self.recipe))
             yield
 
     @override
     def convert_input(self, data: Batch) -> Batch:
-        return self._converter.convert(data, self.weights_dtype)
+        return self._convert_floating_point(data, self.weights_dtype)
 
     @override
     def convert_output(self, data: Batch) -> Batch:
-        return self._converter.convert(data, torch.get_default_dtype())
+        return self._convert_floating_point(data, torch.get_default_dtype())
 
-    def _replace_layers(self, module: torch.nn.Module) -> None:
-        transformer_engine: _TransformerEngineModule = self._pytorch_module()
-        name: str
-        child: torch.nn.Module
-        for name, child in module.named_children():
-            replacement: torch.nn.Module
-            if isinstance(child, torch.nn.Linear):
-                if child.in_features % 8 != 0 or child.out_features % 16 != 0:
+    def _replace_layers(self, module: nn.Module) -> None:
+        child_name: str
+        child: nn.Module
+        for child_name, child in module.named_children():
+            replacement: nn.Module
+            if isinstance(child, nn.Linear):
+                if child.in_features % 16 != 0 or child.out_features % 16 != 0:
                     warnings.warn(
-                        f"Transformer Engine requires Linear dimensions divisible by 8 and 16; "
-                        f"layer {name!r} has shape ({child.in_features}, {child.out_features}) and was not replaced.",
+                        "Transformer Engine Linear dimensions must be divisible by 16; "
+                        f"layer {child_name!r} was not replaced.",
                         UserWarning,
                         stacklevel=3
                     )
                     continue
-                replacement = transformer_engine.Linear(
+                replacement: nn.Module = self._adapter.linear_constructor(
                     child.in_features,
                     child.out_features,
                     bias=child.bias is not None
                 )
                 replacement.load_state_dict(child.state_dict())
-                setattr(module, name, replacement)
-            elif isinstance(child, torch.nn.LayerNorm):
+                setattr(module, child_name, replacement)
+            elif isinstance(child, nn.LayerNorm):
                 normalized_shape: tuple[int, ...] = child.normalized_shape
-                replacement = transformer_engine.LayerNorm(
+                if len(normalized_shape) != 1:
+                    warnings.warn(
+                        "Transformer Engine LayerNorm replacement requires one dimension; "
+                        f"layer {child_name!r} was not replaced.",
+                        UserWarning,
+                        stacklevel=3
+                    )
+                    continue
+                replacement: nn.Module = self._adapter.layer_norm_constructor(
                     normalized_shape[0],
                     eps=child.eps
                 )
                 replacement.load_state_dict(child.state_dict())
-                setattr(module, name, replacement)
+                setattr(module, child_name, replacement)
             else:
                 self._replace_layers(child)
-
-    @staticmethod
-    def _dependency_available() -> bool:
-        if "transformer_engine" in sys.modules:
-            return True
-        try:
-            if importlib.util.find_spec("transformer_engine") is None:
-                return False
-            return Version(version("transformer_engine")) >= Version("0.11.0")
-        except (
-            ImportError,
-            InvalidVersion,
-            ModuleNotFoundError,
-            PackageNotFoundError,
-            ValueError
-        ):
-            return False
-
-    @staticmethod
-    def _recipe_module() -> _RecipeModule:
-        module: ModuleType = importlib.import_module(
-            "transformer_engine.common.recipe"
-        )
-        return cast(_RecipeModule, module)
-
-    @staticmethod
-    def _pytorch_module() -> _TransformerEngineModule:
-        module: ModuleType = importlib.import_module("transformer_engine.pytorch")
-        return cast(_TransformerEngineModule, module)

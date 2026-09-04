@@ -8,8 +8,11 @@
 | `loops/` | The fit, training-epoch, evaluation, and prediction loops the trainer dispatches to. |
 | `accelerators/` | The device abstraction covering CPU, CUDA, and Apple MPS. |
 | `strategies/` | Structural execution contracts plus single-device, distributed data-parallel, tensor-parallel, and composable fully sharded execution. |
+| `precision/` | Full, true-half, mixed, and Transformer Engine precision policies plus optimizer scaling and conversion. |
+| `plugins/` | Structural checkpoint, cluster-environment, and layer-synchronization extension contracts. |
 | `callbacks/` | The lifecycle callbacks: checkpointing, early stopping, exponential moving averages, monitoring, guarding, and profiling. |
 | `loggers/` | The metric-logger interface with CSV and TensorBoard implementations. |
+| `profilers/` | Runtime action measurement and trace export. |
 | `state/` | The serializable trainer and checkpoint state containers. |
 | `utilities/` | Seeding, checkpoint persistence, device transfer, distributed helpers, optimizer and scheduler construction, and the exception vocabulary. |
 

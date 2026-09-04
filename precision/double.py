@@ -3,7 +3,7 @@ from typing import override
 
 import torch
 
-from syntheticmind.precision.conversion import _DtypeContext, _FloatingPointConverter
+from syntheticmind.precision.conversion import _DtypeContext
 from syntheticmind.precision.precision import Precision
 from syntheticmind.utilities.types import Batch, PrecisionType
 
@@ -12,9 +12,6 @@ __all__: list[str] = ["DoublePrecision"]
 
 class DoublePrecision(Precision):
     precision: PrecisionType = "64-true"
-
-    def __init__(self) -> None:
-        self._converter: _FloatingPointConverter = _FloatingPointConverter()
 
     @override
     def convert_module(self, module: torch.nn.Module) -> torch.nn.Module:
@@ -34,4 +31,4 @@ class DoublePrecision(Precision):
 
     @override
     def convert_input(self, data: Batch) -> Batch:
-        return self._converter.convert(data, torch.float64)
+        return self._convert_floating_point(data, torch.float64)

@@ -3,7 +3,7 @@ from typing import Literal, override
 
 import torch
 
-from syntheticmind.precision.conversion import _DtypeContext, _FloatingPointConverter
+from syntheticmind.precision.conversion import _DtypeContext
 from syntheticmind.precision.precision import Precision
 from syntheticmind.utilities.types import Batch, PrecisionType
 
@@ -21,11 +21,10 @@ class HalfPrecision(Precision):
             raise ValueError(
                 f"HalfPrecision requires '16-true' or 'bf16-true', got {precision!r}."
             )
-        self.precision = precision
+        self.precision: PrecisionType = precision
         self._dtype: torch.dtype = (
             torch.float16 if precision == "16-true" else torch.bfloat16
         )
-        self._converter: _FloatingPointConverter = _FloatingPointConverter()
 
     @override
     def convert_module(self, module: torch.nn.Module) -> torch.nn.Module:
@@ -45,4 +44,4 @@ class HalfPrecision(Precision):
 
     @override
     def convert_input(self, data: Batch) -> Batch:
-        return self._converter.convert(data, self._dtype)
+        return self._convert_floating_point(data, self._dtype)

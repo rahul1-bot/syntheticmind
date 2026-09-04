@@ -185,3 +185,12 @@
     4. `object` in an owned contract erases which values can cross the boundary. Named recursive aliases for steps, optimizer closures, state dictionaries, stage arguments, and storage options expose the actual supported domain and make invalid widening visible during review.
     5. Checkpoint artifact reading and live-state restoration are separate operations. Metadata may be loaded before model construction, while restoration must occur only after the model and optimizers exist; a bounded preload cache preserves this ordering without duplicate disk reads.
     6. Asynchronous checkpointing requires a main-thread snapshot before worker submission. The snapshot and background save belong to the checkpoint plugin itself and do not justify nested functions, module functions, or a callable wrapper object.
+
+| Memory | Device and Precision Boundary Design | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
+
+    1. Static backend queries do not require an abstract base carrying placeholder methods; a structural accelerator contract preserves custom backend substitution while concrete accelerators retain device-specific binding.
+    2. Integer GPU configuration means a device count, while a string such as `"2"` means the explicit identifier two and `"-1"` means every available device. Conflating numeric strings with counts silently changes placement semantics.
+    3. Frozen resolved configuration requires immutable nested values as well as a frozen outer model; tuple device identifiers prevent mutation that a frozen model containing a list would still permit.
+    4. A recursive tensor-conversion algorithm used only by precision policies belongs on the concrete precision lifecycle. A stateless converter class adds an object and dependency edge without adding an independent boundary.
+    5. Optional-library integration should isolate dynamic imports and attribute adaptation in one adapter. The owning precision policy should expose stable domain configuration rather than leaking arbitrary mappings or module-shaped Protocol collections.
+    6. Current Transformer Engine uses a general `autocast` context with a `recipe` argument, and current FP8 Linear guidance requires both matrix dimensions to be divisible by sixteen. Version checks and adapter tests must encode that current boundary explicitly.

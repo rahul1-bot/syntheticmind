@@ -1,17 +1,17 @@
-from typing import override
+from typing import Protocol, cast, override, runtime_checkable
 
 import torch
 from torch import nn
+from torch.ao.quantization.qconfig import QConfigAny
 
 __all__: list[str] = ["LayerSync", "TorchSyncBatchNorm"]
 
 
-class LayerSync:
-    def apply(self, model: nn.Module) -> nn.Module:
-        raise NotImplementedError
+@runtime_checkable
+class LayerSync(Protocol):
+    def apply(self, model: nn.Module) -> nn.Module: ...
 
-    def revert(self, model: nn.Module) -> nn.Module:
-        raise NotImplementedError
+    def revert(self, model: nn.Module) -> nn.Module: ...
 
 
 class TorchSyncBatchNorm(LayerSync):
@@ -23,7 +23,7 @@ class TorchSyncBatchNorm(LayerSync):
     def revert(self, model: nn.Module) -> nn.Module:
         converted_model: nn.Module = model
         if isinstance(model, nn.SyncBatchNorm):
-            converted_model = _BatchNormXd(
+            converted_batch_norm: _BatchNormXd = _BatchNormXd(
                 model.num_features,
                 model.eps,
                 model.momentum,
@@ -32,16 +32,22 @@ class TorchSyncBatchNorm(LayerSync):
             )
             if model.affine:
                 with torch.no_grad():
-                    converted_model.weight = model.weight
-                    converted_model.bias = model.bias
-            converted_model.running_mean = model.running_mean
-            converted_model.running_var = model.running_var
-            converted_model.num_batches_tracked = model.num_batches_tracked
-            converted_model.train(model.training)
+                    converted_batch_norm.weight: nn.Parameter | None = model.weight
+                    converted_batch_norm.bias: nn.Parameter | None = model.bias
+            converted_batch_norm.running_mean: torch.Tensor | None = model.running_mean
+            converted_batch_norm.running_var: torch.Tensor | None = model.running_var
+            converted_batch_norm.num_batches_tracked: torch.Tensor | None = (
+                model.num_batches_tracked
+            )
+            converted_batch_norm.train(model.training)
             if hasattr(model, "qconfig"):
-                converted_model.qconfig = model.qconfig
-        for name, child in model.named_children():
-            converted_model.add_module(name, self.revert(child))
+                qconfig: QConfigAny = cast(QConfigAny, getattr(model, "qconfig"))
+                converted_batch_norm.qconfig: QConfigAny = qconfig
+            converted_model: nn.Module = converted_batch_norm
+        child_name: str
+        child: nn.Module
+        for child_name, child in model.named_children():
+            converted_model.add_module(child_name, self.revert(child))
         return converted_model
 
 

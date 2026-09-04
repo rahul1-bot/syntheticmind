@@ -111,3 +111,12 @@
     4. Broad `object` annotations were removed from the complete strategy and launcher package and replaced with named batch, optimizer, backward, model-state, optimizer-state, stage-argument, and checkpoint-storage contracts.
     5. Process-group lifetime now follows the participating process rather than an individual Trainer stage, which preserves sequential distributed stages and live DTensor access while retaining exception and exit cleanup.
     6. The next dependency-ordered phase must audit accelerators, precision plugins, cluster environments, and layer synchronization because these collaborators still feed the reconstructed strategy boundary and retain historical abstraction debt.
+
+| Strategic Note | Execution Collaborator Reconstruction | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
+
+    1. Device, cluster-environment, and layer-synchronization extension points now use structural contracts without inherited placeholder behavior.
+    2. Device selection has one invariant owner, and resolved topology is an immutable validated boundary rather than a mutable dataclass assembled by a free function.
+    3. Precision retains one concrete shared lifecycle while recursive conversion now belongs to that lifecycle directly, avoiding a stateless converter object and duplicate conversion paths.
+    4. Transformer Engine is isolated as an optional external adapter and follows the current NVIDIA `autocast` and delayed-scaling contract instead of the historical `fp8_autocast` call shape.
+    5. Runtime evidence covers the local Apple MPS device, CPU true and mixed precision, distributed CPU execution, cluster launch reconstruction, reversible synchronized batch normalization, and the unavailable optional dependency boundary.
+    6. The next phase is optimizer and training-closure ownership, where historical module functions, callable objects, opaque closure returns, and dynamically mutated optimizer classes still violate the governing architecture.

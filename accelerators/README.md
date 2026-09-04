@@ -1,14 +1,14 @@
-# syntheticmind.accelerators: The Device Abstraction
+# syntheticmind.accelerators: Device Ownership
 
-`accelerators/` isolates device-specific behavior behind one interface, so the trainer and the loops never branch on device type.
+`accelerators/` owns device availability, selection, binding, and the resolved device topology consumed by strategies.
 
-| Module | Contents |
+| Module | Ownership |
 |---|---|
-| `accelerator.py` | `Accelerator`, the abstract device contract covering availability detection, device resolution, and device-scoped setup and teardown. |
-| `cpu.py` | `CPUAccelerator`, the CPU implementation and the default when no hardware accelerator is requested. |
-| `cuda.py` | `CUDAAccelerator`, the NVIDIA CUDA implementation used by the study's cloud training and B200 evaluation lanes. |
-| `mps.py` | `MPSAccelerator`, the Apple Silicon Metal Performance Shaders implementation for local macOS execution. |
+| `accelerator.py` | The structural `Accelerator` contract consumed by Trainer and strategies. |
+| `device_parser.py` | Stateful GPU-selection parsing with count, identifier, uniqueness, and availability invariants. |
+| `topology.py` | The strict immutable `DeviceTopology` resolved from accelerator, device, and node configuration. |
+| `cpu.py` | CPU selection and binding. |
+| `cuda.py` | CUDA discovery, identifier resolution, and process-current-device binding. |
+| `mps.py` | Apple MPS discovery, identifier resolution, and binding. |
 
-## Related Components
-
-The accelerator is selected through the trainer's `accelerator` parameter, which the VOCODE command-line interface forwards as `--accelerator`. It composes with the strategy in `../strategies/`, which owns process placement.
+Strategies own process placement and model wrapping after the accelerator resolves the participating devices.
