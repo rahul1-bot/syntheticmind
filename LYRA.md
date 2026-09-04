@@ -4,7 +4,7 @@
     2. The defined private core Trainer capability target is complete without becoming a Lightning clone or importing its product identity.
     3. Fabric, public documentation, release machinery, promotional work, and upstream test-suite replication remain outside the active objective.
     4. Completion is bounded to verified training lifecycle, state, data, optimization, metrics, precision, callbacks, observability, and distributed execution; public release, deployment conversion, Fabric, unsupported hardware, and future integrations remain outside it.
-    5. New source comments and docstrings remain prohibited. Rewritten legacy modules are explicitly in scope for removal of stale or misleading prose, while unrelated surviving comments remain unchanged.
+    5. Rahul explicitly authorized a dedicated post-stabilization documentation phase on 04 September 2026. Source documentation follows the established VOCODE line-comment style with module ownership, design decisions, client integration, and comment-form API contracts; triple-quoted docstrings and low-information narration remain prohibited.
 
 | Strategic Note | Public Contracts and Internal Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 

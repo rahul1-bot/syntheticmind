@@ -4,7 +4,7 @@
     2. PyTorch Lightning is a mature source of capability evidence, but its branded types and internal decomposition are not industry standards. SyntheticMind adopts universal concepts and owns its implementation language.
     3. An inherited extension point is incomplete until cooperative initialization, method-resolution order, override discovery, launcher transport, exception behavior, and every runtime dispatch site agree with the public signature.
     4. Surface comparison cannot establish capability. A parameter that is accepted but ignored, a hook that is defined but never dispatched, or a property backed by stale state is a defect rather than partial parity.
-    5. Completion means the declared private capability boundary has executable success, failure, persistence, topology, and source evidence; it never converts excluded deployment, Fabric, release, unsupported hardware, or future integrations into implied claims.
+    5. Completion means the declared private capability boundary has executable success, failure, persistence, topology, and source evidence; after stability, documentation must describe only those verified semantics through the project-authorized VOCODE line-comment system and must never convert excluded deployment, Fabric, release, unsupported hardware, or future integrations into implied claims.
 
 | Memory | Lifecycle, Presentation, and Failure Ownership | Date: 04 September 2026 | Time: 05:23 PM | Name: Ghost |
 

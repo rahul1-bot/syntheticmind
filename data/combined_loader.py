@@ -1,3 +1,33 @@
+# This module:
+# 1. Defines CombinedLoader, the training-data composition primitive that turns
+#    one loader or a nested loader tree into the uniform iterator consumed by
+#    fit, evaluation, prediction, and progress reporting
+# 2. Implements the minimum-size, maximum-size, cycling, and sequential
+#    traversal algorithms used to coordinate loaders with different lengths
+# 3. Preserves sampler topology, explicit batch limits, stateful-loader
+#    continuation, pickling, and multiprocessing worker cleanup
+#
+# Design decisions:
+# - PyTorch pytree flattening preserves the client's dict, list, and tuple shape
+#   while the traversal algorithms operate on one ordered leaf sequence; every
+#   non-sequential batch is reconstructed into the original tree before return
+# - Primitive scalar collections are treated as dataset or batch leaves rather
+#   than mistaken for loader structure, allowing ordinary list- and tuple-based
+#   samples to pass through unchanged
+# - Each traversal policy is a private iterator with its own counters and reset
+#   state because minimum, maximum, cycling, and sequential exhaustion have
+#   different algorithms but no independent public lifecycle
+# - Sequential mode returns one loader leaf at a time with its dataloader index;
+#   the other modes return the reconstructed loader tree with index zero
+# - Stateful child loaders are discovered structurally and restored in flattened
+#   order, so checkpoint continuation preserves client loader implementations
+#   without wrapping them in a SyntheticMind-specific adapter
+# - reset removes persistent multiprocessing iterator references after shutting
+#   down the active traversal, preventing completed stages from retaining worker
+#   processes or stale prefetched batches
+#
+# Author: Rahul Sawhney
+
 import math
 from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import Literal, Protocol, cast, override, runtime_checkable
@@ -50,12 +80,18 @@ type _ModeState = dict[str, _ModeStateValue]
 
 @runtime_checkable
 class _StatefulIterable(Protocol):
+    # Structural checkpoint contract implemented by stateful dataloaders. A
+    # client loader participates by exposing this pair; inheritance from a
+    # SyntheticMind class is not required.
     def state_dict(self) -> DataLoaderState: ...
 
     def load_state_dict(self, state_dict: DataLoaderState) -> None: ...
 
 
 class _ModeIterator(Iterator[_IteratorOutput]):
+    # Shared traversal state for loader-combination algorithms: concrete leaves,
+    # resolved limits, known combined length, live iterators, per-leaf counts,
+    # and the number of combined outputs already yielded.
     def __init__(
         self,
         iterables: list[Iterable[Batch]],
@@ -71,6 +107,8 @@ class _ModeIterator(Iterator[_IteratorOutput]):
 
     @override
     def __iter__(self) -> _ModeIterator:
+        # Recreates every child iterator and resets all counters, making each
+        # CombinedLoader iteration a fresh traversal over the current leaves.
         self.iterators: list[Iterator[Batch]] = []
         iterable: Iterable[Batch]
         for iterable in self.iterables:
@@ -80,20 +118,28 @@ class _ModeIterator(Iterator[_IteratorOutput]):
         return self
 
     def _next(self, index: int) -> Batch:
+        # Pulls one value from the selected leaf and advances its consumed count.
         value: Batch = next(self.iterators[index])
         self.counts[index] += 1
         return value
 
     def _is_complete(self) -> bool:
+        # Applies an explicit or inferred combined-length ceiling before a mode
+        # requests another child value.
         return self.length is not None and self.yielded >= self.length
 
     def reset(self) -> None:
+        # Releases iterator references and returns the traversal to its initial
+        # counter state without modifying the underlying loader objects.
         self.iterators: list[Iterator[Batch]] = []
         self.counts: list[int] = []
         self.yielded: int = 0
 
     @override
     def __getstate__(self) -> _ModeState:
+        # Excludes PyTorch DataLoader iterators from pickled state because their
+        # multiprocessing machinery cannot cross a launcher boundary safely;
+        # ordinary Python iterators remain serializable when their type permits.
         state: _ModeState = cast(_ModeState, dict(self.__dict__))
         serializable_iterators: list[Iterator[Batch] | None] = []
         iterator: Iterator[Batch]
@@ -108,6 +154,8 @@ class _ModeIterator(Iterator[_IteratorOutput]):
 
 
 class _MinSize(_ModeIterator):
+    # Stops the combined traversal as soon as any leaf is exhausted. Every
+    # returned batch contains exactly one value from every loader.
     @override
     def __next__(self) -> _IteratorOutput:
         if self._is_complete():
@@ -122,6 +170,8 @@ class _MinSize(_ModeIterator):
 
 
 class _MaxSize(_ModeIterator):
+    # Continues until every leaf is exhausted and substitutes None for leaves
+    # that ended earlier, preserving the complete longest-loader horizon.
     @override
     def __next__(self) -> _IteratorOutput:
         if self._is_complete():
@@ -143,6 +193,8 @@ class _MaxSize(_ModeIterator):
 
 
 class _MaxSizeCycle(_ModeIterator):
+    # Rewinds shorter leaves when they exhaust and stops only after every leaf
+    # has completed at least once or the resolved maximum length is reached.
     @override
     def __init__(
         self,
@@ -161,6 +213,8 @@ class _MaxSizeCycle(_ModeIterator):
 
     @override
     def __next__(self) -> _IteratorOutput:
+        # Pulls every leaf, restarting exhausted leaves unless all leaves have
+        # completed; per-leaf counters restart with each new cycle.
         if self._is_complete():
             raise StopIteration
         values: list[Batch] = []
@@ -188,6 +242,9 @@ class _MaxSizeCycle(_ModeIterator):
 
 
 class _Sequential(_ModeIterator):
+    # Traverses one loader completely before opening the next and returns the
+    # active loader index with each batch, matching multi-loader evaluation and
+    # prediction step signatures.
     @override
     def __init__(
         self,
@@ -210,6 +267,8 @@ class _Sequential(_ModeIterator):
 
     @override
     def __next__(self) -> _IteratorOutput:
+        # Advances through loaders in flattened order, resetting the local batch
+        # index at each boundary while preserving the global yielded count.
         while self.iterator_idx < len(self.iterables):
             try:
                 value: Batch = self._next(0)
@@ -227,6 +286,8 @@ class _Sequential(_ModeIterator):
 
     @override
     def _next(self, index: int) -> Batch:
+        # Reads only the active sequential iterator and treats its per-loader
+        # limit as an exhaustion boundary even when the iterable has more data.
         del index
         limit: int | None = self.limits[self.iterator_idx]
         if limit is not None and self.counts[self.iterator_idx] >= limit:
@@ -250,11 +311,54 @@ class _Sequential(_ModeIterator):
 
 
 class CombinedLoader(Iterator[_IteratorOutput]):
+    # Uniform iterator over one loader or a nested loader collection. Clients
+    # normally return plain loaders from Module or DataModule factories and let
+    # Trainer select the standard mode; construct CombinedLoader explicitly when
+    # a research method requires a particular multi-loader traversal policy.
+    #
+    # Integration: every iteration yields ``(batch, batch_idx, dataloader_idx)``.
+    # Non-sequential modes reconstruct batch into the supplied loader tree;
+    # sequential mode yields the active leaf and reports its flattened index.
+    #
+    # Example::
+    #
+    #     from torch.utils.data import DataLoader
+    #
+    #     from syntheticmind import CombinedLoader
+    #
+    #     loaders: dict[str, DataLoader] = {
+    #         "labeled": labeled_loader,
+    #         "unlabeled": unlabeled_loader
+    #     }
+    #     combined: CombinedLoader = CombinedLoader(
+    #         loaders,
+    #         mode="max_size_cycle"
+    #     )
+    #     for batch, batch_idx, dataloader_idx in combined:
+    #         labeled_batch = batch["labeled"]
+    #         unlabeled_batch = batch["unlabeled"]
+    #
+    # The explicit limits property may bound each leaf independently before
+    # iteration. Length becomes available only after iter(combined) initializes
+    # the traversal, matching the live iterator whose horizon is reported.
     def __init__(
         self,
         iterables: _IterableCollection,
         mode: CombinedLoaderMode = "min_size"
     ) -> None:
+        # Validates the requested algorithm, flattens the client collection with
+        # primitive-batch awareness, and stores both representations so later
+        # sampler replacement can update leaves without losing tree structure.
+        #
+        # Args:
+        #     iterables: One iterable or a nested dict, list, or tuple of
+        #         iterable or Dataset leaves.
+        #     mode: Combination algorithm: ``"min_size"``,
+        #         ``"max_size_cycle"``, ``"max_size"``, or ``"sequential"``.
+        #         Default: ``"min_size"``.
+        #
+        # Raises:
+        #     ValueError: If mode is not one of the supported algorithms.
         if mode not in ("min_size", "max_size_cycle", "max_size", "sequential"):
             raise ValueError(
                 f"Unsupported mode {mode!r}; expected min_size, max_size_cycle, "
@@ -278,14 +382,20 @@ class CombinedLoader(Iterator[_IteratorOutput]):
 
     @property
     def iterables(self) -> _IterableCollection:
+        # Original loader collection with any later flattened-leaf replacements
+        # reconstructed into the same client-visible tree shape.
         return self._iterables
 
     @property
     def flattened(self) -> list[_IterableLeaf]:
+        # Ordered loader leaves used by connectors, loops, and sampler policy.
         return self._flattened
 
     @flattened.setter
     def flattened(self, flattened: list[_IterableLeaf]) -> None:
+        # Replaces leaves without changing the pytree specification. DataConnector
+        # uses this after distributed sampler reconstruction; a cardinality
+        # change is rejected because it cannot satisfy the original tree.
         if len(flattened) != len(self._flattened):
             raise ValueError(
                 f"Flattened length {len(flattened)} does not match {len(self._flattened)}."
@@ -298,6 +408,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
 
     @property
     def sampler(self) -> _SamplerCollection:
+        # Sampler attributes from every leaf reconstructed into loader topology;
+        # leaves without a sampler contribute None.
         values: list[_SamplerLeaf] = []
         iterable: _IterableLeaf
         for iterable in self._flattened:
@@ -311,6 +423,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
 
     @property
     def batch_sampler(self) -> _SamplerCollection:
+        # Batch-sampler attributes from every leaf reconstructed into loader
+        # topology; this remains separate from sampler for client inspection.
         values: list[_SamplerLeaf] = []
         iterable: _IterableLeaf
         for iterable in self._flattened:
@@ -324,10 +438,14 @@ class CombinedLoader(Iterator[_IteratorOutput]):
 
     @property
     def limits(self) -> list[_Limit] | None:
+        # Per-leaf limits before normalization; None means no explicit ceiling.
         return self._limits
 
     @limits.setter
     def limits(self, limits: _Limit | Sequence[_Limit]) -> None:
+        # Applies one limit to every leaf or validates a leaf-aligned sequence.
+        # Positive infinity represents an unbounded leaf and finite floats must
+        # be exact non-negative integers.
         if limits is None:
             self._limits: list[_Limit] | None = None
             return
@@ -349,9 +467,13 @@ class CombinedLoader(Iterator[_IteratorOutput]):
 
     @property
     def mode(self) -> CombinedLoaderMode:
+        # Immutable traversal algorithm selected at construction.
         return self._mode
 
     def _length(self) -> int | None:
+        # Computes the combined horizon from effective per-leaf lengths: minimum
+        # for min_size, maximum for maximum modes, sum for sequential, and None
+        # whenever the selected algorithm depends on an unsized leaf.
         lengths: list[int | None] = []
         limits: list[int | None] = self._resolved_limits()
         iterable: _IterableLeaf
@@ -387,6 +509,7 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         return sum(cast(list[int], lengths))
 
     def _has_sized_iterables(self) -> bool:
+        # Whether every loader leaf exposes a usable finite or bounded length.
         iterable: _IterableLeaf
         for iterable in self._flattened:
             if self._safe_length(iterable) is None:
@@ -395,6 +518,9 @@ class CombinedLoader(Iterator[_IteratorOutput]):
 
     @override
     def __iter__(self) -> CombinedLoader:
+        # Constructs the selected private iterator over current leaves and
+        # resolved limits. Non-iterable leaves fail at this boundary before a
+        # loop begins consuming partial training state.
         iterables: list[Iterable[Batch]] = []
         iterable: _IterableLeaf
         for iterable in self._flattened:
@@ -415,6 +541,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
 
     @override
     def __next__(self) -> _IteratorOutput:
+        # Advances the initialized traversal and restores non-sequential outputs
+        # to client topology; requesting a batch before iter() is a usage error.
         if self._iterator is None:
             raise RuntimeError("CombinedLoader must be iterated before requesting a batch.")
         iterator_output: _IteratorOutput = next(self._iterator)
@@ -432,6 +560,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         return output, batch_idx, dataloader_idx
 
     def __len__(self) -> int:
+        # Returns the active traversal horizon after initialization. Unknown
+        # horizons remain explicit TypeError rather than fabricated estimates.
         if self._iterator is None:
             raise RuntimeError("CombinedLoader must be iterated before requesting its length.")
         length: int | None = self._length()
@@ -443,6 +573,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         return length
 
     def _dataset_length(self) -> int:
+        # Computes sample cardinality from child dataset attributes for tuning
+        # and overfit decisions, following the selected combination algorithm.
         lengths: list[int] = []
         iterable: _IterableLeaf
         for iterable in self._flattened:
@@ -462,6 +594,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         return sum(lengths)
 
     def _state_dicts(self) -> list[DataLoaderState]:
+        # Captures state from structurally stateful leaves in flattened order and
+        # rejects implementations that violate their mapping return contract.
         state_dicts: list[DataLoaderState] = []
         iterable: _IterableLeaf
         for iterable in self._flattened:
@@ -476,12 +610,15 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         return state_dicts
 
     def _has_stateful_iterables(self) -> bool:
+        # Whether any child loader participates in exact cursor continuation.
         return any(
             isinstance(iterable, _StatefulIterable)
             for iterable in self._flattened
         )
 
     def _load_state_dicts(self, state_dicts: list[DataLoaderState]) -> None:
+        # Restores states against the same flattened stateful-loader order. A
+        # count mismatch rejects a changed data topology before any cursor moves.
         if not state_dicts:
             return
         stateful_iterables: list[_StatefulIterable] = []
@@ -505,6 +642,9 @@ class CombinedLoader(Iterator[_IteratorOutput]):
             iterable.load_state_dict(state_dict)
 
     def reset(self) -> None:
+        # Releases the mode iterator and clears persistent DataLoader worker
+        # iterator references so the next stage or epoch starts from a clean
+        # loader lifecycle.
         if self._iterator is not None:
             self._iterator.reset()
         self._iterator: _ModeIterator | None = None
@@ -521,6 +661,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
             setattr(iterable, "_iterator", None)
 
     def _resolved_limits(self) -> list[int | None]:
+        # Converts stored integral floats and positive infinity into the integer
+        # or unbounded representation consumed by traversal algorithms.
         if self._limits is None:
             return [None] * len(self._flattened)
         resolved_limits: list[int | None] = []
@@ -535,6 +677,7 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         return resolved_limits
 
     def _iterator_type(self) -> type[_ModeIterator]:
+        # Resolves the validated public mode into its private traversal class.
         match self._mode:
             case "min_size":
                 return _MinSize
@@ -546,6 +689,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
                 return _Sequential
 
     def _is_primitive_collection(self, value: _TreeNode) -> bool:
+        # Tells pytree when a dict, list, or tuple is a scalar batch leaf rather
+        # than loader structure by requiring every direct child to be primitive.
         if isinstance(value, dict):
             children: Iterable[_TreeNode] = cast(
                 dict[str, _TreeNode],
@@ -565,6 +710,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
         return True
 
     def _safe_length(self, value: _TreeNode | None) -> int | None:
+        # Reads Sized length while treating an implementation-level TypeError as
+        # an intentionally unknown horizon.
         if not isinstance(value, Sized):
             return None
         try:
@@ -573,6 +720,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
             return None
 
     def _normalize_limit(self, limit: _Limit) -> _Limit:
+        # Accepts non-negative integer counts and positive infinity only; bools,
+        # fractional values, negative values, NaN, and negative infinity fail.
         if limit is None:
             return None
         if type(limit) is bool or not isinstance(limit, (int, float)):

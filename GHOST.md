@@ -5,7 +5,7 @@
     3. Future capabilities require a new evidence-backed scope rather than extending this completed objective through speculative parity or copied framework baggage.
     4. Fabric, public documentation, release machinery, promotional work, and replication of the upstream PyTorch Lightning test suite are excluded.
     5. Code behavior, inherited extension compatibility, failure handling, and proportionate executable verification control the work queue.
-    6. New source-code comments and docstrings remain prohibited. The active ground-up refactor explicitly targets rewritten legacy modules, so stale or misleading source prose is removed with the code it described rather than preserved as false architecture.
+    6. Rahul explicitly authorized the post-stabilization documentation phase on 04 September 2026. SyntheticMind now follows the VOCODE line-comment system recorded in `docs/project_guidelines/documentation_style.md`: module ownership, design rationale, client integration, lifecycle contracts, and comment-form API guidance are required, while triple-quoted docstrings, TODO prose, syntax narration, and stale compatibility claims remain prohibited.
 
 | Architecture Decision | Public Terminology and Framework Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 

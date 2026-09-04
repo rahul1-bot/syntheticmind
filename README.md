@@ -35,3 +35,5 @@ Checkpoint schema version 2 is native and resumable. A durable training checkpoi
 ## Related Components
 
 Downstream research projects consume the package-root contracts and specialize models, data, callbacks, and parallelization plans without changing framework ownership. Focused runtime probes and source references remain outside the tracked production package.
+
+The package-level documentation begins with [`data/README.md`](data/README.md), [`primitives/README.md`](primitives/README.md), and [`rng/README.md`](rng/README.md). Source comments and future Markdown documentation follow [`docs/project_guidelines/documentation_style.md`](docs/project_guidelines/documentation_style.md).

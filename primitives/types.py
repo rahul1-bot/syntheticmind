@@ -1,3 +1,26 @@
+# This module:
+# 1. Defines the recursive value vocabulary shared across model, data, Trainer,
+#    optimization, checkpoint, launcher, logger, and strategy boundaries
+# 2. Defines DeviceTransferable, the structural contract through which custom
+#    batch containers participate in device placement
+#
+# Design decisions:
+# - Recursive aliases name every accepted leaf and container explicitly instead
+#   of escaping through Any or object, so a boundary states what can actually
+#   cross it and nested checkpoint payloads remain reviewable
+# - Types live here only when at least two semantic subsystems consume them;
+#   implementation-local aliases stay beside their owner
+# - StateDict describes lightweight component state, CheckpointDict describes
+#   the complete serialized value domain, and OptimizerState preserves integer
+#   parameter identifiers; these domains are intentionally not interchangeable
+# - Batch and ModelOutput are distinct because batches may contain custom
+#   device-transferable objects and bytes, while model outputs must remain
+#   values the loops can route, gather, or return to clients
+# - The module contains vocabulary only: no construction, validation, I/O, or
+#   runtime policy is permitted here
+#
+# Author: Rahul Sawhney
+
 from argparse import Namespace
 from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
@@ -55,10 +78,16 @@ __all__: list[str] = [
     "MapLocation"
 ]
 
+# Public lifecycle names accepted by Trainer entry points, callbacks, profilers,
+# and process launchers.
 type TrainerStage = Literal["fit", "validate", "test", "predict"]
 
+# Internal execution phases distinguish training and sanity validation from the
+# public entry point that owns them.
 type RunningStage = Literal["training", "validating", "testing", "predicting", "sanity_checking"]
 
+# User-facing precision input accepts the established numeric and string forms;
+# PrecisionType is the canonical resolved policy stored after configuration.
 type PrecisionInput = (
     Literal[64, 32, 16]
     | Literal[
@@ -90,6 +119,8 @@ type PrecisionType = Literal[
 
 type ClipAlgorithm = Literal["norm", "value"]
 
+# Scheduler and metric reduction vocabularies cross core, loop, callback, and
+# strategy boundaries and therefore remain framework primitives.
 type SchedulerInterval = Literal["step", "epoch"]
 
 type Reduction = Literal["mean", "sum", "min", "max"]
@@ -104,10 +135,17 @@ type BatchScalar = bool | int | float | str | bytes | None
 
 @runtime_checkable
 class DeviceTransferable(Protocol):
+    # Structural device-transfer contract for client batch containers. A type
+    # participates without inheriting from SyntheticMind when it exposes a
+    # Tensor-compatible to(device, non_blocking=...) operation.
     def to(self, device: torch.device, non_blocking: bool = False) -> DeviceTransferable:
+        # Returns the same logical value placed on the requested device. CUDA
+        # batches may receive non_blocking=True; other backends receive False.
         ...
 
 
+# Recursive batch and dataloader domains preserve nested dict, list, and tuple
+# topology from client data factories through CombinedLoader and every loop.
 type Batch = (
     BatchScalar
     | torch.Tensor
@@ -134,12 +172,17 @@ type DataLoaderSource = (
 
 type DataLoaderState = dict[str, CheckpointValue]
 
+# StepArgument accounts for the optional dataloader index appended by sequential
+# multi-loader execution, while step results remain scalar metric mappings.
 type StepArgument = Batch | int
 
 type StepOutput = dict[str, torch.Tensor | float]
 
 type TrainingStepOutput = torch.Tensor | StepOutput | None
 
+# ModelOutput is the recursive value domain returned from prediction and hook
+# dispatch; collective gathering has a narrower numeric domain and a transformed
+# result whose leaves are always tensors.
 type ModelScalar = bool | int | float | str | None
 
 type ModelOutput = (
@@ -168,6 +211,8 @@ type GatherResult = (
     | tuple[GatherResult, ...]
 )
 
+# Hyperparameters include portable constructor values plus the richer objects
+# that capture may encounter before logger normalization or checkpoint writing.
 type HyperparameterScalar = bool | int | float | str | None
 
 type HyperparameterValue = (
@@ -193,6 +238,8 @@ type HyperparameterValue = (
 
 type HyperparameterDict = dict[str, HyperparameterValue]
 
+# Component state is string-keyed and intentionally narrower than a complete
+# checkpoint payload. TrainerStateDict restricts live progress to scalar values.
 type StateScalar = bool | int | float | str | None
 
 type StateValue = StateScalar | torch.Tensor | list[StateValue] | tuple[StateValue, ...] | dict[str, StateValue]
@@ -201,6 +248,8 @@ type StateDict = dict[str, StateValue]
 
 type TrainerStateDict = dict[str, StateScalar]
 
+# Checkpoint values admit tensors, NumPy arrays, and recursively nested
+# containers because a full trajectory aggregates state from every participant.
 type CheckpointScalar = StateScalar
 
 type CheckpointValue = (
@@ -214,6 +263,8 @@ type CheckpointValue = (
 
 type CheckpointDict = dict[str, CheckpointValue]
 
+# Distributed checkpoint state preserves PyTorch's model ValueType and the
+# integer parameter identifiers used by optimizer state dictionaries.
 type ModelState = dict[str, ValueType]
 
 type OptimizerStateKey = str | int
@@ -239,6 +290,8 @@ type OptimizerParameterGroup = dict[
 
 type DistributedCheckpointState = dict[str, ModelState | OptimizerState]
 
+# Optimizer closures and step keyword values form the execution seam shared by
+# Module, SyntheticOptimizer, precision plugins, strategies, and loops.
 type OptimizerClosureResult = float | torch.Tensor | None
 
 type OptimizerClosure = Callable[[], OptimizerClosureResult]
@@ -251,6 +304,8 @@ type OptimizerStepOptions = dict[str, OptimizerStepValue]
 
 type BackwardInputs = torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor] | None
 
+# MapLocation mirrors torch.load while keeping the accepted callable, device,
+# string, mapping, and default forms explicit at checkpoint APIs.
 type MapLocation = (
     Callable[[torch.types.Storage, str], torch.types.Storage | None]
     | torch.device

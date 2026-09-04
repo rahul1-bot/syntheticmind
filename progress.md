@@ -4,7 +4,7 @@
     2. ✅ The controlling PyTorch Lightning comparison is the ignored `external/` checkout at revision `21ac84116633b8c629da03c41e6d6ec2cfb15241` from 01 September 2026.
     3. ✅ The governing Python rules are `/Users/rahulsawhney/Library/CloudStorage/OneDrive-Personal/Documents/StudyDocuments/Rahul/code-guidelines.md`; repository-local historical copies have no authority.
     4. ✅ Public terminology, inheritance, method, parameter, default, state, hook, and lifecycle compatibility are mandatory wherever SyntheticMind implements the same machine-learning concept.
-    5. ✅ Fabric, public release or promotional documentation, upstream test-suite replication, new source comments, linters, and static type checkers remain excluded. Internal architecture references and mandatory ledgers remain active.
+    5. ✅ Rahul authorized the dedicated SyntheticMind documentation phase on 04 September 2026; inward package, primitive, stochastic-stream, and data documentation now follows the VOCODE line-comment standard, while Fabric, public release promotion, upstream test-suite replication, linters, static type checkers, and triple-quoted docstrings remain excluded.
 
 | Progress Complete | Trainer Runtime Foundation | Date: 04 September 2026 | Time: 07:48 PM | Name: Ghost |
 
