@@ -11,6 +11,7 @@ from syntheticmind.types import (
     DataLoaderState,
     DataLoaderSource,
     ModelOutput,
+    OptimizerState,
     RunningStage,
     StateDict,
     TrainerStateDict
@@ -79,7 +80,7 @@ class _WorkerOutput(BaseModel):
     train_total_batch_idx: int
     train_epoch_rng_state: CheckpointDict | None
     train_epoch_metric_states_by_rank: list[CheckpointDict]
-    train_optimizer_states: list[CheckpointValue]
+    train_optimizer_states: list[OptimizerState]
     train_scheduler_states: list[CheckpointValue]
     received_sigterm: bool
     is_last_batch: bool

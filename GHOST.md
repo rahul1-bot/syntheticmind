@@ -124,7 +124,7 @@
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
     7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
 
-| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:39 PM | Name: Ghost |
+| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:43 PM | Name: Ghost |
 
     1. The Trainer checkpoint connector remains the sole trajectory coordinator; stage `ckpt_path` and mutable `trainer.ckpt_path` are the explicit selection controls, while the unused constructor `resume_from_checkpoint` alias and connector accessor were removed.
     2. Schema version 2 records artifact identity, configuration, progress, participant state, randomness, and strict per-rank partial-epoch schemas; entries require epoch cadence, scalar and TorchMetrics accumulators cannot mix state kinds, and malformed identity, rank count, or world size fails before model mutation.
@@ -132,7 +132,7 @@
     4. A partial `max_steps` or stop boundary preserves the current epoch instead of fabricating epoch-end hooks or scheduler steps; loader cursor, rank-local scalar accumulators, non-persistent TorchMetrics tensor or list state, update counts, and metric identity resume together.
     5. A persisted effective configuration snapshot permits larger run ceilings while rejecting drift in accumulation, training and validation limits, cadence, clipping, determinism, sampler policy, barebones state, synchronization, reload cadence, and precision before restoration; bounded Timer runs record their actual unbounded epoch ceiling.
     6. Direct resumable saves during incomplete batches fail; ModelCheckpoint records due batch or validation triggers and flushes at the correct batch or epoch durability boundary, while weights-only output remains safe and cannot continue fit.
-    7. Exact scalar reductions, TorchMetrics tensor and list state, epoch and plateau schedulers, local and two-rank differing metric histories, spawned post-fit optimizer and scheduler payloads, world-size rejection, corruption, stateful data, and sharded FSDP2 resume pass.
+    7. Exact scalar and TorchMetrics state, schedulers, differing-rank histories, spawned post-fit payloads, world-size rejection, corruption, stateful data, and sharded FSDP2 resume pass; spawned optimizer payloads use the integer-key-aware OptimizerState contract rather than a false string-key checkpoint mapping.
 
 | Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 

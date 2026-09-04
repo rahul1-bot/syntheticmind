@@ -81,6 +81,7 @@ from syntheticmind.types import (
     DataLoaderSource,
     HyperparameterDict,
     ModelOutput,
+    OptimizerState,
     PrecisionInput,
     PrecisionType,
     RunningStage,
@@ -1261,9 +1262,9 @@ class Trainer:
     ) -> None:
         launcher: _ProcessLauncher | None = self._stage_launcher()
         if launcher is not None and launcher.start_method != "popen":
-            self._checkpoint_connector.train_optimizer_states: list[
-                CheckpointValue
-            ] = self._checkpoint_optimizer_states(False)
+            self._checkpoint_connector.train_optimizer_states: list[OptimizerState] = (
+                self._checkpoint_optimizer_states(False)
+            )
             self._checkpoint_connector.train_scheduler_states: list[
                 CheckpointValue
             ] = self._checkpoint_scheduler_states()
@@ -1932,7 +1933,7 @@ class Trainer:
         combined_loader_states: list[DataLoaderState] = loop_state[3]
         is_mid_epoch: bool = loop_state[4]
         epoch: int = self._checkpoint_epoch(module, is_mid_epoch)
-        optimizer_states: list[CheckpointValue] = self._checkpoint_optimizer_states(
+        optimizer_states: list[OptimizerState] = self._checkpoint_optimizer_states(
             weights_only
         )
         scheduler_states: list[CheckpointValue] = self._checkpoint_scheduler_states()
@@ -2098,8 +2099,8 @@ class Trainer:
     def _checkpoint_optimizer_states(
         self,
         weights_only: bool
-    ) -> list[CheckpointValue]:
-        optimizer_states: list[CheckpointValue] = []
+    ) -> list[OptimizerState]:
+        optimizer_states: list[OptimizerState] = []
         if weights_only:
             return optimizer_states
         if not self.optimizers:
@@ -2107,10 +2108,7 @@ class Trainer:
         optimizer: torch.optim.Optimizer
         for optimizer in self.optimizers:
             optimizer_states.append(
-                cast(
-                    CheckpointValue,
-                    self._checkpoint_connector.optimizer_state(optimizer)
-                )
+                self._checkpoint_connector.optimizer_state(optimizer)
             )
         return optimizer_states
 

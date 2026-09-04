@@ -15,6 +15,7 @@ from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
     DataLoaderState,
+    OptimizerState,
     RunningStage,
     StateDict,
     TrainerStage
@@ -233,7 +234,7 @@ class _WorkerStateTransfer:
         trainer._checkpoint_connector.train_epoch_metric_states_by_rank: list[
             CheckpointDict
         ] = worker_output.train_epoch_metric_states_by_rank
-        trainer._checkpoint_connector.train_optimizer_states: list[CheckpointValue] = (
+        trainer._checkpoint_connector.train_optimizer_states: list[OptimizerState] = (
             worker_output.train_optimizer_states
         )
         trainer._checkpoint_connector.train_scheduler_states: list[CheckpointValue] = (

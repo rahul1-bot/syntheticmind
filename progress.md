@@ -126,12 +126,12 @@
     3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
     4. ✅ Weighted, dataclass, ambiguity, tensor-state, TorchMetrics, CPU, MPS, remote fsspec, external DDP, spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
 
-| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 07:39 PM | Name: Ghost |
+| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 07:43 PM | Name: Ghost |
 
     1. ✅ Schema version 2 validates artifact, configuration, progress, participant, randomness, and per-rank partial metric identity, epoch cadence, scalar-versus-TorchMetrics kind, update count, rank count, and world size before restoration.
     2. ✅ One Randomness owner replaces SeedManager and duplicate launcher or checkpoint RNG logic, captures only active accelerator generators, and preserves exact Python, NumPy, torch CPU, CUDA, and MPS state.
     3. ✅ A partial run retains the current epoch, loader, scalar reductions, TorchMetrics tensor or list state, and schedulers without synthetic epoch hooks; graph/custom-group metrics and changed worlds reject explicitly.
-    4. ✅ Exact local, differing-rank DDP, spawned parent post-fit, stateful-loader, accumulated, step- and epoch-plateau, validation-trigger, tensor-parallel, and sharded FSDP2 continuation pass.
+    4. ✅ Exact local, differing-rank DDP, precisely typed spawned optimizer and scheduler post-fit state, stateful-loader, accumulated, plateau, validation-trigger, tensor-parallel, and sharded FSDP2 continuation pass.
 
 | Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 

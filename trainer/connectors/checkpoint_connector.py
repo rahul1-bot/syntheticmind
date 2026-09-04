@@ -33,6 +33,7 @@ from syntheticmind.types import (
     CheckpointValue,
     DataLoaderState,
     HyperparameterDict,
+    OptimizerState,
     StateDict,
     TrainerStage
 )
@@ -60,7 +61,7 @@ class _CheckpointConnector:
         self.train_total_batch_idx: int = -1
         self.train_epoch_rng_state: CheckpointDict | None = None
         self.train_epoch_metric_states_by_rank: list[CheckpointDict] = []
-        self.train_optimizer_states: list[CheckpointValue] = []
+        self.train_optimizer_states: list[OptimizerState] = []
         self.train_scheduler_states: list[CheckpointValue] = []
 
     def select_path(
@@ -116,7 +117,7 @@ class _CheckpointConnector:
         self.train_total_batch_idx: int = -1
         self.train_epoch_rng_state: CheckpointDict | None = None
         self.train_epoch_metric_states_by_rank: list[CheckpointDict] = []
-        self.train_optimizer_states: list[CheckpointValue] = []
+        self.train_optimizer_states: list[OptimizerState] = []
         self.train_scheduler_states: list[CheckpointValue] = []
 
     def build(
@@ -133,7 +134,7 @@ class _CheckpointConnector:
         precision_plugin: Precision,
         weights_only: bool,
         model_state_dict: CheckpointValue,
-        optimizer_states: list[CheckpointValue],
+        optimizer_states: list[OptimizerState],
         scheduler_states: list[CheckpointValue],
         trainer_configuration: CheckpointValue
     ) -> CheckpointDict:
@@ -148,7 +149,10 @@ class _CheckpointConnector:
             self._store_hyperparameters(checkpoint, model)
         if not weights_only:
             checkpoint["rng_state"]: CheckpointValue = self.capture_random_state()
-            checkpoint["optimizer_states"]: CheckpointValue = optimizer_states
+            checkpoint["optimizer_states"]: CheckpointValue = cast(
+                CheckpointValue,
+                optimizer_states
+            )
         if not weights_only and completed_batches > 0:
             checkpoint["completed_batches"]: CheckpointValue = completed_batches
         if not weights_only and total_batch_idx >= 0:
@@ -311,11 +315,8 @@ class _CheckpointConnector:
     def optimizer_state(
         self,
         optimizer: torch.optim.Optimizer
-    ) -> CheckpointValue:
-        return cast(
-            CheckpointValue,
-            self._strategy.checkpoint.optimizer_state(optimizer)
-        )
+    ) -> OptimizerState:
+        return self._strategy.checkpoint.optimizer_state(optimizer)
 
     def connect_optimizers(
         self,
