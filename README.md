@@ -20,6 +20,8 @@
 
 The public surface follows established PyTorch research vocabulary. Models subclass `Module`, which is itself a `torch.nn.Module`, and express behavior through `forward`, `training_step`, `validation_step`, `test_step`, `predict_step`, and `configure_optimizers`. Metrics are emitted through `Module.log` and `Module.log_dict` with explicit step and epoch reduction, logger visibility, and distributed-synchronization semantics. Data behavior is expressed through the `DataModule` methods `prepare_data`, `setup`, `teardown`, and the per-stage dataloader constructors.
 
+`Trainer`, `Module`, `DataModule`, and `DatasetDataModule` are available from the `syntheticmind` package root. Their implementations remain owned by the semantic subpackages shown above.
+
 `Trainer` orchestrates the fit, validate, test, and predict stages under parameters covering epoch ceilings, accelerator and strategy selection, precision, gradient accumulation and clipping, validation cadence, sanity validation, per-stage batch limits, deterministic seeding, and checkpoint resume. Manual optimization through `manual_backward`, `optimizer_step`, `toggle_optimizer`, and `untoggle_optimizer` supports multi-optimizer research models; the adversarial vocoders of this study use this path for their alternating generator and discriminator updates.
 
 ## Checkpoints

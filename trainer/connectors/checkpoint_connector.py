@@ -550,13 +550,13 @@ class _CheckpointConnector:
         source._clean_hparams()
         if not source.hparams:
             return
-        checkpoint[source.CHECKPOINT_HYPER_PARAMS_NAME]: CheckpointValue = (
+        checkpoint[source._checkpoint_hyperparameters_name]: CheckpointValue = (
             source._hparams_name
         )
         stored_hyperparameters: HyperparameterDict = {
             key: value for key, value in source.hparams.items()
         }
-        checkpoint[source.CHECKPOINT_HYPER_PARAMS_KEY]: CheckpointValue = cast(
+        checkpoint[source._checkpoint_hyperparameters_key]: CheckpointValue = cast(
             CheckpointValue,
             stored_hyperparameters
         )

@@ -27,7 +27,7 @@ from syntheticmind.utilities.filesystem import (
     make_directory,
     normalize_path,
     same_path,
-    write_text,
+    write_text
 )
 from syntheticmind.utilities.types import (
     Batch,
@@ -35,7 +35,7 @@ from syntheticmind.utilities.types import (
     StateDict,
     StateValue,
     StepOutput,
-    TrainerStage,
+    TrainerStage
 )
 
 if TYPE_CHECKING:
@@ -45,11 +45,11 @@ __all__: list[str] = ["ModelCheckpoint"]
 
 
 class ModelCheckpoint(Checkpoint):
-    CHECKPOINT_JOIN_CHAR: str = "-"
-    CHECKPOINT_EQUALS_CHAR: str = "="
-    CHECKPOINT_NAME_LAST: str = "last"
-    FILE_EXTENSION: str = ".ckpt"
-    STARTING_VERSION: int = 1
+    _checkpoint_join_character: str = "-"
+    _checkpoint_equals_character: str = "="
+    _last_checkpoint_name: str = "last"
+    _file_extension: str = ".ckpt"
+    _starting_version: int = 1
 
     def __init__(
         self,
@@ -487,14 +487,14 @@ class ModelCheckpoint(Checkpoint):
             if auto_insert_metric_name:
                 resolved_filename = resolved_filename.replace(
                     group,
-                    name + self.CHECKPOINT_EQUALS_CHAR + "{" + name
+                    name + self._checkpoint_equals_character + "{" + name
                 )
             resolved_filename = resolved_filename.replace(group, f"{{0[{name}]")
             if name not in metrics:
                 metrics[name] = torch.tensor(0)
         resolved_filename = resolved_filename.format(metrics)
         if prefix is not None:
-            resolved_filename = self.CHECKPOINT_JOIN_CHAR.join(
+            resolved_filename = self._checkpoint_join_character.join(
                 (prefix, resolved_filename)
             )
         return resolved_filename
@@ -513,10 +513,10 @@ class ModelCheckpoint(Checkpoint):
             auto_insert_metric_name=self.auto_insert_metric_name
         )
         if ver is not None:
-            resolved_filename = self.CHECKPOINT_JOIN_CHAR.join(
+            resolved_filename = self._checkpoint_join_character.join(
                 (resolved_filename, f"v{ver}")
             )
-        name: str = f"{resolved_filename}{self.FILE_EXTENSION}"
+        name: str = f"{resolved_filename}{self._file_extension}"
         return join_path(self.dirpath, name) if self.dirpath is not None else name
 
     def _get_metric_interpolated_filepath_name(
@@ -527,7 +527,7 @@ class ModelCheckpoint(Checkpoint):
     ) -> str:
         filepath: str = self.format_checkpoint_name(monitor_candidates)
         if self._enable_version_counter:
-            version: int = self.STARTING_VERSION
+            version: int = self._starting_version
             while (
                 self.file_exists(filepath, trainer)
                 if trainer is not None
@@ -695,10 +695,10 @@ class ModelCheckpoint(Checkpoint):
             return
         filepath: str = self.format_checkpoint_name(
             monitor_candidates,
-            self.CHECKPOINT_NAME_LAST
+            self._last_checkpoint_name
         )
         if self._enable_version_counter:
-            version: int = self.STARTING_VERSION
+            version: int = self._starting_version
             while (
                 self.file_exists(filepath, trainer)
                 if synchronize
@@ -706,7 +706,7 @@ class ModelCheckpoint(Checkpoint):
             ) and filepath != self.last_model_path:
                 filepath = self.format_checkpoint_name(
                     monitor_candidates,
-                    self.CHECKPOINT_NAME_LAST,
+                    self._last_checkpoint_name,
                     ver=version
                 )
                 version += 1

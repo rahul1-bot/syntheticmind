@@ -31,10 +31,10 @@ __all__: list[str] = [
     "summarize"
 ]
 
-PARAMETER_NUM_UNITS: tuple[str, ...] = (" ", "K", "M", "B", "T")
-UNKNOWN_SIZE: str = "?"
-LEFTOVER_PARAMS_NAME: str = "other params"
-NOT_APPLICABLE: str = "n/a"
+_parameter_count_units: tuple[str, ...] = (" ", "K", "M", "B", "T")
+_unknown_size: str = "?"
+_leftover_parameters_name: str = "other params"
+_not_applicable: str = "n/a"
 
 type BatchShape = str | list[object]
 type SummaryData = list[tuple[str, list[str]]]
@@ -101,11 +101,11 @@ class LayerSummary:
 
     @property
     def in_size(self) -> BatchShape:
-        return self._in_size or UNKNOWN_SIZE
+        return self._in_size or _unknown_size
 
     @property
     def out_size(self) -> BatchShape:
-        return self._out_size or UNKNOWN_SIZE
+        return self._out_size or _unknown_size
 
     @property
     def layer_type(self) -> str:
@@ -323,15 +323,15 @@ class ModelSummary:
     ) -> None:
         columns: dict[str, list[str]] = dict(arrays)
         columns[" "].append(" ")
-        columns["Name"].append(LEFTOVER_PARAMS_NAME)
-        columns["Type"].append(NOT_APPLICABLE)
+        columns["Name"].append(_leftover_parameters_name)
+        columns["Type"].append(_not_applicable)
         columns["Params"].append(get_human_readable_count(total_leftover_params))
-        columns["Mode"].append(NOT_APPLICABLE)
-        columns["FLOPs"].append(NOT_APPLICABLE)
+        columns["Mode"].append(_not_applicable)
+        columns["FLOPs"].append(_not_applicable)
         if "In sizes" in columns:
-            columns["In sizes"].append(NOT_APPLICABLE)
+            columns["In sizes"].append(_not_applicable)
         if "Out sizes" in columns:
-            columns["Out sizes"].append(NOT_APPLICABLE)
+            columns["Out sizes"].append(_not_applicable)
 
     def __str__(self) -> str:
         return _format_summary_table(
@@ -353,10 +353,10 @@ def parse_batch_shape(batch: object) -> BatchShape:
         try:
             return list(cast(Any, shape))
         except TypeError:
-            return UNKNOWN_SIZE
+            return _unknown_size
     if isinstance(batch, (list, tuple)):
         return [parse_batch_shape(element) for element in batch]
-    return UNKNOWN_SIZE
+    return _unknown_size
 
 
 def _format_summary_table(
@@ -412,7 +412,7 @@ def get_formatted_model_size(total_model_size: float) -> str:
 def get_human_readable_count(number: int) -> str:
     if number < 0:
         raise ValueError(f"number must be non-negative, got {number}")
-    labels: tuple[str, ...] = PARAMETER_NUM_UNITS
+    labels: tuple[str, ...] = _parameter_count_units
     digit_count: int = int(math.floor(math.log10(number)) + 1 if number > 0 else 1)
     group_count: int = min(int(math.ceil(digit_count / 3)), len(labels))
     shift: int = -3 * (group_count - 1)

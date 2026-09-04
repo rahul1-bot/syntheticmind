@@ -260,3 +260,11 @@
     2. Trainer state is not a general state-domain package; its status, stage, counters, interruption, and stop flag change with Trainer lifecycle and therefore belong beside Trainer.
     3. Connector extraction should precede canonical Trainer relocation when it materially shrinks the orchestration module and establishes the package's conceptual contents before imports move.
     4. Subprocess and multiprocessing launchers are mandatory relocation tests because serialized module paths and conditional annotations can remain stale after local imports appear successful.
+
+| Memory | Hook Contracts Are Machine-Learning Concepts | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
+
+    1. Hook families are not arbitrary mixins created to shorten a file. They are the stable extension vocabulary through which research models and data modules participate in deterministic Trainer and loop boundaries.
+    2. Lightning's `ModelHooks`, `DataHooks`, and `CheckpointHooks` separation is conceptually sound even though unrelated Lightning implementation details remain unsuitable for SyntheticMind. Removing these families would erase the distinction between model lifecycle, data lifecycle, and checkpoint participation.
+    3. Cooperative `super()` inside `DataHooks.__init__` has meaning only inside the complete multiple-inheritance graph. It must not be decorated as an override merely because `object.__init__` exists; the concrete MRO must demonstrate that the call initializes the next real framework participant.
+    4. Hook dispatch belongs to Trainer and loops, hook implementations belong to modules, data modules, and callbacks, and hook-name logging policy belongs with the hook vocabulary. A separate rule-model family adds no independent state, boundary, or lifecycle.
+    5. Serialized checkpoint field strings are durable schema values, while Python identifiers naming those fields are implementation details. Renaming the identifiers to lower snake case removes style debt without migrating the checkpoint format.

@@ -6,26 +6,27 @@ import numbers
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from io import BytesIO
+from functools import partial
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, ClassVar, Literal, Self, cast, overload, override
+from typing import IO, ClassVar, Literal, Self, cast, overload, override
 
+import syntheticmind
 import torch
 import torch.distributed as dist
-from pydantic import BaseModel, ConfigDict
 from torch import nn
+from torch.distributed.device_mesh import DeviceMesh
+from torchmetrics import Metric, MetricCollection
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.core.hooks import DataHooks, MetricLoggingContract, ModelHooks
+from syntheticmind.core.hooks import CheckpointHooks, DataHooks, ModelHooks
 from syntheticmind.core.hyperparameters import HyperparametersMixin
-from syntheticmind.core.model_checkpoint_loader import ModelCheckpointLoader
 from syntheticmind.core.optimizer import (
     LRSchedulerTypeUnion,
     StatefulScheduler,
     SyntheticOptimizer,
     OptimizerLRScheduler
 )
-from syntheticmind.core.saving import CheckpointHooks
+from syntheticmind.core.saving import _CheckpointLoader
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.exceptions import MisconfigurationError
@@ -36,100 +37,82 @@ from syntheticmind.utilities.types import (
     BackwardInputs,
     GatherData,
     GatherResult,
+    HyperparameterValue,
     MapLocation,
     ModelOutput,
     OptimizerClosure,
     OptimizerParameterGroup,
     Reduction,
+    RunningStage,
     StepOutput,
     TrainingStepOutput
 )
 
-if TYPE_CHECKING:
-    from torch.distributed.device_mesh import DeviceMesh
-    from torchmetrics import Metric, MetricCollection
+__all__: list[str] = ["LoggedMetric", "Module"]
 
-    from syntheticmind.trainer.trainer import Trainer
-    from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
-
-__all__: list[str] = ["Module", "MetricLoggingConfiguration", "LoggedMetric"]
-
-_metric_type: type[nn.Module] | None = None
-_metric_collection_type: type[nn.Module] | None = None
-
-
-def _torchmetrics_types() -> tuple[type[nn.Module], type[nn.Module]]:
-    global _metric_type, _metric_collection_type
-    if _metric_type is None or _metric_collection_type is None:
-        from torchmetrics import Metric, MetricCollection
-
-        _metric_type = Metric
-        _metric_collection_type = MetricCollection
-    return _metric_type, _metric_collection_type
-
-
-def _is_metric(value: object) -> bool:
-    if not isinstance(value, nn.Module):
-        return False
-    metric_type, _ = _torchmetrics_types()
-    return isinstance(value, metric_type)
-
-
-def _is_metric_collection(value: object) -> bool:
-    if not isinstance(value, nn.Module):
-        return False
-    _, metric_collection_type = _torchmetrics_types()
-    return isinstance(value, metric_collection_type)
-
-
-class MetricLoggingConfiguration(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
-
-    progress_bar: bool = False
-    logger: bool = True
-    on_step: bool | None = None
-    on_epoch: bool | None = None
-    reduction: Reduction = "mean"
-    sync_distributed: bool = False
-    add_dataloader_idx: bool = True
-    batch_size: int | None = None
+type _MetricCandidate = nn.Module | ModelOutput
+type _MetricReduction = (
+    str
+    | Callable[[torch.Tensor], torch.Tensor]
+    | Callable[[Sequence[torch.Tensor]], torch.Tensor | int]
+)
+type _MetricMetadata = tuple[
+    bool,
+    bool,
+    bool,
+    bool,
+    Reduction,
+    bool,
+    bool,
+    dist.ProcessGroup | None,
+    bool,
+    str | None,
+    bool
+]
+type _ModuleConversionArgument = (
+    bool
+    | str
+    | torch.device
+    | torch.dtype
+    | torch.Tensor
+    | torch.memory_format
+    | None
+)
+type _Printable = ModelOutput | nn.Module | Path | BaseException
+type _ModuleStateValue = (
+    HyperparameterValue
+    | LoggedMetric
+    | syntheticmind.Trainer
+    | DeviceMesh
+    | dist.ProcessGroup
+    | Logger
+    | Callback
+    | Callable[..., ModelOutput]
+    | dict[str | int, _ModuleStateValue]
+    | list[_ModuleStateValue]
+    | tuple[_ModuleStateValue, ...]
+    | set[_ModuleStateValue]
+)
 
 
-class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Module):
-    CHECKPOINT_HYPER_PARAMS_KEY: ClassVar[str] = "hyper_parameters"
-    CHECKPOINT_HYPER_PARAMS_NAME: ClassVar[str] = "hparams_name"
-    CHECKPOINT_HYPER_PARAMS_TYPE: ClassVar[str] = "hparams_type"
-    __jit_unused_properties__: ClassVar[list[str]] = [
-        "example_input_array",
-        "on_gpu",
-        "current_epoch",
-        "global_step",
-        "global_rank",
-        "local_rank",
-        "logger",
-        "loggers",
-        "automatic_optimization",
-        "trainer",
-        "strict_loading",
-        "device",
-        "device_mesh",
-        "dtype",
-        "logged_metrics"
-    ] + HyperparametersMixin.__jit_unused_properties__
-    _jit_is_scripting: ClassVar[bool] = False
+class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Module):
+    _checkpoint_hyperparameters_key: ClassVar[str] = "hyper_parameters"
+    _checkpoint_hyperparameters_name: ClassVar[str] = "hparams_name"
+    _checkpoint_hyperparameters_type: ClassVar[str] = "hparams_type"
+    @override
     def __init__(self) -> None:
         super().__init__()
-        self._trainer: Trainer | None = None
-        self._example_input_array: torch.Tensor | tuple[object, ...] | dict[str, object] | None = None
+        self._trainer: syntheticmind.Trainer | None = None
+        self._example_input_array: Batch | None = None
         self._automatic_optimization: bool = True
         self._strict_loading: bool | None = None
         self._current_epoch: int = 0
         self._global_step: int = 0
         self._logged_metrics: list[LoggedMetric] = []
-        self._logged_metric_metadata: dict[str, tuple[object, ...]] = {}
+        self._logged_metric_metadata: dict[str, _MetricMetadata] = {}
         self._metric_attributes: dict[int, str] | None = None
         self._logging_warning_keys: set[str] = set()
-        self._running_stage: str | None = None
+        self._running_stage: RunningStage | None = None
         self._device: torch.device = torch.device("cpu")
         self._device_mesh: DeviceMesh | None = None
         self._dtype: torch.dtype = torch.float32
@@ -145,9 +128,9 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         hparams_file: str | Path | None = None,
         strict: bool | None = None,
         weights_only: bool | None = None,
-        **kwargs: object
+        **kwargs: HyperparameterValue
     ) -> Self:
-        return ModelCheckpointLoader.load(
+        return _CheckpointLoader.load(
             cls,
             checkpoint_path,
             map_location,
@@ -155,55 +138,6 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             strict,
             weights_only,
             kwargs
-        )
-
-    @torch.no_grad()
-    def to_torchscript(
-        self,
-        file_path: str | Path | None = None,
-        method: str | None = "script",
-        example_inputs: object | None = None,
-        **kwargs: object
-    ) -> torch.jit.ScriptModule | dict[str, torch.jit.ScriptModule]:
-        from syntheticmind.core.model_export import ModelTorchScriptExporter
-
-        exporter: ModelTorchScriptExporter = ModelTorchScriptExporter(self)
-        return exporter.export(file_path, method, example_inputs, kwargs)
-
-    @torch.no_grad()
-    def to_onnx(
-        self,
-        file_path: str | Path | BytesIO | None = None,
-        input_sample: object | None = None,
-        **kwargs: object
-    ) -> torch.onnx.ONNXProgram | None:
-        from syntheticmind.core.model_export import ModelONNXExporter
-
-        exporter: ModelONNXExporter = ModelONNXExporter(self)
-        return exporter.export(file_path, input_sample, kwargs)
-
-    @torch.no_grad()
-    def to_tensorrt(
-        self,
-        file_path: str | Path | BytesIO | None = None,
-        input_sample: object | None = None,
-        ir: Literal["default", "dynamo", "ts"] = "default",
-        output_format: Literal["exported_program", "torchscript"] = "exported_program",
-        retrace: bool = False,
-        default_device: str | torch.device = "cuda",
-        **compile_kwargs: object
-    ) -> torch.jit.ScriptModule | torch.fx.GraphModule:
-        from syntheticmind.core.model_tensorrt import ModelTensorRTCompiler
-
-        compiler: ModelTensorRTCompiler = ModelTensorRTCompiler(self)
-        return compiler.compile(
-            file_path,
-            input_sample,
-            ir,
-            output_format,
-            retrace,
-            default_device,
-            compile_kwargs
         )
 
     @contextmanager
@@ -216,7 +150,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             self._current_fx_name: str | None = previous_hook_name
 
     @override
-    def forward(self, *args: object, **kwargs: object) -> ModelOutput:
+    def forward(self, *args: Batch, **kwargs: Batch) -> ModelOutput:
         return super().forward(*args, **kwargs)
 
     def training_step(self, batch: Batch, batch_idx: int) -> TrainingStepOutput:
@@ -277,7 +211,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         logger: bool | None = None,
         on_step: bool | None = None,
         on_epoch: bool | None = None,
-        reduce_fx: str | Callable[[object], object] = "mean",
+        reduce_fx: _MetricReduction = "mean",
         enable_graph: bool = False,
         sync_dist: bool = False,
         sync_dist_group: dist.ProcessGroup | None = None,
@@ -308,7 +242,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             raise TypeError("self.log(metric_attribute=...) requires a string or None.")
         if isinstance(value, Mapping):
             raise ValueError(f"self.log({name!r}, ...) does not support nested mappings.")
-        is_metric_value: bool = _is_metric(value)
+        is_metric_value: bool = self._is_metric(value)
         if not isinstance(value, (numbers.Number, torch.Tensor)) and not is_metric_value:
             raise ValueError(
                 f"self.log({name!r}, ...) does not support values of type {type(value).__name__}."
@@ -340,7 +274,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             )
         resolved_on_step: bool
         resolved_on_epoch: bool
-        resolved_on_step, resolved_on_epoch = MetricLoggingContract.resolve(
+        resolved_on_step, resolved_on_epoch = self._resolve_logging_schedule(
             hook_name=current_fx_name,
             on_step=on_step,
             on_epoch=on_epoch
@@ -412,7 +346,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
                     self._metric_attributes = {
                         id(metric): attribute
                         for attribute, metric in self.named_modules()
-                        if _is_metric(metric)
+                        if self._is_metric(metric)
                     }
                 metric_attribute = self._metric_attributes.get(id(value))
                 if metric_attribute is None:
@@ -431,7 +365,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
                     raise MisconfigurationError(
                         f"metric_attribute={metric_attribute!r} does not reference the logged Metric."
                     )
-            resolved_value = cast("Metric", value)
+            resolved_value = cast(Metric, value)
         else:
             default_dtype: torch.dtype = torch.get_default_dtype()
             if default_dtype not in {torch.float32, torch.float64}:
@@ -487,7 +421,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             rank_zero_only=rank_zero_only,
             dataloader_idx=self._current_dataloader_idx
         )
-        previous_metadata: tuple[object, ...] | None = self._logged_metric_metadata.get(
+        previous_metadata: _MetricMetadata | None = self._logged_metric_metadata.get(
             metric.storage_key
         )
         if previous_metadata is not None and previous_metadata != metric.metadata:
@@ -506,7 +440,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         logger: bool | None = None,
         on_step: bool | None = None,
         on_epoch: bool | None = None,
-        reduce_fx: str | Callable[[object], object] = "mean",
+        reduce_fx: _MetricReduction = "mean",
         enable_graph: bool = False,
         sync_dist: bool = False,
         sync_dist_group: dist.ProcessGroup | None = None,
@@ -514,18 +448,17 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         batch_size: int | None = None,
         rank_zero_only: bool = False
     ) -> None:
-        if not isinstance(dictionary, Mapping) and not _is_metric_collection(dictionary):
+        if not isinstance(dictionary, Mapping) and not self._is_metric_collection(dictionary):
             raise TypeError(
                 "self.log_dict() requires a mapping or torchmetrics.MetricCollection."
             )
-        items: object = dictionary.items()
-        if not isinstance(items, Iterator):
-            items = iter(items)
+        items: Iterator[tuple[str, numbers.Number | torch.Tensor | Metric]] = iter(
+            dictionary.items()
+        )
         log: Callable[..., None] = cast(Callable[..., None], self.log)
-        for name, value in cast(
-            "Iterator[tuple[str, numbers.Number | torch.Tensor | Metric]]",
-            items
-        ):
+        name: str
+        value: numbers.Number | torch.Tensor | Metric
+        for name, value in items:
             log(
                 name=name,
                 value=value,
@@ -543,7 +476,11 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             )
 
     @override
-    def to(self, *args: object, **kwargs: object) -> Module:
+    def to(
+        self,
+        *args: _ModuleConversionArgument,
+        **kwargs: _ModuleConversionArgument
+    ) -> Module:
         result: Module = super().to(*args, **kwargs)
         param: torch.nn.Parameter | None = next(iter(result.parameters()), None)
         if param is not None:
@@ -557,8 +494,12 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             else:
                 if args and isinstance(args[0], (torch.device, str)):
                     result._device: torch.device = torch.device(args[0])
-                elif "device" in kwargs:
-                    result._device: torch.device = torch.device(kwargs["device"])
+                elif isinstance(kwargs.get("device"), (torch.device, str)):
+                    device_argument: torch.device | str = cast(
+                        torch.device | str,
+                        kwargs["device"]
+                    )
+                    result._device: torch.device = torch.device(device_argument)
                 if args and isinstance(args[0], torch.dtype):
                     result._dtype: torch.dtype = args[0]
                 elif "dtype" in kwargs and isinstance(kwargs["dtype"], torch.dtype):
@@ -630,11 +571,10 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             raise MisconfigurationError(
                 "manual_backward() requires automatic_optimization = False."
             )
-        trainer: Trainer = self.trainer
-        epoch_loop: TrainingEpochLoop | None = trainer.fit_loop.epoch_loop
-        if epoch_loop is None:
+        trainer: syntheticmind.Trainer = self.trainer
+        if trainer.fit_loop.epoch_loop is None:
             raise RuntimeError("Trainer fit loop is not initialized.")
-        epoch_loop.manual_backward(
+        trainer.fit_loop.epoch_loop.manual_backward(
             trainer,
             self,
             loss,
@@ -665,9 +605,8 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         gradient_clip_val: int | builtins.float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
-        trainer: Trainer = self.trainer
-        epoch_loop: TrainingEpochLoop | None = trainer.fit_loop.epoch_loop
-        if epoch_loop is None:
+        trainer: syntheticmind.Trainer = self.trainer
+        if trainer.fit_loop.epoch_loop is None:
             raise RuntimeError("Trainer fit loop is not initialized.")
         raw_optimizer: torch.optim.Optimizer = (
             optimizer.optimizer if isinstance(optimizer, SyntheticOptimizer) else optimizer
@@ -712,7 +651,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
                 f"`gradient_clip_algorithm` {resolved_gradient_clip_algorithm} is invalid. "
                 "Allowed algorithms: ('norm', 'value')."
             )
-        epoch_loop.clip_gradients(
+        trainer.fit_loop.epoch_loop.clip_gradients(
             optimizer=raw_optimizer,
             gradient_clip_val=resolved_gradient_clip_val,
             gradient_clip_algorithm=resolved_gradient_clip_algorithm
@@ -811,7 +750,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         | torch.optim.Optimizer
         | list[torch.optim.Optimizer]
     ):
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         optimizers: list[SyntheticOptimizer] | list[torch.optim.Optimizer] = (
             trainer._synthetic_optimizers if use_synthetic_optimizer else trainer.optimizers
         )
@@ -822,7 +761,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
     def lr_schedulers(
         self
     ) -> LRSchedulerTypeUnion | list[LRSchedulerTypeUnion] | None:
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         if not trainer.lr_scheduler_configs:
             return None
         schedulers: list[LRSchedulerTypeUnion] = [
@@ -902,28 +841,28 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         return result
 
     @property
-    def trainer(self) -> Trainer:
-        if self._trainer is None and not self._jit_is_scripting:
+    def trainer(self) -> syntheticmind.Trainer:
+        if self._trainer is None:
             raise RuntimeError("Module is not attached to a Trainer. Call trainer.fit(module, ...) first")
-        return cast("Trainer", self._trainer)
+        return self._trainer
 
     @trainer.setter
-    def trainer(self, trainer: Trainer | None) -> None:
+    def trainer(self, trainer: syntheticmind.Trainer | None) -> None:
         for child in self.children():
             if isinstance(child, Module):
                 child.trainer = trainer
         self._trainer = trainer
 
     @property
-    def example_input_array(self) -> torch.Tensor | tuple[object, ...] | dict[str, object] | None:
+    def example_input_array(self) -> Batch | None:
         return self._example_input_array
 
     @example_input_array.setter
     def example_input_array(
         self,
-        example_input_array: torch.Tensor | tuple[object, ...] | dict[str, object] | None
+        example_input_array: Batch | None
     ) -> None:
-        self._example_input_array: torch.Tensor | tuple[object, ...] | dict[str, object] | None = example_input_array
+        self._example_input_array: Batch | None = example_input_array
 
     @property
     def automatic_optimization(self) -> bool:
@@ -979,13 +918,13 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
 
     def print(
         self,
-        *args: object,
+        *args: _Printable,
         sep: str | None = " ",
         end: str | None = "\n",
         file: IO[str] | None = None,
         flush: bool = False
     ) -> None:
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         if not trainer.is_global_zero:
             return
         progress_bar = trainer.progress_bar_callback
@@ -1008,13 +947,11 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
             group if group is not None else dist.group.WORLD
         )
 
-        def gather_tensor(tensor: torch.Tensor) -> torch.Tensor:
-            return self.trainer.strategy.all_gather(
-                tensor,
-                group=resolved_group,
-                sync_grads=sync_grads
-            )
-
+        gather_tensor: Callable[[torch.Tensor], torch.Tensor] = partial(
+            self._gather_tensor,
+            group=resolved_group,
+            sync_grads=sync_grads
+        )
         return transform_tensor_collection(data, self.device, gather_tensor)
 
     @property
@@ -1042,8 +979,11 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         return list(self._logged_metrics)
 
     @override
-    def __getstate__(self) -> dict[str, object]:
-        state: dict[str, object] = dict(self.__dict__)
+    def __getstate__(self) -> dict[str, _ModuleStateValue]:
+        state: dict[str, _ModuleStateValue] = cast(
+            dict[str, _ModuleStateValue],
+            dict(self.__dict__)
+        )
         state["_trainer"] = None
         return state
 
@@ -1054,6 +994,27 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
     def _reset_logging_state(self) -> None:
         self._reset_logged_metrics()
         self._logged_metric_metadata.clear()
+
+    def _gather_tensor(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        sync_grads: bool
+    ) -> torch.Tensor:
+        return self.trainer.strategy.all_gather(
+            tensor,
+            group=group,
+            sync_grads=sync_grads
+        )
+
+
+    @classmethod
+    def _is_metric(cls, value: _MetricCandidate) -> bool:
+        return isinstance(value, Metric)
+
+    @classmethod
+    def _is_metric_collection(cls, value: _MetricCandidate) -> bool:
+        return isinstance(value, MetricCollection)
 
 
 class LoggedMetric:
@@ -1120,7 +1081,7 @@ class LoggedMetric:
             else ""
         )
         self.storage_key: str = f"{hook_name}.{name}{dataloader_key}"
-        self.metadata: tuple[object, ...] = (
+        self.metadata: _MetricMetadata = (
             progress_bar,
             logger,
             on_step,
@@ -1137,7 +1098,7 @@ class LoggedMetric:
 
     @property
     def is_metric(self) -> bool:
-        return _is_metric(self.value)
+        return Module._is_metric(self.value)
 
     def output_name(self, on_step: bool) -> str:
         name: str = self.name
@@ -1168,9 +1129,15 @@ class LoggedMetric:
     def _compute_step(self, device: torch.device) -> torch.Tensor | None:
         if self._computed_step_value is not None:
             return self._computed_step_value
-        value: object = self.value
+        value: numbers.Number | torch.Tensor | None = cast(
+            numbers.Number | torch.Tensor | None,
+            self.value
+        )
         if self.is_metric:
-            value = getattr(value, "_forward_cache")
+            value: numbers.Number | torch.Tensor | None = cast(
+                numbers.Number | torch.Tensor | None,
+                getattr(self.value, "_forward_cache")
+            )
             if value is None:
                 return None
         if isinstance(value, numbers.Number):
@@ -1218,8 +1185,8 @@ class LoggedMetric:
         value: torch.Tensor | None = self.compute_step(device)
         if value is not None:
             return value
-        metric: Metric = cast("Metric", self.value)
-        computed: object = metric.compute()
+        metric: Metric = cast(Metric, self.value)
+        computed: ModelOutput = cast(ModelOutput, metric.compute())
         if not isinstance(computed, torch.Tensor) or computed.numel() != 1:
             raise ValueError(
                 f"The compute() result for logged Metric {self.name!r} must be a single-element Tensor."
@@ -1240,8 +1207,8 @@ class LoggedMetric:
             value: torch.Tensor | None = self.compute_step(device)
             assert value is not None
             return value
-        metric: Metric = cast("Metric", self.value)
-        computed: object = metric.compute()
+        metric: Metric = cast(Metric, self.value)
+        computed: ModelOutput = cast(ModelOutput, metric.compute())
         if not isinstance(computed, torch.Tensor) or computed.numel() != 1:
             raise ValueError(
                 f"The compute() result for logged Metric {self.name!r} must be a single-element Tensor."

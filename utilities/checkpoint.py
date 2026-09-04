@@ -35,7 +35,7 @@ from syntheticmind.utilities.filesystem import (
     is_local_path,
     make_directory,
     normalize_path,
-    open_binary,
+    open_binary
 )
 from syntheticmind.utilities.types import CheckpointDict, MapLocation
 

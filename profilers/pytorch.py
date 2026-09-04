@@ -91,25 +91,29 @@ class RegisterRecordFunction:
 
 
 class PyTorchProfiler(Profiler):
-    STEP_FUNCTIONS: set[str] = {
-        "training_step",
-        "validation_step",
-        "test_step",
-        "predict_step"
-    }
-    AVAILABLE_SORT_KEYS: set[str] = {
-        "cpu_time",
-        "cuda_time",
-        "cpu_time_total",
-        "cuda_time_total",
-        "self_cpu_time_total",
-        "self_cuda_time_total",
-        "cpu_memory_usage",
-        "cuda_memory_usage",
-        "self_cpu_memory_usage",
-        "self_cuda_memory_usage",
-        "count"
-    }
+    _step_functions: frozenset[str] = frozenset(
+        {
+            "training_step",
+            "validation_step",
+            "test_step",
+            "predict_step"
+        }
+    )
+    _available_sort_keys: frozenset[str] = frozenset(
+        {
+            "cpu_time",
+            "cuda_time",
+            "cpu_time_total",
+            "cuda_time_total",
+            "self_cpu_time_total",
+            "self_cuda_time_total",
+            "cpu_memory_usage",
+            "cuda_memory_usage",
+            "self_cpu_memory_usage",
+            "self_cuda_memory_usage",
+            "count"
+        }
+    )
 
     def __init__(
         self,
@@ -152,10 +156,10 @@ class PyTorchProfiler(Profiler):
         self._recording_map: dict[str, list[record_function]] = {}
         self._trace_index: int = 0
         self._last_step_action: str | None = None
-        if self._sort_by_key not in self.AVAILABLE_SORT_KEYS:
+        if self._sort_by_key not in self._available_sort_keys:
             raise MisconfigurationError(
                 f"Found sort_by_key {self._sort_by_key!r}. "
-                f"Expected one of {sorted(self.AVAILABLE_SORT_KEYS)}."
+                f"Expected one of {sorted(self._available_sort_keys)}."
             )
         schedule: object = self._profiler_kwargs.get("schedule")
         if schedule is not None:
@@ -301,7 +305,7 @@ class PyTorchProfiler(Profiler):
             if not recordings:
                 del self._recording_map[action_name]
         action_leaf: str = action_name.rsplit(".", 1)[-1]
-        if self.profiler is not None and action_leaf in self.STEP_FUNCTIONS:
+        if self.profiler is not None and action_leaf in self._step_functions:
             self._last_step_action = action_name
             self.profiler.step()
 

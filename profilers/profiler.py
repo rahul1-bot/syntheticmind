@@ -16,7 +16,7 @@ from syntheticmind.utilities.filesystem import (
     exists,
     is_local_path,
     join_path,
-    open_text,
+    open_text
 )
 
 __all__: list[str] = ["Profiler"]

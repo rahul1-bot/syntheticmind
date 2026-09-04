@@ -231,7 +231,7 @@ class PredictionLoop(Loop):
                 minimum_arguments=2
             ):
                 step_arguments = (
-                    (batch,)
+                    tuple([batch])
                     if hook_dataloader_idx is None
                     else (batch, hook_dataloader_idx)
                 )

@@ -3,8 +3,6 @@
 #    single-process fallbacks whenever no process group is initialized
 # 2. Wraps the barrier and all-reduce collectives so call sites need no
 #    initialization guards of their own
-# 3. Provides the rank_zero_only decorator that restricts side-effecting helpers
-#    to the coordinating process
 #
 # Design decisions:
 # - Every query degrades to single-process values (rank 0, local rank 0, world
@@ -17,17 +15,12 @@
 #   group behaves exactly like plain local execution
 # - all_reduce follows the collective's in-place semantics and returns the same
 #   tensor for chaining; the single-process path returns the input untouched
-# - rank_zero_only returns None on non-coordinating ranks instead of repeating
-#   the wrapped side effect once per process
 # - Module-level function aliases mirror the classmethod namespace so importing
 #   code can bind bare functions; both routes reach the same implementations
 #
 # Author: Rahul Sawhney
 
 import os
-from collections.abc import Callable
-from functools import wraps
-from typing import ParamSpec, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -39,12 +32,8 @@ __all__: list[str] = [
     "is_distributed",
     "is_rank_zero",
     "barrier",
-    "all_reduce",
-    "rank_zero_only",
+    "all_reduce"
 ]
-
-P = ParamSpec("P")
-T = TypeVar("T")
 
 
 class DistributedUtils:
@@ -163,17 +152,3 @@ def all_reduce(
 ) -> torch.Tensor:
     # Function alias for DistributedUtils.all_reduce.
     return DistributedUtils.all_reduce(tensor, op=op, group=group)
-
-
-def rank_zero_only(fn: Callable[P, T]) -> Callable[P, T | None]:
-    # Decorator that runs the wrapped callable only on rank zero. Non-zero ranks
-    # receive None, which keeps side effects such as logging and file writes to
-    # exactly one process per job.
-    @wraps(fn)
-    def wrapped(*args: P.args, **kwargs: P.kwargs) -> T | None:
-        # Evaluates the rank at call time, not decoration time, so the decorator
-        # works even when applied before process-group initialization.
-        if is_rank_zero():
-            return fn(*args, **kwargs)
-        return None
-    return wrapped

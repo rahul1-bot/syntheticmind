@@ -54,7 +54,7 @@ from syntheticmind.utilities.filesystem import (
     join_path,
     make_directory,
     read_text,
-    write_text,
+    write_text
 )
 from syntheticmind.utilities.types import Batch, ModelOutput, RunningStage, StepOutput, TrainerStage
 

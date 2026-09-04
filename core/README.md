@@ -4,11 +4,11 @@
 
 | Module | Contents |
 |---|---|
-| `module.py` | `Module`, the model contract, with `MetricLoggingConfiguration` and `LoggedMetric`. |
+| `module.py` | `Module`, the model contract, with its live `LoggedMetric` records. |
 | `datamodule.py` | `DataModule`, the data contract, and `DatasetDataModule`. |
-| `hooks.py` | `DataHooks`, `ModelHooks`, `MetricLoggingRule`, and `MetricLoggingContract`. |
+| `hooks.py` | The `ModelHooks`, `DataHooks`, and `CheckpointHooks` lifecycle contracts. |
 | `optimizer.py` | Managed optimizer access, accepted `configure_optimizers` declarations, scheduler configuration, and declaration parsing. |
-| `saving.py` | `CheckpointHooks`, the hook surface around checkpoint save and load. |
+| `saving.py` | Model reconstruction from canonical SyntheticMind checkpoints and explicit hyperparameter sources. |
 
 `Trainer` binds these contracts from `../trainer/trainer.py`. Its connectors own accelerator composition, callback composition, data execution, experiment observation, checkpoint trajectories, and signal lifecycle.
 
@@ -16,4 +16,4 @@
 
 ## Related Components
 
-The trainer executes any `Module` and `DataModule` pair without knowledge of the domain; every VOCODE architecture and dataset reaches it through these contracts via the execution roles in `../../vocode/trainers/`.
+The trainer executes any `Module` and `DataModule` pair without knowledge of the downstream research domain. Models, datasets, and experiments enter the harness only through these contracts.

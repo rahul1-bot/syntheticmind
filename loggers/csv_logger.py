@@ -33,7 +33,7 @@ from syntheticmind.utilities.filesystem import (
     join_path,
     open_text,
     read_text,
-    write_text,
+    write_text
 )
 from syntheticmind.utilities.types import HyperparameterDict
 

@@ -34,14 +34,18 @@ class _XLAProfilerModule(Protocol):
 
 
 class XLAProfiler(Profiler):
-    STEP_FUNCTIONS: set[str] = {"validation_step", "test_step", "predict_step"}
-    RECORD_FUNCTIONS: set[str] = {
-        "training_step",
-        "backward",
-        "validation_step",
-        "test_step",
-        "predict_step"
-    }
+    _step_functions: frozenset[str] = frozenset(
+        {"validation_step", "test_step", "predict_step"}
+    )
+    _record_functions: frozenset[str] = frozenset(
+        {
+            "training_step",
+            "backward",
+            "validation_step",
+            "test_step",
+            "predict_step"
+        }
+    )
 
     def __init__(self, port: int = 9012) -> None:
         if type(port) is not int or not 1 <= port <= 65535:
@@ -57,7 +61,7 @@ class XLAProfiler(Profiler):
     @override
     def start(self, action_name: str) -> None:
         action_leaf: str = action_name.rsplit(".", 1)[-1]
-        if action_leaf not in self.RECORD_FUNCTIONS:
+        if action_leaf not in self._record_functions:
             return
         xla_profiler: _XLAProfilerModule = cast(
             _XLAProfilerModule,
@@ -67,7 +71,7 @@ class XLAProfiler(Profiler):
         if self._server is None:
             self._server = xla_profiler.start_server(self.port)
         recording: _XLARecording
-        if action_leaf in self.STEP_FUNCTIONS:
+        if action_leaf in self._step_functions:
             recording = xla_profiler.StepTrace(
                 action_name,
                 step_num=self._get_step_num(action_name)

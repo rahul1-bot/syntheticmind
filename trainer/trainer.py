@@ -27,14 +27,14 @@ from syntheticmind.core.optimizer import (
     OptimizerLRScheduler,
     SyntheticOptimizer,
     _OptimizerConfigurationParser,
-    _SchedulerInstance,
+    _SchedulerInstance
 )
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.batch_limits import (
     normalize_batch_limit,
     normalize_fast_dev_run,
     normalize_sanity_steps,
-    resolve_batch_limit,
+    resolve_batch_limit
 )
 from syntheticmind.loops.evaluation_loop import EvaluationLoop
 from syntheticmind.loops.fit_loop import FitLoop
@@ -69,7 +69,7 @@ from syntheticmind.utilities.filesystem import (
     basename,
     list_directory,
     modified_time,
-    normalize_path,
+    normalize_path
 )
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.utilities.seed import SeedManager
@@ -85,7 +85,7 @@ from syntheticmind.utilities.types import (
     PrecisionInput,
     PrecisionType,
     RunningStage,
-    TrainerStage,
+    TrainerStage
 )
 
 __all__: list[str] = ["Trainer"]
@@ -1496,30 +1496,13 @@ class Trainer:
             return hook(*args, **kwargs)
 
     def _configure_model(self, module: Module) -> None:
-        has_legacy_override: bool = is_overridden("configure_sharded_model", module, ModelHooks)
-        has_configure_override: bool = is_overridden("configure_model", module, ModelHooks)
-        if has_legacy_override and has_configure_override:
-            module_name: str = type(module).__name__
-            raise MisconfigurationError(
-                f"{module_name} overrides both configure_model() and deprecated configure_sharded_model(). "
-                f"Override only configure_model()."
-            )
-        hook_name: str
-        hook: Callable[[], None]
-        if has_legacy_override:
-            warnings.warn(
-                "configure_sharded_model() is deprecated; override configure_model() instead.",
-                DeprecationWarning,
-                stacklevel=3
-            )
-            hook_name: str = "configure_sharded_model"
-            hook: Callable[[], None] = module.configure_sharded_model
-        elif has_configure_override:
-            hook_name: str = "configure_model"
-            hook: Callable[[], None] = module.configure_model
-        else:
+        if not is_overridden("configure_model", module, ModelHooks):
             return
-        self._call_module_hook(module, hook_name, hook)
+        self._call_module_hook(
+            module,
+            "configure_model",
+            module.configure_model
+        )
 
     def _setup_model(self, module: Module, device: torch.device) -> Module:
         self.accelerator.setup_device(device)
@@ -1992,24 +1975,22 @@ class Trainer:
                 self.strategy.cluster_environment.teardown,
                 failures
             )
-        combined_loaders: tuple[tuple[str, CombinedLoader | None], ...] = (
-            (
+        combined_loaders: list[tuple[str, CombinedLoader | None]] = (
+            [
                 ("train", self._data_connector.train_combined_loader),
                 ("val", self._data_connector.val_combined_loader)
-            )
+            ]
             if stage == "fit"
-            else (
-                ("val", self._data_connector.val_combined_loader),
-            )
+            else [("val", self._data_connector.val_combined_loader)]
             if stage == "validate"
-            else (
+            else [
                 (
                     stage,
                     self._data_connector.test_combined_loader
                     if stage == "test"
                     else self._data_connector.predict_combined_loader
-                ),
-            )
+                )
+            ]
         )
         for loader_stage, combined_loader in combined_loaders:
             if combined_loader is not None:

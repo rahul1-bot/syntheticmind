@@ -37,7 +37,7 @@ from syntheticmind.utilities.types import (
     StateDict,
     StateScalar,
     StepOutput,
-    TrainerStage,
+    TrainerStage
 )
 
 if TYPE_CHECKING:

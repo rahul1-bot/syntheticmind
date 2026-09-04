@@ -25,7 +25,7 @@ __all__: list[str] = [
     "TrainingInterruptedError",
     "CheckpointError",
     "DistributedError",
-    "SIGTERMException",
+    "SIGTERMException"
 ]
 
 
