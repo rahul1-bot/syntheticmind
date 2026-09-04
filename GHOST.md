@@ -88,14 +88,14 @@
     5. Precision construction covers CPU float16 fallback, model-parallel restrictions, recursive conversion, and the NVIDIA Transformer Engine 2.18 autocast and strict delayed-scaling boundary.
     6. Trainer remains the sole public composition surface. CPU, MPS, unavailable CUDA, precision contexts, layer synchronization, plugin conflicts, DDP launchers, model parallelism, and Transformer Engine adapter behavior pass.
 
-| Architecture Decision | Callback Contract and Connector Ownership | Date: 04 September 2026 | Time: 04:40 PM | Name: Ghost |
+| Architecture Decision | Callback Contract, Monitoring, and Connector Ownership | Date: 04 September 2026 | Time: 04:47 PM | Name: Ghost |
 
     1. Callback defines the complete established setup, fit, training, validation, test, prediction, optimization, exception, checkpoint, and state hook vocabulary; all forty-three call signatures remain unchanged and concrete implementations mark every actual override.
     2. Model-provided callbacks are configured once per stage, replace compatible Trainer callbacks through the established inheritance rule, and remain ordered before checkpoint callbacks.
     3. The connector accepts a bound configuration operation rather than a concrete Trainer reference, preserving module hook context and profiler ownership without introducing a circular import or synthetic Trainer-host Protocol.
     4. Trainer and loops own hook timing, HookDispatcher owns profiler-aware invocation, and the connector owns only callback composition and configuration state; the base contract now uses Python 3.14 lazy package annotations without a future import, conditional type import, source prose, or circular dependency workaround.
-    5. Invalid return values, non-callback sequence members, duplicate state keys, illegal configure-hook logging, and callback setup failures leave the configuration boundary reusable for a later stage.
-    6. Fit, validation, test, prediction, checkpoint participation, repeated stages, serialization, DDP spawn, and DDP fork verification pass after the migration.
+    5. Early stopping, finite-value protection, learning-rate telemetry, data-axis throughput, and accelerator statistics retain separate ML meanings while obsolete future imports and static pseudo-utilities were removed; every assignment and override remains explicit.
+    6. Fit, validation, test, prediction, invalid configuration, non-finite failure, optimizer telemetry, distributed sample accounting, filtered device statistics, checkpoint participation, serialization, DDP, spawn, and fork verification pass.
 
 | Architecture Decision | Signal Connector Placement | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
 

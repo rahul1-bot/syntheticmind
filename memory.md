@@ -135,12 +135,12 @@
     5. Package width is harmless when each file is a selectable recognized implementation, as with callbacks or strategies. The same width is architectural debt when files are fragments created to satisfy numeric budgets.
     6. Concept-first decomposition still requires directed dependencies, bounded public surface, explicit state ownership, and runtime evidence; it overrides mechanical splitting, not correctness or maintainability review.
 
-| Memory | Callback Contracts Without Circular Trainer Coupling | Date: 04 September 2026 | Time: 04:40 PM | Name: Ghost |
+| Memory | Callback Contracts and Monitoring Ownership | Date: 04 September 2026 | Time: 04:47 PM | Name: Ghost |
 
     1. Callback vocabulary, callback configuration, hook timing, and hook invocation are separate concepts: Callback defines signatures, the connector owns selection and identity, loops and Trainer choose transitions, and HookDispatcher owns profiled calls.
     2. Python 3.14 lazy annotations can reference `syntheticmind.Trainer` and `syntheticmind.Module` through the package during circular construction without a future import, `TYPE_CHECKING`, quoted annotation, or weakened host Protocol.
-    3. Model callback replacement must remove callbacks by compatible parent type, not merely exact class identity, while preserving unrelated Trainer callbacks and placing checkpoint callbacks last.
-    4. Connector state must clear after configuration failure and after every stage so a rejected callback declaration cannot poison later validation, testing, or prediction.
+    3. Monitoring callbacks remain separate only when each names a real ML observation or control concept; removing static helpers means their validation, scalar conversion, synchronization, and emission operations stay on the callback instance that owns the policy.
+    4. Early-stop decisions require rank consensus, finite checks precede mutation, learning rates follow optimizer use, throughput follows the data-parallel sample axis, and device statistics come from the selected Accelerator.
 
 | Memory | Data Composition and Validated Run Policy | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
 

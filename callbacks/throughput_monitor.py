@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import time
 from collections.abc import Callable
 from typing import override
@@ -203,8 +201,7 @@ class ThroughputMonitor(Callback):
             return [len(batch)]
         return []
 
-    @staticmethod
-    def _synchronize(trainer: syntheticmind.Trainer) -> None:
+    def _synchronize(self, trainer: syntheticmind.Trainer) -> None:
         device: torch.device = trainer.strategy.root_device
         if device.type == "cuda" and torch.cuda.is_available():
             torch.cuda.synchronize(device)

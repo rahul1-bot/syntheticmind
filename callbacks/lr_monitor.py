@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Literal, cast, override
 
 import syntheticmind
@@ -163,8 +161,8 @@ class LearningRateMonitor(Callback):
             configured_name: str | None = next(iter(configured_names), None)
             base_name: str = configured_name or f"lr-{optimizer_type}"
             if configured_name is None and type_index > 0:
-                base_name = f"{base_name}-{type_index}"
-            base_name = f"{self.log_key_prefix}{base_name}"
+                base_name: str = f"{base_name}-{type_index}"
+            base_name: str = f"{self.log_key_prefix}{base_name}"
             if base_name in used_names:
                 raise MisconfigurationError(
                     f"Learning-rate logging name {base_name!r} is duplicated."
@@ -292,8 +290,11 @@ class LearningRateMonitor(Callback):
             return None
         return self._scalar(momentum, "momentum")
 
-    @staticmethod
-    def _scalar(value: OptimizerStateValue | None, name: str) -> float:
+    def _scalar(
+        self,
+        value: OptimizerStateValue | None,
+        name: str
+    ) -> float:
         if type(value) is int or type(value) is float:
             return float(value)
         if isinstance(value, torch.Tensor) and value.numel() == 1:

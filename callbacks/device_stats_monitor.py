@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Literal, override
 
 import syntheticmind
@@ -178,7 +176,7 @@ class DeviceStatsMonitor(Callback):
             trainer.strategy.root_device
         )
         if self.filter_keys is not None:
-            statistics = {
+            statistics: dict[str, float] = {
                 name: value
                 for name, value in statistics.items()
                 if name in self.filter_keys

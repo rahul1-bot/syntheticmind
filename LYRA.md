@@ -156,12 +156,12 @@
     3. The generic utility package has been eliminated completely; every surviving behavior now belongs to an ML lifecycle, execution policy, core contract, callback, or infrastructure boundary.
     4. Callback topology is the next audit because its remaining flat package width crosses the generic review boundary and must be judged by selectable training concepts rather than file count alone.
 
-| Strategic Note | Callback Contract and Capability Subtraction | Date: 04 September 2026 | Time: 04:40 PM | Name: Ghost |
+| Strategic Note | Callback Contract, Monitoring, and Capability Subtraction | Date: 04 September 2026 | Time: 04:47 PM | Name: Ghost |
 
     1. Three callback surfaces were removed because their names overstated their executable semantics or duplicated the canonical profiler subsystem.
     2. Deleting the runtime callback also removed its private timing state from Trainer and loops, leaving profiler action contexts as the sole timing authority.
     3. Callback preserves the complete established hook surface and every call signature through lazy package annotations; concrete callbacks explicitly declare their overrides and no conditional import or stale source commentary remains in the base contract.
-    4. The remaining direct callback modules are independently selectable training concepts; progress, timer, weight averaging, and monitoring internals remain correctness and structural audit targets rather than candidates for cosmetic folders.
+    4. Early stopping, finite checks, learning-rate telemetry, throughput, and device statistics remain independent monitoring concepts and now use owner-bound operations without obsolete annotation imports or static utility methods; timer, weight averaging, and model inspection remain separate audit targets.
 
 | Strategic Note | EMA Weight Averaging Contract | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
 

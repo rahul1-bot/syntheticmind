@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import math
 from typing import Literal, override
 
@@ -118,15 +116,17 @@ class EarlyStopping(Callback):
                 f"got shape {tuple(broadcast_score.shape)}."
             )
         current_score: torch.Tensor = broadcast_score.detach().cpu().squeeze()
-        should_stop: bool
-        reason: StoppingReason | None
-        message: str | None
-        should_stop, reason, message = self._evaluate(current_score)
+        evaluation: tuple[bool, StoppingReason | None, str | None] = (
+            self._evaluate(current_score)
+        )
+        should_stop: bool = evaluation[0]
+        reason: StoppingReason | None = evaluation[1]
+        message: str | None = evaluation[2]
         synchronized_stop: bool = trainer.strategy.reduce_boolean_decision(
             should_stop,
             all=False
         )
-        trainer.should_stop = trainer.should_stop or synchronized_stop
+        trainer.should_stop: bool = trainer.should_stop or synchronized_stop
         if not synchronized_stop:
             return
         self.stopped_epoch: int = module.current_epoch
@@ -171,7 +171,7 @@ class EarlyStopping(Callback):
                 raise TypeError("EarlyStopping best_score must be scalar.")
             best_score: torch.Tensor = score_value.detach().cpu().clone().squeeze()
         elif type(score_value) is int or type(score_value) is float:
-            best_score = torch.tensor(float(score_value))
+            best_score: torch.Tensor = torch.tensor(float(score_value))
         else:
             raise TypeError("EarlyStopping best_score must be a scalar tensor or number.")
         self.wait_count: int = wait_value
@@ -241,8 +241,7 @@ class EarlyStopping(Callback):
             return current_value >= self.divergence_threshold
         return current_value <= self.divergence_threshold
 
-    @staticmethod
-    def _validate_threshold(name: str, value: float | None) -> None:
+    def _validate_threshold(self, name: str, value: float | None) -> None:
         if value is None:
             return
         if type(value) not in (int, float):

@@ -99,12 +99,12 @@
     3. ✅ Duplicate plugin categories, conflicting Trainer and Strategy configuration, invalid synchronized-layer combinations, unavailable accelerators, unsupported distributed MPS execution, and invalid precision combinations fail at construction.
     4. ✅ CPU, MPS, DDP subprocess, spawn, fork, checkpoint-plugin injection, precision fallback, and full and sharded model-parallel execution pass with production-package compilation and source review.
 
-| Progress Complete | Callback Contract and Connector Reconstruction | Date: 04 September 2026 | Time: 04:40 PM | Name: Ghost |
+| Progress Complete | Callback Contract, Monitoring, and Connector Reconstruction | Date: 04 September 2026 | Time: 04:47 PM | Name: Ghost |
 
     1. ✅ Callback resolution, default checkpointing, timers, progress display, model summaries, ordering, model callback replacement, and state-key validation now belong to one internal callback connector.
     2. ✅ Callback preserves all forty-three established call signatures through Python 3.14 lazy package annotations, while HookDispatcher owns invocation and the connector uses a bound configuration operation without a circular import or host Protocol.
-    3. ✅ Every concrete callback override is explicitly marked, and model callback fit, validation, test, prediction, repeated-stage, checkpoint, serialization, invalid-return, duplicate-state, configure-hook logging, DDP, spawn, and fork paths pass.
-    4. ✅ The migration removed more than two hundred callback-composition lines from Trainer without changing the public callback list or stage entrypoints.
+    3. ✅ Early stopping, finite checks, learning-rate monitoring, throughput, and device statistics retain separate callback files and now contain no obsolete future import, broad annotation, static pseudo-utility, source prose, or unannotated owner transition.
+    4. ✅ Model callback stages, non-finite rejection, telemetry, distributed sample accounting, filtered device statistics, checkpoint state, invalid configuration, DDP, spawn, and fork paths pass without changing public callback APIs.
 
 | Progress Complete | Signal Connector Relocation | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
 
