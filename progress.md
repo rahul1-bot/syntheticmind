@@ -184,20 +184,20 @@
 
 | Progress Complete | Cross-Subsystem Contract and Override Placement | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 
-    1. ✅ Framework type aliases and the four used exception categories live in canonical package-root modules; two unreferenced exported exception classes and all stale source prose were deleted.
+    1. ✅ Framework type aliases and the four used exception categories live in canonical `primitives` modules; two unreferenced exported exception classes and all stale source prose were deleted.
     2. ✅ Every production and ignored verification import was migrated directly, with no compatibility façade or stale utility path retained.
     3. ✅ The project-parent override census is empty after marking real DataModule, logger, loop, profiler, checkpoint-wrapper, torch-function, representation, and pickle overrides; constructors with only Protocol-generated or object ancestry remain undecorated.
     4. ✅ Model checkpoint hydration, optimizer execution, local metric views, two-rank DDP strategy execution, and two-rank TorchMetrics reduction pass after relocation.
     5. ✅ Stale deployment-export and interrupted-hold records were removed during ledger consolidation, keeping the active progress index below its child-scope soft limit.
 
-| Progress Complete | Training Data Composition Ownership | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
+| Progress Complete | Semantic Root Topology and Execution State | Date: 04 September 2026 | Time: 09:34 PM | Name: Ghost |
 
-    1. ✅ `CombinedLoader` moved to its canonical package-root module and is exported directly, while every production and ignored verification consumer migrated without a utility compatibility façade.
-    2. ✅ Four genuine combination algorithms remain private and colocated; module functions, static pseudo-utilities, mutable dispatch state, broad annotations, and generic state dictionaries are absent without adding a class or module.
-    3. ✅ Recursive batch, iterable, sampler, loader-state, and pickle domains are explicit, byte batches are supported, and public mode, limit, flattened-tree, sampler, reset, length, and continuation meanings remain stable.
-    4. ✅ Direct execution covers all modes, owner-bound leaf classification, safe length, finite and unsized limits, invalid limits, nested datasets, pickling, state capture, restoration, and persistent-worker cleanup.
-    5. ✅ Spawned two-rank fit, validation, test, prediction, exact stateful resume, metric identity, sampler partitioning, and direct distributed prediction ordering pass after relocation.
-    6. ✅ The explicit concept-integrity size exception is recorded because splitting the loader tree lifecycle would manufacture one-consumer implementation fragments rather than improve machine-learning architecture.
+    1. ✅ `DataModule`, `DatasetDataModule`, and `CombinedLoader` moved into the canonical `data` package, while their established package-root public identities remain unchanged.
+    2. ✅ Framework aliases and exceptions moved into a strictly passive `primitives` package, and stochastic stream behavior moved into `rng/streams.py`; every production and ignored verification import uses the canonical path without compatibility modules.
+    3. ✅ Deterministic algorithm, warning, cuDNN, benchmark, and CUBLAS policy moved from Trainer's monolith into one stateful Trainer Determinism owner, and launcher transfer no longer mutates those torch globals independently.
+    4. ✅ The importable package root contains only `__init__.py`; `core` retains model-facing contracts, `data` retains source and loader semantics, and runtime behavior cannot enter `primitives`.
+    5. ✅ All production modules import, old module paths fail, RNG streams restore exactly, deterministic state restores exactly, and CombinedLoader worker pickling passes.
+    6. ✅ Spawned two-rank multi-loader fit, validation, test, and prediction; exact stateful checkpoint continuation; subprocess DDP execution; and deterministic two-rank model parallelism pass after relocation.
 
 | Progress Complete | Distributed Ownership Evacuation | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
 

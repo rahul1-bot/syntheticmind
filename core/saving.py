@@ -12,7 +12,7 @@ from torch import nn
 
 from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     CheckpointDict,
     CheckpointValue,
     HyperparameterDict,

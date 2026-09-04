@@ -18,7 +18,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.checkpoint import (
     _ModelParallelCheckpoint
 )
 from syntheticmind.strategies.parallel import ParallelStrategy
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.primitives.exceptions import MisconfigurationError
 from syntheticmind.strategies.model_initialization import _ModuleInitializer
 
 __all__: list[str] = ["ModelParallelStrategy"]

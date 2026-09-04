@@ -5,7 +5,7 @@ from typing import ClassVar
 import syntheticmind
 import torch
 
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.primitives.exceptions import MisconfigurationError
 from syntheticmind.storage.filesystem import StoragePath
 
 __all__: list[str] = []

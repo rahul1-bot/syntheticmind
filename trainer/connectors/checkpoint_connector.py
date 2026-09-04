@@ -9,12 +9,12 @@ from pydantic import ValidationError
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpointing import ModelCheckpoint
-from syntheticmind.core.datamodule import DataModule
+from syntheticmind.data.datamodule import DataModule
 from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.core.metric import LoggedMetric, _LoggedMetricCheckpoint
 from syntheticmind.core.optimizer import _SchedulerInstance
 from syntheticmind.plugins.precision.precision import Precision
-from syntheticmind.randomness import _Randomness, _RandomStateSnapshot
+from syntheticmind.rng.streams import _Randomness, _RandomStateSnapshot
 from syntheticmind.plugins.checkpoint_io import (
     CheckpointPath,
     CheckpointStorageOptions
@@ -26,9 +26,9 @@ from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import
     _MetricAccumulatorCheckpoint
 )
 from syntheticmind.trainer.configuration import _TrainerConfigurationSnapshot
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.primitives.exceptions import MisconfigurationError
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     CheckpointDict,
     CheckpointValue,
     DataLoaderState,

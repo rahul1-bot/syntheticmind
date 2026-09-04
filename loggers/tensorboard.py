@@ -4,7 +4,7 @@ from typing import Protocol, override
 
 from syntheticmind.loggers.logger import Logger, _JsonValue
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import HyperparameterDict
+from syntheticmind.primitives.types import HyperparameterDict
 
 __all__: list[str] = ["TensorBoardLogger"]
 

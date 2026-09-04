@@ -16,7 +16,7 @@ from syntheticmind.callbacks.checkpointing.schedule import _CheckpointSchedule
 from syntheticmind.callbacks.checkpointing.transaction import _CheckpointTransaction
 from syntheticmind.core.module import Module
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import Batch, StateDict, StepOutput, TrainerStage
+from syntheticmind.primitives.types import Batch, StateDict, StepOutput, TrainerStage
 
 __all__: list[str] = ["ModelCheckpoint"]
 

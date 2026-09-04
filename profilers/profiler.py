@@ -9,7 +9,7 @@ from loguru import logger as log
 from torch import nn
 
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = ["PassThroughProfiler", "Profiler"]
 

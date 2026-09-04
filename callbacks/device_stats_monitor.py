@@ -5,8 +5,8 @@ import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import Batch, ModelOutput, StepOutput, TrainerStage
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import Batch, ModelOutput, StepOutput, TrainerStage
 
 __all__: list[str] = ["DeviceStatsMonitor"]
 

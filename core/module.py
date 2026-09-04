@@ -28,8 +28,8 @@ from syntheticmind.core.optimizer import (
 )
 from syntheticmind.core.saving import _CheckpointLoader
 from syntheticmind.loggers.logger import Logger
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import (
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import (
     Batch,
     BackwardInputs,
     GatherData,

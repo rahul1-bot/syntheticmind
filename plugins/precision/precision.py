@@ -7,7 +7,7 @@ import torch
 
 from syntheticmind.core.module import Module
 from syntheticmind.core.hooks import CheckpointHooks
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     BackwardInputs,
     Batch,
     CheckpointDict,

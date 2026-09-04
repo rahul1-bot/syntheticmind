@@ -16,9 +16,9 @@ from syntheticmind.callbacks.checkpointing.schedule import (
     _CheckpointSchedule,
     _ScheduleSnapshot
 )
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.primitives.exceptions import MisconfigurationError
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import StateDict, StateValue
+from syntheticmind.primitives.types import StateDict, StateValue
 
 __all__: list[str] = []
 

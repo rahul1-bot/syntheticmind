@@ -9,7 +9,7 @@ from torch.utils.data.dataloader import (
     _MultiProcessingDataLoaderIter
 )
 
-from syntheticmind.types import Batch, DataLoaderState
+from syntheticmind.primitives.types import Batch, DataLoaderState
 
 __all__: list[str] = ["CombinedLoader", "CombinedLoaderMode"]
 

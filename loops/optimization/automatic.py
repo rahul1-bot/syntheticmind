@@ -4,8 +4,8 @@ from collections.abc import Callable, Mapping
 import torch
 
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import (
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import (
     OptimizerStepOutput,
     StepOutput,
     TrainingStepOutput

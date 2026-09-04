@@ -4,8 +4,8 @@ from typing import ClassVar, Literal
 import torch
 from pydantic import BaseModel, ConfigDict
 
-from syntheticmind.randomness import _RandomStateSnapshot
-from syntheticmind.types import (
+from syntheticmind.rng.streams import _RandomStateSnapshot
+from syntheticmind.primitives.types import (
     CheckpointDict,
     CheckpointValue,
     DataLoaderState,

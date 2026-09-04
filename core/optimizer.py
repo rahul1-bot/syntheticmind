@@ -19,8 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import nn
 from torch.optim.lr_scheduler import LRScheduler, OneCycleLR, ReduceLROnPlateau
 
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import (
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import (
     OptimizerClosure,
     OptimizerParameterGroup,
     OptimizerState,

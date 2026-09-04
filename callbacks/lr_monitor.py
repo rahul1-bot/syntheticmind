@@ -6,8 +6,8 @@ import torch
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import LRSchedulerConfig
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import (
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import (
     OptimizerParameterGroup,
     OptimizerStateValue,
     SchedulerInterval,

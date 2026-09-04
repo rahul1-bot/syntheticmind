@@ -3,7 +3,7 @@ from typing import cast
 import syntheticmind
 import torch.multiprocessing as mp
 
-from syntheticmind.core.datamodule import DataModule
+from syntheticmind.data.datamodule import DataModule
 from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
     ProcessStartMethod,
@@ -14,8 +14,8 @@ from syntheticmind.strategies.launchers.environment import _DistributedEnvironme
 from syntheticmind.strategies.launchers.multiprocessing import _MultiprocessingLauncher
 from syntheticmind.strategies.launchers.subprocess import _SubprocessLauncher
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = ["ProcessStartMethod"]
 

@@ -10,8 +10,8 @@ from pydantic import (
     model_validator
 )
 
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import ClipAlgorithm, PrecisionType
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import ClipAlgorithm, PrecisionType
 
 __all__: list[str] = []
 

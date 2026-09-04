@@ -8,12 +8,12 @@ import torch
 from torch import nn
 from torch.autograd.profiler_util import EventList
 from torch.profiler import ExecutionTraceObserver, ProfilerAction, ProfilerActivity, record_function
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.primitives.exceptions import MisconfigurationError
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.profilers.pytorch.module_recording import _ModuleRecordFunctions
 from syntheticmind.profilers.pytorch.schedule import _ProfilerSchedule, _ProfilerScheduleFunction
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = ["PyTorchProfiler"]
 type _ProfilerActivityFilter = dict[ProfilerActivity, list[str]]

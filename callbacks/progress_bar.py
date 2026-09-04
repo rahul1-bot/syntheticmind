@@ -9,10 +9,10 @@ import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.timer import Timer
-from syntheticmind.combined_loader import CombinedLoader
+from syntheticmind.data.combined_loader import CombinedLoader
 from syntheticmind.core.module import Module
 from syntheticmind.trainer.console import ConsoleRenderer
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     Batch,
     ModelOutput,
     RunningStage,

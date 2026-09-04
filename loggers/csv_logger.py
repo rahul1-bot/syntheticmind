@@ -10,7 +10,7 @@ from typing import override
 from fsspec.spec import AbstractFileSystem
 from syntheticmind.loggers.logger import Logger, _JsonValue
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import HyperparameterDict
+from syntheticmind.primitives.types import HyperparameterDict
 
 __all__: list[str] = ["CSVLogger"]
 

@@ -7,8 +7,8 @@ from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import StateDict, StateValue
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import StateDict, StateValue
 
 __all__: list[str] = ["EarlyStopping"]
 

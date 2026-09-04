@@ -6,7 +6,7 @@ from torch import nn
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
-from syntheticmind.types import Batch, ModelOutput
+from syntheticmind.primitives.types import Batch, ModelOutput
 
 __all__: list[str] = []
 

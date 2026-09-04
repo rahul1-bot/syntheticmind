@@ -8,8 +8,8 @@ from syntheticmind.callbacks.model_summary import ModelSummary
 from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = []
 

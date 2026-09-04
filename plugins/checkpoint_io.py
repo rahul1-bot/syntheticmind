@@ -11,7 +11,7 @@ import torch
 from fsspec.spec import AbstractFileSystem
 
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import CheckpointDict, CheckpointValue, MapLocation
+from syntheticmind.primitives.types import CheckpointDict, CheckpointValue, MapLocation
 
 __all__: list[str] = [
     "AsyncCheckpointIO",

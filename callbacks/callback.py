@@ -3,7 +3,7 @@ from typing import override
 import syntheticmind
 import torch
 
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     Batch,
     CheckpointDict,
     ModelOutput,

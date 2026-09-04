@@ -19,12 +19,12 @@ from syntheticmind.loops.optimization.automatic import _AutomaticOptimization
 from syntheticmind.loops.optimization.manual import _ManualOptimization
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.data.combined_loader import CombinedLoader
+from syntheticmind.primitives.exceptions import MisconfigurationError
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
     MetricAccumulator
 )
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     Batch,
     BackwardInputs,
     CheckpointDict,

@@ -3,7 +3,7 @@ from typing import Literal, cast
 import syntheticmind
 import torch
 
-from syntheticmind.types import StateDict, StateValue
+from syntheticmind.primitives.types import StateDict, StateValue
 
 __all__: list[str] = []
 

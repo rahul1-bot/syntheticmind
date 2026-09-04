@@ -13,8 +13,8 @@ from syntheticmind.core.module import Module
 from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.trainer.states import TrainerState
-from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.types import Batch, RunningStage
+from syntheticmind.data.combined_loader import CombinedLoader
+from syntheticmind.primitives.types import Batch, RunningStage
 
 __all__: list[str] = ["FitLoop"]
 

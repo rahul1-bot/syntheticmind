@@ -7,8 +7,8 @@ import torch.distributed as dist
 from pydantic import BaseModel, ConfigDict, Field as ModelField, ValidationError
 from torchmetrics import Metric
 
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import Batch, ModelOutput, Reduction, StateDict, TensorReducer
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import Batch, ModelOutput, Reduction, StateDict, TensorReducer
 
 __all__: list[str] = ["MetricAccumulator"]
 

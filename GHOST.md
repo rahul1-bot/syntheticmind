@@ -175,21 +175,21 @@
 
 | Architecture Decision | Cross-Cutting Contract, Override, and Storage Ownership | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 
-    1. Trainer owns run seeding, worker randomness, terminal rendering, deterministic algorithms, benchmark flags, and complete-run configuration; Loop owns evaluation gradient context.
+    1. The `rng` package owns process-wide stochastic stream seeding and snapshots, while Trainer-owned Determinism owns deterministic algorithms and backend policy; Trainer retains composition and Loop owns evaluation gradient context.
     2. Core data transfer owns recursive batch placement, Module owns its one-consumer gather traversal, Strategy owns topology-sensitive initialization, and the logger connector owns metric accumulation.
     3. Path-bound StoragePath owns one resolved fsspec backend and protocol-aware normalization, joining, containment, metadata, resources, traversal, mutation, copying, and staging; twenty-three module functions and every broad fsspec return annotation were removed without changing ML-facing `str | Path` APIs.
-    4. Framework exception and recursive domain type contracts live at the package root; only used FrameworkError, MisconfigurationError, CheckpointError, and SIGTERMException categories remain, with explicit constructor overrides and unchanged message prefixes.
+    4. Framework exception and recursive domain type contracts live in the dependency-inward `primitives` package; only used FrameworkError, MisconfigurationError, CheckpointError, and SIGTERMException categories remain, with explicit constructor overrides and unchanged message prefixes.
     5. Every method replacing an explicit project or framework parent contract is marked `@override`, including real constructor, representation, and pickle hooks; Protocol-generated or `object`-only constructors remain deliberately undecorated because no declared obligation exists.
     6. Local, `file://`, in-memory remote, transactional CSV, profiler artifact, full checkpoint, remote ModelCheckpoint, schema-v2 model hydration, spawned DDP, and failure-atomic sharded model-parallel paths pass through StoragePath and their assigned artifact owners.
 
-| Architecture Decision | Training Data Composition Ownership | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
+| Architecture Correction | Semantic Root Topology and Execution State Ownership | Date: 04 September 2026 | Time: 09:34 PM | Name: Ghost |
 
-    1. `CombinedLoader` moved from the transitional utility package to the canonical `syntheticmind.combined_loader` module and is exported from the package root as a first-class training-data composition concept.
-    2. Root placement preserves dependency direction because both model-facing `DatasetDataModule` construction and outward Trainer stage execution consume the concept; placing it beneath Trainer connectors would force core data contracts to import orchestration.
-    3. The four private mode iterators remain colocated because minimum-size, maximum-size, cycling, and sequential traversal are real algorithmic variants constructed, reset, serialized, and consumed exclusively by `CombinedLoader`.
-    4. Module-level functions, static pseudo-utilities, mutable mode dispatch, generic annotations, and legacy utility imports are absent; tree-leaf classification, safe length, and limit normalization are private operations on the live CombinedLoader owner.
-    5. The cohesive 588-line module and 337-line primary class exceed generic structural limits under Rahul's explicit SyntheticMind concept-integrity authority. Splitting tree structure, limits, iteration, state continuation, and worker teardown would create implementation fragments and is therefore rejected.
-    6. All four combination modes, finite and unsized limits, nested construction, serialization, state capture and restoration, persistent-worker cleanup, two-rank lifecycle execution, exact stateful resume, and prediction ordering pass.
+    1. Rahul rejected the intermediate package-root placement because dependency sharing did not establish a semantic owner; the importable root now contains only `__init__.py` and explicit public re-exports.
+    2. `data/` owns `DataModule`, `DatasetDataModule`, and `CombinedLoader`, joining data-source lifecycle and nested loader composition without placing either concept beneath Trainer orchestration.
+    3. The four private loader mode iterators remain colocated with CombinedLoader because minimum-size, maximum-size, cycling, and sequential traversal are genuine algorithms within one data-composition lifecycle.
+    4. `primitives/` contains only cross-subsystem aliases, structural types, and framework exceptions; algorithms, mutable state, configuration resolution, resources, and concrete implementations are prohibited from entering that package.
+    5. `rng/streams.py` owns seed application plus Python, NumPy, torch CPU, CUDA, and MPS stream snapshots, while `trainer/determinism.py` owns deterministic algorithm and backend policy and prevents launcher transfer from becoming a second torch-global authority.
+    6. Public class identities remain available from `syntheticmind`, all obsolete module paths were removed without compatibility façades, and local import, stochastic restoration, deterministic restoration, spawned multi-loader, exact stateful resume, subprocess DDP, and deterministic model-parallel probes pass.
 
 | Architecture Decision | Strategy-Owned Distributed Reduction | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
 

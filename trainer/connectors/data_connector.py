@@ -16,13 +16,13 @@ from torch.utils.data import (
     SequentialSampler
 )
 
-from syntheticmind.core.datamodule import DataModule
+from syntheticmind.data.datamodule import DataModule
 from syntheticmind.core.module import Module
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import Batch, DataLoaderSource, TrainerStage
+from syntheticmind.data.combined_loader import CombinedLoader
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import Batch, DataLoaderSource, TrainerStage
 
 __all__: list[str] = []
 

@@ -11,7 +11,7 @@ import torch
 from torch import nn
 
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import HyperparameterDict, HyperparameterValue
+from syntheticmind.primitives.types import HyperparameterDict, HyperparameterValue
 
 __all__: list[str] = ["Logger"]
 

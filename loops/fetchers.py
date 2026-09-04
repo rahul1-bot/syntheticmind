@@ -1,7 +1,7 @@
 from collections.abc import Callable, Iterable, Iterator
 from typing import cast, override
 
-from syntheticmind.types import DataLoaderState
+from syntheticmind.primitives.types import DataLoaderState
 
 __all__: list[str] = []
 

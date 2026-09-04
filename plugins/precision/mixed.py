@@ -8,8 +8,8 @@ import torch
 
 from syntheticmind.core.module import Module
 from syntheticmind.plugins.precision.precision import Precision
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import (
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import (
     ClipAlgorithm,
     OptimizerClosure,
     OptimizerClosureResult,

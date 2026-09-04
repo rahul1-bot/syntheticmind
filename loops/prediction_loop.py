@@ -10,8 +10,8 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
-from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.types import Batch, ModelOutput, RunningStage, StepArgument
+from syntheticmind.data.combined_loader import CombinedLoader
+from syntheticmind.primitives.types import Batch, ModelOutput, RunningStage, StepArgument
 
 __all__: list[str] = ["PredictionLoop"]
 

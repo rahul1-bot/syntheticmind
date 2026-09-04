@@ -1,5 +1,5 @@
-from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.core.datamodule import DataModule, DatasetDataModule
+from syntheticmind.data.combined_loader import CombinedLoader
+from syntheticmind.data.datamodule import DataModule, DatasetDataModule
 from syntheticmind.core.module import Module
 from syntheticmind.trainer.trainer import Trainer
 

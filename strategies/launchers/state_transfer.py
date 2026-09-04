@@ -4,14 +4,14 @@ import syntheticmind
 import torch
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.core.datamodule import DataModule
+from syntheticmind.data.datamodule import DataModule
 from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
     StageResult,
     _GlobalState,
     _WorkerOutput
 )
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     CheckpointDict,
     CheckpointValue,
     DataLoaderState,
@@ -30,10 +30,10 @@ class _WorkerStateTransfer:
         del cls
         return _GlobalState(
             random_state=trainer._randomness.capture(),
-            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
-            deterministic_warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
-            cudnn_benchmark=torch.backends.cudnn.benchmark,
-            cudnn_deterministic=torch.backends.cudnn.deterministic
+            deterministic_algorithms=trainer._determinism.algorithms_enabled,
+            deterministic_warn_only=trainer._determinism.warn_only_enabled,
+            cudnn_benchmark=trainer._determinism.benchmark_enabled,
+            cudnn_deterministic=trainer._determinism.cudnn_deterministic_enabled
         )
 
     @classmethod
@@ -44,12 +44,12 @@ class _WorkerStateTransfer:
     ) -> None:
         del cls
         trainer._randomness.restore(global_state.random_state)
-        torch.use_deterministic_algorithms(
+        trainer._determinism.restore(
             global_state.deterministic_algorithms,
-            warn_only=global_state.deterministic_warn_only
+            global_state.deterministic_warn_only,
+            global_state.cudnn_benchmark,
+            global_state.cudnn_deterministic
         )
-        torch.backends.cudnn.benchmark: bool = global_state.cudnn_benchmark
-        torch.backends.cudnn.deterministic: bool = global_state.cudnn_deterministic
 
     @classmethod
     def collect(

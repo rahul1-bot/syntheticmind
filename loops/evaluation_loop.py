@@ -16,11 +16,11 @@ from syntheticmind.core.module import Module
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.trainer.states import TrainerState
-from syntheticmind.combined_loader import CombinedLoader
+from syntheticmind.data.combined_loader import CombinedLoader
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
     MetricAccumulator
 )
-from syntheticmind.types import Batch, RunningStage, StepArgument, StepOutput
+from syntheticmind.primitives.types import Batch, RunningStage, StepArgument, StepOutput
 
 __all__: list[str] = ["EvaluationLoop"]
 

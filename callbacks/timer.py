@@ -9,8 +9,8 @@ from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import Batch, StateDict, StateValue, StepOutput, TrainerStage
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import Batch, StateDict, StateValue, StepOutput, TrainerStage
 
 __all__: list[str] = ["Timer"]
 

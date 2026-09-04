@@ -3,7 +3,7 @@ from typing import ClassVar
 
 from syntheticmind.plugins.environments import ClusterEnvironment
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.primitives.exceptions import MisconfigurationError
 
 __all__: list[str] = []
 

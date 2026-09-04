@@ -4,13 +4,13 @@ from types import CodeType
 from typing import cast
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.core.datamodule import DataModule
+from syntheticmind.data.datamodule import DataModule
 from syntheticmind.core.hooks import DataHooks, ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
-from syntheticmind.types import DataLoaderSource, ModelOutput
+from syntheticmind.primitives.types import DataLoaderSource, ModelOutput
 
 __all__: list[str] = []
 

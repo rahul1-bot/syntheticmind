@@ -13,7 +13,7 @@ from syntheticmind.plugins.checkpoint_io import (
     _WrappingCheckpointIO
 )
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     CheckpointDict,
     CheckpointValue,
     ModelState,

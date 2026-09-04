@@ -97,17 +97,18 @@
 
 | Strategic Note | Shared Contract and Override Direction | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 
-    1. Framework-wide types and the four used exception contracts live at the package root; two unreferenced categories and their stale prose were removed instead of preserved as fake breadth.
-    2. This placement lets every training subsystem name shared data and failure domains without introducing a dependency on an implementation graveyard or another lifecycle owner.
+    1. Framework-wide types and the four used exception contracts live in the dependency-inward `primitives` package; two unreferenced categories and their stale prose were removed instead of preserved as fake breadth.
+    2. This placement lets every training subsystem name shared data and failure domains without introducing a dependency on an implementation graveyard, another lifecycle owner, or loose package-root modules.
     3. Real parent replacements declare `@override` across constructors, hooks, representations, serialization, and algorithms; Protocol-generated or object-only constructor ancestry does not manufacture an obligation.
     4. The production project-parent override census is empty, and every ownership reassignment remains bounded by executable process, checkpoint, and lifecycle evidence rather than filename motion.
 
-| Strategic Note | Training Data Composition Boundary | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
+| Architecture Correction | Data, Primitive, and Execution-State Packages | Date: 04 September 2026 | Time: 09:34 PM | Name: Ghost |
 
-    1. `CombinedLoader` is now an explicit SyntheticMind data-composition API rather than a utility implementation detail.
-    2. Its package-root placement keeps model-facing DataModule construction inward from Trainer orchestration while allowing every stage loop to consume one canonical loader tree.
-    3. Distinct combination algorithms remain private collaborators, while leaf classification, safe length, and limit normalization execute as owner-bound operations without exporting a class family or static utility surface.
-    4. The next ownership target is distributed behavior still concealed in utilities; Strategy must absorb execution semantics while consumers retain only their real presentation or metric responsibilities.
+    1. DataModule lifecycle and CombinedLoader composition now form the explicit `data` package, while the package root remains a public composition surface rather than a home for unrelated implementations.
+    2. Distinct loader algorithms remain private CombinedLoader collaborators, and model-facing construction plus outward Trainer stages consume the same canonical data package without importing orchestration inward.
+    3. Passive cross-subsystem types and framework failures form the strictly bounded `primitives` package; concrete behavior and mutable process state remain excluded.
+    4. Stochastic streams form the independent `rng` capability, whereas deterministic algorithm and backend selection remain Trainer execution policy; desired reproducibility no longer falsely merges those two mechanisms into one owner.
+    5. Canonical imports, public exports, spawned loader reconstruction, exact stochastic continuation, deterministic worker restoration, and distributed model-parallel execution pass after relocation without compatibility aliases.
 
 | Strategic Note | Distributed Execution Authority | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
 
@@ -126,7 +127,7 @@
 | Strategic Note | Model Inspection and Utility Elimination | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 
     1. Model summary is now a callback capability family whose lifecycle, private inspection report, and optional Rich renderer have explicit ownership.
-    2. Inspection measures actual parameter storage and executes example-input forwarding through canonical DataModule precedence and shared multi-backend randomness as a reversible observation transaction.
+    2. Inspection measures actual parameter storage and executes example-input forwarding through canonical DataModule precedence and shared multi-backend `rng` streams as a reversible observation transaction.
     3. The generic utility package has been eliminated completely; every surviving behavior now belongs to an ML lifecycle, execution policy, core contract, callback, or infrastructure boundary.
     4. Callback, report, and optional Rich rendering operations are owner-bound without future imports, static pseudo-utilities, broad annotations, or nested hook functions; local and two-rank evidence passes.
 

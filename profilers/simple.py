@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import override
 
 from syntheticmind.profilers.profiler import Profiler
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = ["SimpleProfiler"]
 

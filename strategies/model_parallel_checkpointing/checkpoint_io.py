@@ -19,7 +19,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.sharded_store import 
     _ShardedCheckpointStore
 )
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import (
+from syntheticmind.primitives.types import (
     CheckpointDict,
     CheckpointValue,
     DistributedCheckpointState,

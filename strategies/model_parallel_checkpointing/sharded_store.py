@@ -15,9 +15,9 @@ from syntheticmind.strategies.model_parallel_checkpointing.generation import (
     _CheckpointGenerationIndex,
     _CheckpointGenerationPointer
 )
-from syntheticmind.exceptions import CheckpointError
+from syntheticmind.primitives.exceptions import CheckpointError
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import CheckpointDict, DistributedCheckpointState
+from syntheticmind.primitives.types import CheckpointDict, DistributedCheckpointState
 
 __all__: list[str] = []
 

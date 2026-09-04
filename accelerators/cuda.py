@@ -4,7 +4,7 @@ import torch
 
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.accelerators.device_parser import DeviceInput, _AcceleratorDeviceParser
-from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.primitives.exceptions import MisconfigurationError
 
 __all__: list[str] = ["CUDAAccelerator"]
 

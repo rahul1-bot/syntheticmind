@@ -3,8 +3,8 @@ from typing import ClassVar, cast
 
 import torch
 
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import (
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import (
     Batch,
     CheckpointDict,
     DataLoaderSource,

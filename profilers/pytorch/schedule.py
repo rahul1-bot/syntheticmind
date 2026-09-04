@@ -3,8 +3,8 @@ from typing import ClassVar, Literal, cast
 
 from torch.profiler import ProfilerAction
 
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = []
 

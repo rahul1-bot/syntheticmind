@@ -12,8 +12,8 @@ from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.hooks import RemovableHandle
 
 from syntheticmind.core.module import Module
-from syntheticmind.randomness import _Randomness, _RandomStateSnapshot
-from syntheticmind.types import Batch, ModelOutput
+from syntheticmind.rng.streams import _Randomness, _RandomStateSnapshot
+from syntheticmind.primitives.types import Batch, ModelOutput
 
 __all__: list[str] = []
 

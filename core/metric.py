@@ -6,8 +6,8 @@ import torch.distributed as dist
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from torchmetrics import Metric
 
-from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import (
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import (
     ModelOutput,
     Reduction,
     StateDict,

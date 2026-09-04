@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import syntheticmind
 
-from syntheticmind.types import StateDict, StateValue
+from syntheticmind.primitives.types import StateDict, StateValue
 
 __all__: list[str] = []
 

@@ -7,7 +7,7 @@ from typing import override
 
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.storage.filesystem import StoragePath
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = ["AdvancedProfiler"]
 

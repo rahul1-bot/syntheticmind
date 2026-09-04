@@ -14,7 +14,7 @@ from torch.multiprocessing.spawn import (
 )
 
 from syntheticmind.accelerators.cpu import CPUAccelerator
-from syntheticmind.core.datamodule import DataModule
+from syntheticmind.data.datamodule import DataModule
 from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
     ProcessStartMethod,
@@ -26,8 +26,8 @@ from syntheticmind.strategies.launchers.contracts import (
 from syntheticmind.strategies.launchers.environment import _DistributedEnvironment
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.launchers.state_transfer import _WorkerStateTransfer
-from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
-from syntheticmind.types import TrainerStage
+from syntheticmind.primitives.exceptions import MisconfigurationError, SIGTERMException
+from syntheticmind.primitives.types import TrainerStage
 
 __all__: list[str] = []
 

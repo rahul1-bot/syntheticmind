@@ -198,17 +198,17 @@
 | Memory | Dependency-Neutral Framework and Override Contracts | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 
     1. Shared aliases and used framework exceptions are contracts, not utilities; an exported failure category with no raise site or consumer is compatibility theatre rather than a useful semantic boundary.
-    2. Placing these contracts at the package root prevents core, Trainer, loops, strategies, plugins, callbacks, loggers, and profilers from depending on a generic utility layer or on one another merely to name shared domains.
+    2. Placing these contracts in a dependency-inward `primitives` package prevents core, Trainer, loops, strategies, plugins, callbacks, loggers, and profilers from depending on a generic utility layer or on one another merely to name shared domains.
     3. A contract relocation requires multiprocessing and distributed execution evidence because imported module paths participate in worker reconstruction even when local imports compile.
     4. Override markers follow declared parent methods, not the mere existence of `object` or Protocol metaclass machinery; real constructor, representation, serialization, hook, and algorithm replacements require `@override`, while invented obligations create false architecture.
 
-| Memory | Combined Loader Is a Data Composition Primitive | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
+| Memory | Semantic Root and Stochastic Execution Boundaries | Date: 04 September 2026 | Time: 09:34 PM | Name: Ghost |
 
-    1. Nested loader tree shape, sampling mode, length and limit semantics, iteration state, stateful-loader continuation, and worker teardown form one training-data concept rather than unrelated utility mechanisms.
-    2. The mode iterator classes pay rent as distinct traversal algorithms, while tree-leaf classification, safe length, and limit normalization remain private instance operations rather than static utilities detached from the loader state they interpret.
-    3. A core DataModule and outward Trainer loops both consume loader composition, so an inward package-root module preserves acyclic dependency direction better than a Trainer connector subpackage or a one-file data directory.
-    4. Worker reconstruction, pickling, direct distributed execution, and exact stateful resume are mandatory relocation evidence because ordinary local iteration cannot expose module-path or cursor-ownership regressions.
-    5. Explicit project authority may retain one oversized cohesive concept when every proposed split creates implementation fragments; the exception must name the inseparable responsibilities and remain subject to subtraction review.
+    1. Nested loader shape, sampling mode, limits, iteration state, continuation, and worker teardown form one CombinedLoader concept, while DataModule owns data-source lifecycle; their shared `data` package reflects the ML domain without merging the two classes.
+    2. The mode iterator classes pay rent as distinct traversal algorithms, while tree-leaf classification, safe length, and limit normalization remain private instance operations rather than detached utilities.
+    3. Cross-subsystem types and failures belong in `primitives` only because they are passive inward vocabulary; putting active randomness there would destroy the package's admission boundary.
+    4. Random streams and deterministic execution are related reproducibility inputs but not one mechanism: seeds and generator snapshots determine stochastic trajectory, while deterministic algorithms and backend flags constrain operation selection.
+    5. A package name that remains semantically awkward can reveal a false aggregation: separating `rng/streams.py` from `trainer/determinism.py` clarifies ownership, while canonical import, public identity, pickling, exact continuation, and distributed execution establish the relocation beyond compilation.
 
 | Memory | Distributed State Must Follow the Selected Strategy | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
 
