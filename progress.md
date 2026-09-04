@@ -126,18 +126,18 @@
     3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
     4. ✅ Weighted, dataclass, ambiguity, tensor-state, TorchMetrics, CPU, MPS, remote fsspec, external DDP, spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
 
-| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 06:57 PM | Name: Ghost |
+| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
 
     1. ✅ Schema version 2 now validates artifact identity, resolved Trainer configuration, progress coordinates, state collections, metadata, and immutable multi-backend randomness before restoration.
     2. ✅ One Randomness owner replaces SeedManager and duplicate launcher or checkpoint RNG logic, captures only active accelerator generators, and preserves exact Python, NumPy, torch CPU, CUDA, and MPS state.
     3. ✅ Ordinary and stateful loaders retain progress and randomness, while a batch remains non-durable through optimizer, progress, hooks, metrics, validation, and plateau cadence; direct resumable saves fail and ModelCheckpoint flushes due triggers afterward.
-    4. ✅ Weights-only artifacts remain available but non-resumable, no step-zero artifact is emitted, and exact accumulated plus step-level plateau continuation joins corruption, CPU, MPS, subprocess, DDP selection, and full or sharded model-parallel evidence.
+    4. ✅ Weights-only artifacts remain available but non-resumable, no step-zero artifact is emitted, and exact accumulated plus step- and epoch-plateau continuation joins corruption, CPU, MPS, subprocess, DDP selection, and full or sharded model-parallel evidence.
 
-| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 06:52 PM | Name: Ghost |
+| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
 
     1. ✅ TrainingEpochLoop now composes bounded resume, iteration, batch, optimization, cadence, continuation, and completion transitions; the public run path and inner iterator meet method hard limits without new classes or APIs.
     2. ✅ One Trainer transfer transaction serves every stage, Strategy owns deferred gradient synchronization, and SyntheticOptimizer uses distinct automatic and manual step operations without direct DDP inspection or a boolean step mode.
-    3. ✅ Standard and plateau scheduler operations are explicit, `estimated_stepping_batches` is the sole horizon calculation, manual clipping avoids configuration mutation, dead precision, scaler, and duplicate scheduler-resolution state is gone, and every modified assignment is locally typed.
+    3. ✅ Standard and plateau scheduler operations are explicit, epoch plateau state advances before monitoring persistence, `estimated_stepping_batches` is the sole horizon calculation, manual clipping avoids configuration mutation, and dead duplicate scheduler state is gone.
     4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, durable accumulated checkpoint resume, multi-loader DDP, transfer precedence, stateful continuation, plateau scheduling, and sharded model-parallel paths pass.
 
 | Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |

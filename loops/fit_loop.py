@@ -117,13 +117,6 @@ class FitLoop(Loop):
             monitoring_callbacks,
             non_monitoring_callbacks
         )
-        if module.automatic_optimization:
-            self.epoch_loop.update_plateau_schedulers(
-                trainer,
-                module,
-                "epoch",
-                state.current_epoch + 1
-            )
         state.increment_epoch()
         module._current_epoch: int = state.current_epoch
         trainer._raise_if_sigterm()
@@ -184,6 +177,14 @@ class FitLoop(Loop):
             module.on_train_epoch_end
         )
         self._flush_hook_metrics(module, trainer, state)
+        if module.automatic_optimization:
+            assert self.epoch_loop is not None
+            self.epoch_loop.update_plateau_schedulers(
+                trainer,
+                module,
+                "epoch",
+                state.current_epoch + 1
+            )
         trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_epoch_end",

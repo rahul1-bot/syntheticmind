@@ -239,11 +239,11 @@
     4. DataConnector still applies resolved batch limits because loader cardinality is known only at the data boundary, while Trainer retains side-effectful torch flags, seeding, and runtime construction.
     5. Trainer runtime construction now follows explicit accelerator, policy, connector, loop, and live-state phases, while checkpoint restoration separately applies resumed trajectory coordinates after participant state exists; this preserves order without introducing public builders or pseudo-domain classes.
 
-| Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 06:57 PM | Name: Ghost |
+| Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
 
     1. A training checkpoint and a weights-only model artifact are distinct contracts; only the former carries optimizer, scheduler, callback, DataModule, precision, loop, progress, configuration, and randomness state.
     2. One immutable random-state snapshot covers Python, NumPy, torch CPU, and only the active CUDA or MPS backend across checkpoint and multiprocessing boundaries.
-    3. Mid-epoch continuation retains loader coordinates and randomness, but durability also requires completed optimizer, hook, metric, validation, and plateau-scheduler transitions; due batch saves flush only after that boundary.
+    3. Durability requires completed optimizer, hook, metric, validation, and plateau transitions; due batch saves flush post-cadence, while epoch metrics and plateau state advance before monitoring callbacks persist the epoch.
     4. Resolved configuration provenance permits a larger run ceiling while rejecting trajectory-changing accumulation, data, validation, clipping, determinism, sampler, synchronization, reload, or precision drift.
     5. Unsafe direct-save rejection, deferred callback triggers, exact accumulated and step-plateau resume, strict corruption, stochastic CPU and MPS replay, DDP selection, and full or sharded model-parallel evidence control acceptance.
 
