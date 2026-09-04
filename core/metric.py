@@ -1,3 +1,33 @@
+# This module:
+# 1. Defines LoggedMetric, the internal observation produced by Module.log and
+#    consumed by loop reduction, runtime views, callbacks, progress output, and
+#    experiment loggers
+# 2. Defines the strict checkpoint identity used to continue scalar and
+#    torchmetrics epoch windows across a partial training epoch
+#
+# Design decisions:
+# - A logged observation carries its originating hook and dataloader identity in
+#   addition to its public name, preventing collisions between stages and loader
+#   leaves before routing creates consumer-facing names
+# - Scalar values and torchmetrics.Metric instances remain distinct: scalar
+#   observations use SyntheticMind reduction, while Metric instances retain
+#   their own state, compute operation, and synchronization semantics
+# - Step computation is cached because progress, callback, logger, and epoch
+#   consumers may inspect the same observation; the cached tensor preserves the
+#   requested graph only when enable_graph=True
+# - Distributed scalar reduction passes through the selected Strategy operation
+#   supplied by the caller, while rank-zero-only observations never enter a
+#   collective that other ranks cannot match
+# - Partial-epoch checkpointing persists immutable observation identity plus
+#   non-persistent torchmetrics tensor or tensor-list state and update count;
+#   custom process groups and live autograd graphs are rejected because they
+#   cannot cross process or persistence ownership safely
+# - Metric persistence is enabled only while state is copied and its original
+#   flags are restored in finally, so checkpoint inspection cannot permanently
+#   change a client Metric
+#
+# Author: Rahul Sawhney
+
 import numbers
 from typing import Annotated, ClassVar, Literal, cast
 
@@ -34,6 +64,9 @@ type _TorchMetricState = torch.Tensor | list[_TorchMetricState]
 
 
 class _LoggedMetricCheckpoint(BaseModel):
+    # Strict metadata schema identifying one resumable epoch observation. The
+    # live scalar or Metric value travels separately because identity must be
+    # validated before state is applied to a runtime object.
     schema_version: Literal[1] = 1
     name: Annotated[str, Field(min_length=1)]
     hook_name: Annotated[str, Field(min_length=1)]
@@ -58,6 +91,10 @@ class _LoggedMetricCheckpoint(BaseModel):
 
 
 class LoggedMetric:
+    # One Module.log observation with complete routing, reduction, distributed,
+    # dataloader, graph, and checkpoint semantics. Clients create these only
+    # through Module.log or Module.log_dict; loops and the logger connector own
+    # consumption and publication.
     __slots__: tuple[str, ...] = (
         "name",
         "hook_name",
@@ -99,6 +136,9 @@ class LoggedMetric:
         rank_zero_only: bool,
         dataloader_idx: int | None
     ) -> None:
+        # Binds immutable routing metadata to the current tensor or Metric value
+        # and derives an internal storage key from hook, public name, and loader
+        # identity. The step cache starts empty for lazy consumer-driven compute.
         self.name: str = name
         self.hook_name: str = hook_name
         self.value: torch.Tensor | Metric = value
@@ -138,9 +178,14 @@ class LoggedMetric:
 
     @property
     def is_metric(self) -> bool:
+        # Whether reduction and epoch state belong to a torchmetrics.Metric
+        # instance rather than SyntheticMind's scalar accumulator.
         return isinstance(self.value, Metric)
 
     def output_name(self, on_step: bool) -> str:
+        # Builds the consumer-facing name, adding step or epoch suffixes only
+        # when both cadences were requested and appending loader identity when
+        # configured.
         name: str = self.name
         if self.on_step and self.on_epoch:
             name: str = f"{name}_{'step' if on_step else 'epoch'}"
@@ -149,12 +194,16 @@ class LoggedMetric:
         return name
 
     def base_name(self) -> str:
+        # Builds the unsuffixed public identity used by callback and evaluation
+        # views while retaining optional dataloader qualification.
         name: str = self.name
         if self.add_dataloader_idx and self.dataloader_idx is not None:
             name: str = f"{name}/dataloader_idx_{self.dataloader_idx}"
         return name
 
     def local_value(self) -> torch.Tensor:
+        # Returns the rank-local scalar tensor for accumulator input. Stateful
+        # Metric objects have no equivalent per-call epoch scalar and fail here.
         if self.is_metric:
             raise RuntimeError(
                 "A torchmetrics.Metric has no per-call scalar epoch value."
@@ -168,6 +217,8 @@ class LoggedMetric:
         device: torch.device,
         reduce_tensor: TensorReducer
     ) -> torch.Tensor | None:
+        # Computes the step observation under the requested graph policy. Metric
+        # objects may return None before their first forward cache exists.
         if self.enable_graph:
             with torch.enable_grad():
                 return self._compute_step(device, reduce_tensor)
@@ -179,6 +230,8 @@ class LoggedMetric:
         device: torch.device,
         reduce_tensor: TensorReducer
     ) -> torch.Tensor | None:
+        # Normalizes the current scalar, applies optional Strategy reduction,
+        # detaches when requested, and caches the squeezed result once.
         if self._computed_step_value is not None:
             return self._computed_step_value
         value: numbers.Number | torch.Tensor | None = self.value
@@ -217,6 +270,8 @@ class LoggedMetric:
         device: torch.device,
         reduce_tensor: TensorReducer
     ) -> torch.Tensor:
+        # Produces a scalar for immediate consumers, using the step cache when
+        # available and falling back to Metric.compute for stateful metrics.
         if self.enable_graph:
             with torch.enable_grad():
                 return self._compute(device, reduce_tensor)
@@ -238,6 +293,8 @@ class LoggedMetric:
         device: torch.device,
         reduce_tensor: TensorReducer
     ) -> torch.Tensor:
+        # Produces an epoch value from the local scalar observation or the
+        # complete stateful Metric window under the configured graph policy.
         if self.enable_graph:
             with torch.enable_grad():
                 return self._compute_epoch(device, reduce_tensor)
@@ -257,6 +314,8 @@ class LoggedMetric:
         return self._metric_value()
 
     def _metric_value(self) -> torch.Tensor:
+        # Executes Metric.compute and enforces SyntheticMind's scalar publication
+        # contract before optional detachment.
         if not isinstance(self.value, Metric):
             raise TypeError("The logged value is not a torchmetrics.Metric.")
         computed: ModelOutput = self.value.compute()
@@ -270,6 +329,8 @@ class LoggedMetric:
         return computed.squeeze()
 
     def _checkpoint_state(self) -> StateDict:
+        # Serializes observation identity after rejecting graph-retaining or
+        # custom-process-group state that cannot be resumed faithfully.
         if self.enable_graph:
             raise MisconfigurationError(
                 "A graph-retaining epoch metric cannot cross a checkpoint boundary."
@@ -298,6 +359,8 @@ class LoggedMetric:
         return cast(StateDict, state.model_dump(mode="python"))
 
     def _metric_checkpoint_state(self) -> tuple[StateDict, int]:
+        # Captures torchmetrics state on CPU together with its update count while
+        # restoring every original persistence flag afterward.
         if not isinstance(self.value, Metric):
             return {}, 0
         metric: Metric = self.value
@@ -325,6 +388,9 @@ class LoggedMetric:
         state: StateDict,
         update_count: int
     ) -> None:
+        # Restores strict Metric state onto its live device, reinstates the update
+        # count, and invalidates computed caches so continuation recomputes from
+        # the restored window.
         if not isinstance(self.value, Metric):
             if state or update_count != 0:
                 raise ValueError("A scalar epoch metric cannot contain Metric state.")
@@ -355,6 +421,7 @@ class LoggedMetric:
 
     @classmethod
     def _validate_metric_checkpoint_state(cls, state: StateDict) -> None:
+        # Validates every state leaf before a live Metric is mutated.
         value: StateValue
         for value in state.values():
             cls._validate_metric_state_value(value)
@@ -364,6 +431,8 @@ class LoggedMetric:
         cls,
         value: StateValue
     ) -> None:
+        # Restricts resumable Metric state to tensors and recursively nested
+        # tensor lists, the forms verified by current TorchMetrics support.
         if isinstance(value, torch.Tensor):
             return
         if isinstance(value, list):
@@ -378,6 +447,8 @@ class LoggedMetric:
         value: StateValue,
         device: torch.device
     ) -> _TorchMetricState:
+        # Detaches, clones, and moves supported Metric state without retaining
+        # checkpoint storage or autograd aliases.
         if isinstance(value, torch.Tensor):
             return value.detach().to(device).clone()
         if isinstance(value, list):
@@ -393,6 +464,8 @@ class LoggedMetric:
         cls,
         state: StateDict
     ) -> _LoggedMetricCheckpoint:
+        # Validates strict schema and rejects unknown, missing, or mistyped
+        # identity fields before reconstruction.
         del cls
         try:
             return _LoggedMetricCheckpoint.model_validate(state, strict=True)
@@ -405,6 +478,8 @@ class LoggedMetric:
         state: _LoggedMetricCheckpoint,
         value: torch.Tensor | Metric
     ) -> LoggedMetric:
+        # Reconstructs the observation around a separately supplied scalar or
+        # Metric object and verifies that its persisted kind still matches.
         if state.is_metric != isinstance(value, Metric):
             raise TypeError("Checkpoint epoch metric value has the wrong kind.")
         return cls(

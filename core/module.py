@@ -1,3 +1,44 @@
+# This module:
+# 1. Defines Module, the torch.nn.Module subclass every SyntheticMind research
+#    model extends for training, evaluation, prediction, logging, optimization,
+#    checkpoint reconstruction, and Trainer-attached runtime access
+# 2. Owns the client metric-production API and converts each log call into a
+#    LoggedMetric observation with explicit cadence, reduction, graph,
+#    distributed, and dataloader semantics
+# 3. Exposes automatic and manual optimization hooks, managed optimizer access,
+#    gradient clipping, scheduler stepping, temporary parameter toggling, and
+#    direct backward customization
+# 4. Preserves device and dtype mirrors, nested model modes, rank-aware output,
+#    recursive differentiable gathering, and serialization without a live
+#    Trainer graph
+#
+# Design decisions:
+# - Module composes HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks,
+#   and torch.nn.Module through one inheritance contract, so client models gain
+#   the complete lifecycle without wrapper objects or parallel model identities
+# - Trainer attachment is recursive across nested SyntheticMind modules and is
+#   removed during serialization, preventing spawn and checkpoint operations
+#   from capturing the complete live runtime graph
+# - Every log call is validated against the active hook marker maintained by
+#   HookDispatcher; unset cadence follows hook semantics, illegal lifecycle
+#   locations fail immediately, and prediction uses returned values instead of
+#   a second metric channel
+# - Scalar tensors detach and clone by default at production time so buffered
+#   observations cannot retain autograd graphs; enable_graph is explicit and
+#   remains incompatible with resumable epoch state
+# - Stateful torchmetrics objects must be registered module attributes, allowing
+#   checkpoint restoration and device movement to resolve the same instance
+# - Manual optimization delegates backward, clipping, stepping, and gradient
+#   synchronization through the attached Trainer, preserving the same Strategy
+#   and precision semantics as automatic optimization
+# - Device and dtype properties inspect realized parameters first, buffers
+#   second, and cached mirrors last, keeping parameter-free modules accurate
+# - all_gather converts supported numeric trees into tensors and delegates the
+#   collective to Strategy; sync_grads selects PyTorch's differentiable gather
+#   path rather than attaching a false graph to ordinary collective buffers
+#
+# Author: Rahul Sawhney
+
 import builtins
 import inspect
 import numbers
@@ -83,11 +124,71 @@ type _ModuleStateValue = (
 
 
 class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Module):
+    # Base class for every model SyntheticMind trains or evaluates. Clients
+    # implement forward, the stage steps they use, and configure_optimizers;
+    # Trainer supplies lifecycle dispatch, placement, precision, metrics,
+    # distributed execution, checkpointing, and observability around them.
+    #
+    # Integration: subclass syntheticmind.Module rather than torch.nn.Module
+    # directly. Call super().__init__(), define layers, and return a scalar loss
+    # tensor or a mapping containing ``"loss"`` from training_step when using
+    # automatic optimization.
+    #
+    # Example::
+    #
+    #     from typing import override
+    #
+    #     import torch
+    #     from torch import nn
+    #
+    #     from syntheticmind import Module
+    #     from syntheticmind.primitives.types import Batch, TrainingStepOutput
+    #
+    #     class Regressor(Module):
+    #         def __init__(self, input_width: int) -> None:
+    #             super().__init__()
+    #             self.save_hyperparameters()
+    #             self.network: nn.Linear = nn.Linear(input_width, 1)
+    #
+    #         @override
+    #         def forward(self, inputs: Batch) -> torch.Tensor:
+    #             if not isinstance(inputs, torch.Tensor):
+    #                 raise TypeError("Regressor expects a tensor batch.")
+    #             return self.network(inputs)
+    #
+    #         @override
+    #         def training_step(
+    #             self,
+    #             batch: Batch,
+    #             batch_idx: int
+    #         ) -> TrainingStepOutput:
+    #             del batch_idx
+    #             if not isinstance(batch, list | tuple) or len(batch) != 2:
+    #                 raise TypeError("Regressor expects an input-target pair.")
+    #             inputs, targets = batch
+    #             loss: torch.Tensor = torch.nn.functional.mse_loss(
+    #                 self(inputs),
+    #                 targets
+    #             )
+    #             self.log("train_loss", loss, on_epoch=True)
+    #             return {"loss": loss}
+    #
+    #         @override
+    #         def configure_optimizers(self) -> torch.optim.Optimizer:
+    #             return torch.optim.AdamW(self.parameters(), lr=1e-3)
+    #
+    # For alternating or otherwise model-controlled optimization, set
+    # automatic_optimization=False and use the managed SyntheticOptimizer
+    # objects returned by self.optimizers(). Their step and toggle operations
+    # preserve precision, hook, progress, and distributed synchronization policy.
     _checkpoint_hyperparameters_key: ClassVar[str] = "hyper_parameters"
     _checkpoint_hyperparameters_name: ClassVar[str] = "hparams_name"
     _checkpoint_hyperparameters_type: ClassVar[str] = "hparams_type"
     @override
     def __init__(self) -> None:
+        # Initializes the complete cooperative inheritance graph, then starts
+        # detached with automatic optimization, CPU float32 mirrors, empty metric
+        # observations, no device mesh, and no parameter-toggle snapshot.
         super().__init__()
         self._trainer: syntheticmind.Trainer | None = None
         self._example_input_array: Batch | None = None
@@ -117,6 +218,22 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         weights_only: bool | None = None,
         **kwargs: HyperparameterValue
     ) -> Self:
+        # Reconstructs the subclass architecture from saved hyperparameters and
+        # explicit overrides, invokes configure_model and on_load_checkpoint,
+        # applies model state under resolved strictness, and places the result on
+        # the checkpoint or mapped device without constructing a Trainer.
+        #
+        # Args:
+        #     checkpoint_path: Local, remote, or seekable schema-v2 checkpoint.
+        #     map_location: torch.load storage remapping policy. Default: ``None``
+        #         falls back to CPU when the saved accelerator is unavailable.
+        #     hparams_file: Optional CSV or YAML constructor configuration.
+        #     strict: Explicit state-key strictness or None to use strict_loading.
+        #     weights_only: Optional torch.load safety policy.
+        #     **kwargs: Constructor values overriding every persisted source.
+        #
+        # Return:
+        #     A reconstructed instance of cls with model state applied.
         return _CheckpointLoader.load(
             cls,
             checkpoint_path,
@@ -129,6 +246,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @contextmanager
     def _hook_context(self, hook_name: str) -> Iterator[None]:
+        # Installs a nested-safe active hook name for logging validation and
+        # restores the previous context even when the hook raises.
         previous_hook_name: str | None = self._current_fx_name
         self._current_fx_name: str | None = hook_name
         try:
@@ -138,9 +257,19 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @override
     def forward(self, *args: Batch, **kwargs: Batch) -> ModelOutput:
+        # Defines model computation. Clients override this standard torch method;
+        # default prediction and Strategy wrappers invoke the module instance so
+        # PyTorch hooks and compiled-call machinery remain active.
         return super().forward(*args, **kwargs)
 
     def training_step(self, batch: Batch, batch_idx: int) -> TrainingStepOutput:
+        # Computes one training batch. Automatic optimization accepts a scalar
+        # loss tensor, a mapping containing ``"loss"``, or None to skip the
+        # batch; manual optimization may return reporting values independently.
+        #
+        # Args:
+        #     batch: Device-transferred output from the active training loader.
+        #     batch_idx: Logical index within the current loader epoch.
         raise NotImplementedError
 
     def validation_step(
@@ -149,6 +278,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         batch_idx: int,
         dataloader_idx: int = 0
     ) -> StepOutput:
+        # Computes one validation batch. Include dataloader_idx when consuming
+        # several sequential validation loaders; metrics logged here default to
+        # epoch reduction.
         raise NotImplementedError
 
     def test_step(
@@ -157,6 +289,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         batch_idx: int,
         dataloader_idx: int = 0
     ) -> StepOutput:
+        # Computes one test batch. The default delegates to validation_step and
+        # passes dataloader_idx only when the override explicitly accepts it,
+        # allowing validation and test logic to share one client implementation.
         validation_step: Callable[..., StepOutput] = cast(
             Callable[..., StepOutput],
             self.validation_step
@@ -175,10 +310,16 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         batch_idx: int,
         dataloader_idx: int = 0
     ) -> ModelOutput:
+        # Produces one prediction output. The default ignores loader coordinates
+        # and invokes self(batch), preserving the ordinary forward hook path.
         del batch_idx, dataloader_idx
         return self(batch)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
+        # Declares torch optimizers and optional schedulers for fit. Clients may
+        # return the established single, sequence, tuple, or mapping forms; the
+        # default warns and creates a no-op optimizer so evaluation-only modules
+        # remain usable.
         warnings.warn(
             "configure_optimizers must be implemented to use optimization during Trainer.fit.",
             UserWarning,
@@ -187,6 +328,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         return None
 
     def configure_callbacks(self) -> Callback | Sequence[Callback]:
+        # Returns model-specific callbacks composed before stage setup. A
+        # returned callback replaces compatible Trainer callbacks by inheritance
+        # and checkpoint callbacks remain ordered last.
         return []
 
     @torch.compiler.disable
@@ -207,6 +351,38 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         metric_attribute: str | None = None,
         rank_zero_only: bool = False
     ) -> None:
+        # Publishes one scalar or stateful Metric observation from the active
+        # Trainer-managed hook. The call records intent; loops own computation
+        # cadence and the logger connector owns consumer routing and persistence.
+        #
+        # Args:
+        #     name: Public metric identity. Reserved dataloader suffixes may not
+        #         be supplied when add_dataloader_idx is enabled.
+        #     value: Python numeric scalar, single-element tensor, or registered
+        #         torchmetrics.Metric instance.
+        #     prog_bar: Whether the observation enters progress presentation.
+        #     logger: Whether the observation enters experiment loggers; None
+        #         resolves to True.
+        #     on_step: Explicit immediate publication; None follows hook policy.
+        #     on_epoch: Explicit epoch accumulation; None follows hook policy.
+        #     reduce_fx: Scalar epoch reduction: mean, sum, min, or max. Custom
+        #         reductions must be implemented as torchmetrics.Metric.
+        #     enable_graph: Whether scalar computation retains autograd history.
+        #     sync_dist: Whether Strategy reduces the scalar across ranks.
+        #     sync_dist_group: Optional process group for scalar reduction.
+        #     add_dataloader_idx: Whether multi-loader identity is appended.
+        #     batch_size: Explicit mean weight; None requests inference from the
+        #         current batch when epoch mean reduction requires it.
+        #     metric_attribute: Registered Module attribute containing a Metric;
+        #         None requests identity-based discovery.
+        #     rank_zero_only: Marks an observation produced only on global rank
+        #         zero and therefore excludes it from collective reduction.
+        #
+        # Raises:
+        #     MisconfigurationError: If lifecycle, cadence, reduction, loader
+        #         identity, or Metric registration cannot be represented safely.
+        #     TypeError: If option types violate their declared contract.
+        #     ValueError: If value or tensor shape cannot produce one scalar.
         is_metric_value: bool = self._validate_log_request(
             name,
             value,
@@ -289,6 +465,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         metric_attribute: str | None,
         rank_zero_only: bool
     ) -> bool:
+        # Validates option types, positive explicit batch weighting, supported
+        # scalar or Metric values, and the non-nested single-metric boundary
+        # before any observation enters module state.
         if not isinstance(name, str):
             raise TypeError(
                 f"self.log() metric names must be strings, got {type(name).__name__}."
@@ -344,6 +523,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         on_epoch: bool | None,
         add_dataloader_idx: bool
     ) -> _LogContext | None:
+        # Resolves hook-derived cadence and active loader identity. Detached and
+        # barebones modules warn once and discard logging; illegal lifecycle
+        # locations fail instead of fabricating an output channel.
         if self._trainer is None:
             self._warn_logging_once(
                 "detached_module",
@@ -391,6 +573,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         return current_fx_name, resolved_on_step, resolved_on_epoch
 
     def _resolve_log_reduction(self, reduce_fx: _MetricReduction) -> Reduction:
+        # Normalizes supported string, torch, and builtin reduction identities
+        # into the closed scalar reduction vocabulary.
         if isinstance(reduce_fx, str):
             reduction_name: str = reduce_fx.lower()
             reduction_name: str = (
@@ -420,6 +604,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         enable_graph: bool,
         current_fx_name: str
     ) -> tuple[torch.Tensor | Metric, str | None]:
+        # Separates stateful Metric registration from scalar normalization and
+        # returns the concrete value plus its resolved module attribute identity.
         if is_metric_value:
             metric: Metric = cast(Metric, value)
             resolved_attribute: str = self._resolve_metric_attribute(
@@ -440,6 +626,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         metric: Metric,
         metric_attribute: str | None
     ) -> str:
+        # Discovers a Metric among registered submodules once or validates an
+        # explicit attribute path against the exact instance being logged.
         if metric_attribute is None:
             if self._metric_attributes is None:
                 self._metric_attributes: dict[int, str] | None = {
@@ -475,6 +663,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         enable_graph: bool,
         current_fx_name: str
     ) -> torch.Tensor:
+        # Converts numeric values to the framework reduction dtype, validates a
+        # one-element tensor, and detaches plus clones unless graph retention was
+        # explicitly requested.
         default_dtype: torch.dtype = torch.get_default_dtype()
         if default_dtype not in {torch.float32, torch.float64}:
             default_dtype: torch.dtype = torch.float32
@@ -514,6 +705,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         name: str,
         current_fx_name: str
     ) -> None:
+        # Enforces stable routing metadata for repeated calls sharing one
+        # hook/name/loader identity, then appends the observation in production
+        # order for loop consumption.
         previous_metadata: _MetricMetadata | None = self._logged_metric_metadata.get(
             metric.storage_key
         )
@@ -531,6 +725,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         message: str,
         rank_zero_only: bool = False
     ) -> None:
+        # Deduplicates runtime logging warnings and applies global-rank ownership
+        # before emission so distributed runs produce one corrective message.
         if key in self._logging_warning_keys:
             return
         if rank_zero_only and (
@@ -556,6 +752,12 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         batch_size: int | None = None,
         rank_zero_only: bool = False
     ) -> None:
+        # Publishes every item in a mapping or MetricCollection through log with
+        # one shared option set, preserving all validation and routing semantics.
+        #
+        # Args:
+        #     dictionary: Metric-name mapping or torchmetrics.MetricCollection.
+        #     Remaining arguments: The same publication controls accepted by log.
         if not isinstance(dictionary, Mapping) and not self._is_metric_collection(dictionary):
             raise TypeError(
                 "self.log_dict() requires a mapping or torchmetrics.MetricCollection."
@@ -589,6 +791,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         *args: _ModuleConversionArgument,
         **kwargs: _ModuleConversionArgument
     ) -> Module:
+        # Delegates movement and conversion to torch.nn.Module, then refreshes
+        # cached device and dtype from realized parameters, buffers, or explicit
+        # arguments for parameter-free modules.
         result: Module = super().to(*args, **kwargs)
         param: torch.nn.Parameter | None = next(iter(result.parameters()), None)
         if param is not None:
@@ -616,26 +821,34 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @override
     def on_validation_model_zero_grad(self) -> None:
+        # Clears stale gradients before validation through the standard Module
+        # mode-transition hook.
         self.zero_grad()
 
     @override
     def on_validation_model_eval(self) -> None:
+        # Applies recursive evaluation mode before validation.
         self.eval()
 
     @override
     def on_validation_model_train(self) -> None:
+        # Applies recursive training mode after validation; Trainer later
+        # restores exact nested modes captured before the stage.
         self.train()
 
     @override
     def on_test_model_eval(self) -> None:
+        # Applies recursive evaluation mode before test execution.
         self.eval()
 
     @override
     def on_test_model_train(self) -> None:
+        # Applies recursive training mode after test before exact mode rollback.
         self.train()
 
     @override
     def on_predict_model_eval(self) -> None:
+        # Applies recursive evaluation mode before prediction execution.
         self.eval()
 
     def lr_scheduler_step(
@@ -643,6 +856,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         scheduler: StatefulScheduler,
         metric: torch.Tensor | float | None
     ) -> None:
+        # Advances a scheduler with its monitored scalar when present, otherwise
+        # through the ordinary no-argument step. Override for custom scheduler
+        # APIs that do not satisfy this convention.
         if metric is None:
             scheduler.step()
         else:
@@ -655,6 +871,10 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         optimizer: torch.optim.Optimizer | SyntheticOptimizer,
         optimizer_closure: OptimizerClosure | None = None
     ) -> None:
+        # Performs one optimizer mutation through the supplied closure. Precision
+        # and Strategy have already selected the correct managed step operation;
+        # clients override only for optimizer algorithms needing custom calling
+        # semantics.
         del epoch, batch_idx
         optimizer.step(closure=optimizer_closure)
 
@@ -664,6 +884,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         batch_idx: int,
         optimizer: torch.optim.Optimizer
     ) -> None:
+        # Clears gradients at the loop-selected boundary. Override to change the
+        # model's zeroing policy without moving cadence ownership out of the loop.
         del epoch, batch_idx
         optimizer.zero_grad()
 
@@ -675,6 +897,13 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         create_graph: bool = False,
         inputs: BackwardInputs = None
     ) -> None:
+        # Routes a client-driven backward pass through the active epoch loop,
+        # preserving callback hooks, precision scaling, Strategy synchronization,
+        # and progress semantics used by automatic optimization.
+        #
+        # Raises:
+        #     MisconfigurationError: If automatic optimization remains enabled.
+        #     RuntimeError: If the model is not inside an initialized fit loop.
         if self.automatic_optimization:
             raise MisconfigurationError(
                 "manual_backward() requires automatic_optimization = False."
@@ -700,6 +929,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         create_graph: bool = False,
         inputs: BackwardInputs = None
     ) -> None:
+        # Default autograd operation invoked by precision and Strategy. Override
+        # when a research method needs a custom backward algorithm while keeping
+        # the surrounding lifecycle unchanged.
         loss.backward(
             gradient=gradient,
             retain_graph=retain_graph,
@@ -713,6 +945,14 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         gradient_clip_val: int | builtins.float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
+        # Resolves explicit or Trainer-owned clipping configuration and delegates
+        # the actual norm or value clipping to the active epoch loop after
+        # precision unscaling.
+        #
+        # Raises:
+        #     MisconfigurationError: If explicit values conflict with Trainer or
+        #         request an unsupported algorithm.
+        #     TypeError: If the clipping threshold is not numeric.
         trainer: syntheticmind.Trainer = self.trainer
         if trainer.fit_loop.epoch_loop is None:
             raise RuntimeError("Trainer fit loop is not initialized.")
@@ -771,6 +1011,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         gradient_clip_val: int | builtins.float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
+        # Extension hook called before an automatic optimizer step. The default
+        # applies clip_gradients; clients may override the complete clipping
+        # operation while leaving its cadence with the epoch loop.
         self.clip_gradients(
             optimizer,
             gradient_clip_val=gradient_clip_val,
@@ -779,6 +1022,10 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @torch.compiler.disable
     def toggle_optimizer(self, optimizer: torch.optim.Optimizer | SyntheticOptimizer) -> None:
+        # Snapshots requires_grad for every parameter reachable from configured
+        # optimizers, disables all of them, then restores only the selected
+        # optimizer's original flags. Alternating objectives therefore cannot
+        # accumulate gradients into another optimizer's parameter set.
         param_requires_grad_state: dict[torch.nn.Parameter, bool] = {}
         trainer_optimizer: torch.optim.Optimizer
         parameter_group: OptimizerParameterGroup
@@ -800,6 +1047,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @torch.compiler.disable
     def untoggle_optimizer(self, optimizer: torch.optim.Optimizer | SyntheticOptimizer) -> None:
+        # Restores the recorded flags for non-selected optimizer parameters and
+        # clears the snapshot. Parameters shared with the selected optimizer
+        # retain the state restored during toggle_optimizer.
         raw_optimizer: torch.optim.Optimizer = (
             optimizer.optimizer if isinstance(optimizer, SyntheticOptimizer) else optimizer
         )
@@ -820,6 +1070,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         self,
         optimizer: torch.optim.Optimizer | SyntheticOptimizer
     ) -> Iterator[None]:
+        # Scopes parameter isolation around one manual optimization operation and
+        # guarantees restoration when forward, backward, or stepping fails.
         self.toggle_optimizer(optimizer)
         try:
             yield
@@ -858,6 +1110,10 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         | torch.optim.Optimizer
         | list[torch.optim.Optimizer]
     ):
+        # Returns the configured optimizer or optimizer list attached by Trainer.
+        # Managed SyntheticOptimizer adapters are the default because their step
+        # and toggle operations preserve framework lifecycle; pass False for raw
+        # torch optimizers when direct algorithm access is intentionally required.
         trainer: syntheticmind.Trainer = self.trainer
         optimizers: list[SyntheticOptimizer] | list[torch.optim.Optimizer] = (
             trainer._synthetic_optimizers if use_synthetic_optimizer else trainer.optimizers
@@ -869,6 +1125,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
     def lr_schedulers(
         self
     ) -> LRSchedulerTypeUnion | list[LRSchedulerTypeUnion] | None:
+        # Returns no scheduler, one raw scheduler, or the configured scheduler
+        # list. Manual optimization clients invoke these explicitly; automatic
+        # optimization leaves cadence with TrainingEpochLoop.
         trainer: syntheticmind.Trainer = self.trainer
         if not trainer.lr_scheduler_configs:
             return None
@@ -880,16 +1139,23 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         return schedulers
 
     def freeze(self) -> Self:
+        # Disables gradients for every parameter and selects evaluation mode,
+        # returning the subclass instance for fluent research setup.
         for param in self.parameters():
             param.requires_grad: bool = False
         return self.eval()
 
     def unfreeze(self) -> Self:
+        # Enables gradients for every parameter and selects training mode,
+        # returning the subclass instance.
         for param in self.parameters():
             param.requires_grad: bool = True
         return self.train()
 
     def _capture_training_modes(self) -> dict[str, bool]:
+        # Captures the exact training flag of every nested submodule so stage and
+        # failure cleanup can restore heterogeneous mode trees rather than apply
+        # one coarse model-wide flag.
         return {
             name: submodule.training
             for name, submodule in self.named_modules()
@@ -899,6 +1165,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         self,
         training_modes: dict[str, bool]
     ) -> None:
+        # Reapplies only captured named-module modes, tolerating structural
+        # additions that appeared after the snapshot without inventing state.
         name: str
         submodule: nn.Module
         for name, submodule in self.named_modules():
@@ -912,6 +1180,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         explicit: bool = False,
         minimum_arguments: int | None = None
     ) -> bool:
+        # Inspects a bound hook signature to preserve compatibility with optional
+        # dataloader indices and legacy positional shapes without catching
+        # TypeError raised inside client code.
         parameters: list[inspect.Parameter] = list(
             inspect.signature(hook).parameters.values()
         )
@@ -942,6 +1213,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @override
     def cuda(self, device: int | torch.device | None = None) -> Module:
+        # Moves through torch's CUDA implementation and refreshes the cached
+        # device for parameter-free modules from the requested index.
         result: Module = super().cuda(device)
         param: torch.nn.Parameter | None = next(iter(result.parameters()), None)
         if param is not None:
@@ -957,12 +1230,16 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @override
     def cpu(self) -> Module:
+        # Moves through torch's CPU implementation and refreshes the cached
+        # device for parameter-free modules.
         result: Module = super().cpu()
         result._device: torch.device = torch.device("cpu")
         return result
 
     @override
     def type(self, dst_type: str | torch.dtype) -> Module:
+        # Applies torch type conversion and refreshes the cached dtype from
+        # parameters, buffers, or an explicit torch.dtype.
         result: Module = super().type(dst_type)
         param: torch.nn.Parameter | None = next(iter(result.parameters()), None)
         if param is not None:
@@ -977,30 +1254,40 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @override
     def float(self) -> Module:
+        # Converts floating parameters and buffers to float32 and updates the
+        # parameter-free dtype mirror.
         result: Module = super().float()
         result._dtype: torch.dtype = torch.float32
         return result
 
     @override
     def half(self) -> Module:
+        # Converts floating parameters and buffers to float16 and updates the
+        # parameter-free dtype mirror.
         result: Module = super().half()
         result._dtype: torch.dtype = torch.float16
         return result
 
     @override
     def double(self) -> Module:
+        # Converts floating parameters and buffers to float64 and updates the
+        # parameter-free dtype mirror.
         result: Module = super().double()
         result._dtype: torch.dtype = torch.float64
         return result
 
     @override
     def bfloat16(self) -> Module:
+        # Converts floating parameters and buffers to bfloat16 and updates the
+        # parameter-free dtype mirror.
         result: Module = super().bfloat16()
         result._dtype: torch.dtype = torch.bfloat16
         return result
 
     @property
     def trainer(self) -> syntheticmind.Trainer:
+        # Attached Trainer providing live stage, optimization, strategy, logger,
+        # and progress state. Detached access fails with corrective guidance.
         if self._trainer is None:
             raise RuntimeError(
                 "Module is not attached to a Trainer. Call trainer.fit(module, ...) "
@@ -1010,6 +1297,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @trainer.setter
     def trainer(self, trainer: syntheticmind.Trainer | None) -> None:
+        # Attaches or detaches this module and every nested SyntheticMind Module,
+        # keeping client-composed model hierarchies on one runtime authority.
         for child in self.children():
             if isinstance(child, Module):
                 child.trainer: syntheticmind.Trainer | None = trainer
@@ -1017,6 +1306,7 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @property
     def example_input_array(self) -> Batch | None:
+        # Optional representative input used by model summary inspection.
         return self._example_input_array
 
     @example_input_array.setter
@@ -1024,26 +1314,34 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         self,
         example_input_array: Batch | None
     ) -> None:
+        # Records the representative nested batch without moving or executing it.
         self._example_input_array: Batch | None = example_input_array
 
     @property
     def automatic_optimization(self) -> bool:
+        # Whether TrainingEpochLoop owns backward and optimizer stepping.
         return self._automatic_optimization
 
     @automatic_optimization.setter
     def automatic_optimization(self, automatic_optimization: bool) -> None:
+        # Selects automatic or client-driven optimization before fitting.
         self._automatic_optimization: bool = automatic_optimization
 
     @property
     def strict_loading(self) -> bool:
+        # Model-owned checkpoint key strictness; the unset state resolves to True.
         return self._strict_loading in (None, True)
 
     @strict_loading.setter
     def strict_loading(self, strict_loading: bool) -> None:
+        # Sets the model-owned default used when load_from_checkpoint or Trainer
+        # restoration receives no explicit strictness override.
         self._strict_loading: bool | None = strict_loading
 
     @property
     def device(self) -> torch.device:
+        # Current placement from a realized parameter, then buffer, then the
+        # cached mirror maintained by movement methods.
         param: torch.nn.Parameter | None = next(iter(self.parameters()), None)
         if param is not None:
             return param.device
@@ -1054,10 +1352,14 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @property
     def device_mesh(self) -> DeviceMesh | None:
+        # Strategy-provided mesh available during configure_model for tensor
+        # parallel, composable FSDP2, or hybrid client plans.
         return self._device_mesh
 
     @property
     def dtype(self) -> torch.dtype:
+        # Current dtype from a realized parameter, then buffer, then the cached
+        # mirror maintained for parameter-free modules.
         param: torch.nn.Parameter | None = next(iter(self.parameters()), None)
         if param is not None:
             return param.dtype
@@ -1068,12 +1370,16 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @property
     def logger(self) -> Logger | None:
+        # Primary configured experiment logger, or None while detached or when
+        # logging is disabled.
         if self._trainer is None:
             return None
         return self._trainer.logger
 
     @property
     def loggers(self) -> list[Logger]:
+        # Defensive list of all configured loggers; detached modules receive an
+        # independent empty list.
         if self._trainer is None:
             return []
         return self._trainer.loggers
@@ -1086,6 +1392,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         file: IO[str] | None = None,
         flush: bool = False
     ) -> None:
+        # Provides Python print semantics owned by global rank zero. When an
+        # interactive progress callback is active, output routes through it so
+        # the live line is cleared and redrawn without corruption.
         trainer: syntheticmind.Trainer = self.trainer
         if not trainer.is_global_zero:
             return
@@ -1109,6 +1418,15 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         group: dist.ProcessGroup | None = None,
         sync_grads: bool = False
     ) -> GatherResult:
+        # Recursively converts supported numeric leaves and gathers them through
+        # the selected Strategy. World-size-one execution preserves tensor shape;
+        # distributed execution adds the participating-rank dimension.
+        #
+        # Args:
+        #     data: Tensor, NumPy array, bool, int, float, or nested dict, list,
+        #         tuple, or named tuple containing those leaves.
+        #     group: Optional process group; None selects the world group.
+        #     sync_grads: Whether gradients propagate across the collective.
         if type(sync_grads) is not bool:
             raise TypeError(
                 f"`sync_grads` must be a bool, got {type(sync_grads).__name__}."
@@ -1126,30 +1444,39 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
     @property
     def current_epoch(self) -> int:
+        # Trainer-owned logical epoch, or zero while detached.
         return self.trainer.current_epoch if self._trainer is not None else 0
 
     @property
     def global_step(self) -> int:
+        # Number of completed managed optimizer steps, or zero while detached.
         return self.trainer.global_step if self._trainer is not None else 0
 
     @property
     def global_rank(self) -> int:
+        # Strategy-owned global process rank, or zero while detached.
         return self.trainer.global_rank if self._trainer is not None else 0
 
     @property
     def local_rank(self) -> int:
+        # Strategy-owned node-local process rank, or zero while detached.
         return self.trainer.local_rank if self._trainer is not None else 0
 
     @property
     def on_gpu(self) -> bool:
+        # Whether the current module device is specifically CUDA; Apple MPS is
+        # intentionally not reported as GPU by this compatibility property.
         return self.device.type == "cuda"
 
     @property
     def logged_metrics(self) -> list[LoggedMetric]:
+        # Defensive copy of observations waiting for loop consumption.
         return list(self._logged_metrics)
 
     @override
     def __getstate__(self) -> dict[str, _ModuleStateValue]:
+        # Produces pickle state without the live Trainer back-reference, allowing
+        # spawn transport to reconstruct one runtime graph per process.
         state: dict[str, _ModuleStateValue] = cast(
             dict[str, _ModuleStateValue],
             dict(self.__dict__)
@@ -1158,10 +1485,13 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         return state
 
     def _reset_logged_metrics(self) -> None:
+        # Clears pending observations and active loader identity after loop
+        # consumption without erasing cross-call metadata consistency checks.
         self._logged_metrics.clear()
         self._current_dataloader_idx: int | None = None
 
     def _reset_logging_state(self) -> None:
+        # Clears pending observations and metadata at a complete stage boundary.
         self._reset_logged_metrics()
         self._logged_metric_metadata.clear()
 
@@ -1171,6 +1501,8 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         group: dist.ProcessGroup | None,
         sync_grads: bool
     ) -> torch.Tensor:
+        # Supplies the selected group and graph policy to Strategy while the
+        # recursive traversal remains model-owned.
         return self.trainer.strategy.all_gather(
             tensor,
             group=group,
@@ -1183,6 +1515,9 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         device: torch.device,
         transform: Callable[[torch.Tensor], torch.Tensor]
     ) -> GatherResult:
+        # Converts supported numeric leaves on the module device, applies the
+        # collective transform, and reconstructs every collection including
+        # named tuples with their concrete type.
         if isinstance(data, torch.Tensor):
             tensor: torch.Tensor = data.to(device)
             return transform(tensor)
@@ -1236,7 +1571,10 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
 
 
     def _is_metric(self, value: _MetricCandidate) -> bool:
+        # Isolates optional TorchMetrics identity from broader model-output types.
         return isinstance(value, Metric)
 
     def _is_metric_collection(self, value: _MetricCandidate) -> bool:
+        # Identifies MetricCollection without broadening log_dict's accepted
+        # mapping contract.
         return isinstance(value, MetricCollection)

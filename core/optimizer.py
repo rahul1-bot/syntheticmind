@@ -1,3 +1,35 @@
+# This module:
+# 1. Defines the accepted configure_optimizers return vocabulary for torch
+#    optimizers, scheduler configurations, multiple optimizers, and manual
+#    optimization
+# 2. Defines SyntheticOptimizer, the managed adapter connecting a torch optimizer
+#    to Trainer-owned stepping, precision, hook, progress, model-toggle, and
+#    gradient-synchronization operations
+# 3. Parses and validates client optimization declarations into one optimizer
+#    list and one normalized LRSchedulerConfig list
+#
+# Design decisions:
+# - Optimizer algorithms remain native torch.optim.Optimizer instances;
+#   SyntheticOptimizer adds lifecycle orchestration without renaming or
+#   reimplementing the mathematical optimizer
+# - Scheduler support is structural through StatefulScheduler so custom clients
+#   participate when they expose optimizer, step, state_dict, and
+#   load_state_dict; automatic mode requires established scheduler behavior or a
+#   Module.lr_scheduler_step override
+# - Automatic optimization permits one optimizer because the loop owns one
+#   unambiguous loss-to-step path; multiple optimizers require manual
+#   optimization where the model chooses objectives and ordering explicitly
+# - Scheduler cadence, frequency, plateau monitoring, and strict missing-monitor
+#   behavior are normalized once before execution rather than reinterpreted in
+#   every loop boundary
+# - Managed step operations are injected after Trainer constructs the runtime,
+#   allowing the same adapter to preserve local, precision-mediated, DDP, and
+#   model-parallel execution without importing those implementations
+# - The no-op optimizer preserves evaluation-only and explicitly optimizer-free
+#   fit lifecycles while keeping the optimization interface structurally valid
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -61,6 +93,9 @@ type LRSchedulerType = type[LRScheduler] | type[ReduceLROnPlateau]
 
 @runtime_checkable
 class StatefulScheduler(Protocol):
+    # Structural scheduler contract accepted by configure_optimizers. Custom
+    # schedulers need no SyntheticMind inheritance, but automatic optimization
+    # may require Module.lr_scheduler_step to define nonstandard stepping.
     optimizer: torch.optim.Optimizer
 
     def step(self, metric: _SchedulerMetric = None) -> None: ...
@@ -86,6 +121,10 @@ type _ParsedOptimization = tuple[
 
 
 class LRSchedulerConfig(BaseModel):
+    # Immutable normalized scheduler policy consumed by TrainingEpochLoop.
+    # ``interval`` chooses optimizer-step or completed-epoch cadence,
+    # ``frequency`` gates that cadence, and plateau schedulers name the metric
+    # they monitor.
     scheduler: StatefulScheduler
     name: str | None = None
     interval: SchedulerInterval = "epoch"
@@ -103,12 +142,15 @@ class LRSchedulerConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_monitor(self) -> LRSchedulerConfig:
+        # Rejects plateau behavior without a metric identity before loops begin.
         if self.reduce_on_plateau and self.monitor is None:
             raise ValueError("A plateau scheduler requires a monitor metric.")
         return self
 
 
 class LRSchedulerConfigType(TypedDict, total=False):
+    # Mapping form clients may return for a scheduler policy. Missing optional
+    # values resolve through LRSchedulerConfig defaults.
     scheduler: Required[StatefulScheduler]
     name: str | None
     interval: SchedulerInterval
@@ -119,10 +161,13 @@ class LRSchedulerConfigType(TypedDict, total=False):
 
 
 class OptimizerConfig(TypedDict):
+    # Minimal mapping form for one optimizer without a scheduler.
     optimizer: torch.optim.Optimizer
 
 
 class OptimizerLRSchedulerConfig(TypedDict):
+    # Mapping form binding one optimizer to its scheduler and optional plateau
+    # monitor identity.
     optimizer: torch.optim.Optimizer
     lr_scheduler: StatefulScheduler | LRSchedulerConfigType
     monitor: NotRequired[str]
@@ -141,7 +186,34 @@ type OptimizerLRScheduler = (
 
 
 class SyntheticOptimizer:
+    # Managed lifecycle adapter over one native torch optimizer. Trainer connects
+    # the adapter before fit; Module.optimizers returns it by default for manual
+    # optimization so client calls participate in hook, precision, Strategy,
+    # progress, and checkpoint semantics.
+    #
+    # Integration: disable automatic optimization in the Module constructor,
+    # retrieve one or several managed optimizers, and drive them explicitly.
+    #
+    # Example::
+    #
+    #     self.automatic_optimization = False
+    #     generator, discriminator = self.optimizers()
+    #
+    #     with discriminator.toggle_model():
+    #         discriminator.zero_grad()
+    #         discriminator_loss: torch.Tensor = self.discriminator_loss(batch)
+    #         self.manual_backward(discriminator_loss)
+    #         discriminator.step()
+    #
+    #     with generator.toggle_model():
+    #         generator.zero_grad()
+    #         generator_loss: torch.Tensor = self.generator_loss(batch)
+    #         self.manual_backward(generator_loss)
+    #         generator.step()
     def __init__(self, optimizer: torch.optim.Optimizer) -> None:
+        # Binds the native optimizer and prepares disconnected lifecycle
+        # operations. Calling managed behavior before Trainer.connect fails
+        # rather than silently bypassing framework semantics.
         if not isinstance(optimizer, torch.optim.Optimizer):
             raise TypeError("SyntheticOptimizer requires a torch optimizer.")
         self._optimizer: torch.optim.Optimizer = optimizer
@@ -162,6 +234,9 @@ class SyntheticOptimizer:
         toggle_operation: _OptimizerToggle,
         defer_backward_sync_operation: _GradientSyncDeferral
     ) -> None:
+        # Injects the live model and Trainer-owned operations after runtime
+        # construction. Callables remain narrow capabilities instead of a broad
+        # Trainer dependency, preserving serialization and dependency direction.
         if not isinstance(model, nn.Module):
             raise TypeError("SyntheticOptimizer model must be a torch module.")
         if (
@@ -188,6 +263,9 @@ class SyntheticOptimizer:
         closure: OptimizerClosure | None = None,
         **kwargs: OptimizerStepValue
     ) -> OptimizerStepOutput:
+        # Executes the automatic or manual managed step selected by the current
+        # context, bracketing it with callback operations used by progress and
+        # telemetry. The after operation runs even when closure or stepping fails.
         if closure is not None and not callable(closure):
             raise MisconfigurationError("optimizer.step closure must be callable.")
         self._on_before_step()
@@ -206,18 +284,27 @@ class SyntheticOptimizer:
             self._on_after_step()
 
     def zero_grad(self, set_to_none: bool = True) -> None:
+        # Delegates native zeroing; Trainer controls when automatic optimization
+        # invokes it, while manual clients control their own cadence.
         self._optimizer.zero_grad(set_to_none=set_to_none)
 
     def add_param_group(self, param_group: OptimizerParameterGroup) -> None:
+        # Adds a native parameter group so fine-tuning callbacks and client code
+        # retain ordinary torch optimizer behavior.
         self._optimizer.add_param_group(param_group)
 
     def state_dict(self) -> OptimizerState:
+        # Returns native optimizer state with integer parameter identifiers
+        # preserved for exact checkpoint and launcher transfer.
         return cast(OptimizerState, self._optimizer.state_dict())
 
     def load_state_dict(self, state_dict: OptimizerState) -> None:
+        # Restores native optimizer state after parameters and groups exist.
         self._optimizer.load_state_dict(state_dict)
 
     def move_state_to(self, device: torch.device) -> None:
+        # Recursively moves tensor leaves in optimizer state after model
+        # placement, preserving scalar, tuple, list, and integer-keyed mappings.
         parameter_state: dict[torch.Tensor, dict[OptimizerStateKey, OptimizerStateValue]] = cast(
             dict[torch.Tensor, dict[OptimizerStateKey, OptimizerStateValue]],
             self._optimizer.state
@@ -235,6 +322,8 @@ class SyntheticOptimizer:
 
     @contextmanager
     def automatic_step_context(self) -> Iterator[None]:
+        # Selects the automatic managed operation for the enclosed loop-owned
+        # step and restores manual selection in finally.
         self._automatic_step: bool = True
         try:
             yield
@@ -243,6 +332,9 @@ class SyntheticOptimizer:
 
     @contextmanager
     def toggle_model(self, sync_grad: bool = True) -> Iterator[None]:
+        # Isolates this optimizer's parameters through Module toggling and may
+        # suppress distributed backward synchronization for the enclosed manual
+        # operation. Both contexts restore after failure.
         self._require_model()
         synchronization_context: AbstractContextManager[None] = nullcontext()
         if not sync_grad:
@@ -254,33 +346,40 @@ class SyntheticOptimizer:
 
     @property
     def optimizer(self) -> torch.optim.Optimizer:
+        # Underlying native optimizer for algorithms requiring direct access.
         return self._optimizer
 
     @property
     def param_groups(self) -> list[OptimizerParameterGroup]:
+        # Live native parameter groups used by schedulers, monitors, and clients.
         return cast(list[OptimizerParameterGroup], self._optimizer.param_groups)
 
     def _require_model(self) -> nn.Module:
+        # Resolves the connected model or fails before a toggle context begins.
         if self._model is None:
             raise RuntimeError("SyntheticOptimizer is not connected to a model.")
         return self._model
 
     def _require_manual_step_operation(self) -> _ManagedOptimizerStep:
+        # Resolves the Trainer-owned manual step capability after connection.
         if self._manual_step_operation is None:
             raise RuntimeError("SyntheticOptimizer has no manual step operation.")
         return self._manual_step_operation
 
     def _require_automatic_step_operation(self) -> _ManagedOptimizerStep:
+        # Resolves the Trainer-owned automatic step capability after connection.
         if self._automatic_step_operation is None:
             raise RuntimeError("SyntheticOptimizer has no automatic step operation.")
         return self._automatic_step_operation
 
     def _require_toggle_operation(self) -> _OptimizerToggle:
+        # Resolves model parameter isolation after connection.
         if self._toggle_operation is None:
             raise RuntimeError("SyntheticOptimizer is not connected to a toggle operation.")
         return self._toggle_operation
 
     def _require_defer_backward_sync_operation(self) -> _GradientSyncDeferral:
+        # Resolves Strategy-owned synchronization deferral after connection.
         if self._defer_backward_sync_operation is None:
             raise RuntimeError("SyntheticOptimizer has no gradient-sync deferral operation.")
         return self._defer_backward_sync_operation
@@ -290,6 +389,8 @@ class SyntheticOptimizer:
         value: OptimizerStateValue,
         device: torch.device
     ) -> OptimizerStateValue:
+        # Recursively moves tensor state without coercing optimizer-specific
+        # scalar values or mapping keys.
         if isinstance(value, torch.Tensor):
             return value.to(device)
         if isinstance(value, dict):
@@ -317,10 +418,14 @@ class SyntheticOptimizer:
         return value
 
     def _noop(self) -> None:
+        # Default step-boundary callback before Trainer connects telemetry.
         pass
 
 
 class _NoOpOptimizer(torch.optim.Optimizer):
+    # Optimizer-shaped disabled policy used when configure_optimizers returns
+    # None. Closures still execute so training_step can run, while parameter and
+    # state mutation remain absent.
     @override
     def __init__(self) -> None:
         super().__init__([torch.zeros(1)], {})
@@ -362,11 +467,16 @@ class _NoOpOptimizer(torch.optim.Optimizer):
 
 
 class _OptimizerConfigurationParser:
+    # Normalizes every established configure_optimizers return form and validates
+    # the relationships between optimizers, schedulers, plateau monitors, and
+    # automatic or manual execution before the first training batch.
     def __init__(
         self,
         automatic_optimization: bool,
         lr_scheduler_step_overridden: bool
     ) -> None:
+        # Records optimization ownership and whether the client supplied a custom
+        # scheduler-step hook needed by nonstandard automatic schedulers.
         self._automatic_optimization: bool = automatic_optimization
         self._lr_scheduler_step_overridden: bool = lr_scheduler_step_overridden
 
@@ -374,6 +484,8 @@ class _OptimizerConfigurationParser:
         self,
         declaration: OptimizerLRScheduler
     ) -> tuple[list[torch.optim.Optimizer], list[LRSchedulerConfig]]:
+        # Parses the declaration, installs the no-op policy when absent,
+        # normalizes schedulers, and applies cross-component validation.
         normalized_declaration: OptimizerLRScheduler = declaration
         if normalized_declaration is None:
             warnings.warn(
@@ -394,6 +506,9 @@ class _OptimizerConfigurationParser:
         return optimizers, scheduler_configs
 
     def _parse(self, declaration: OptimizerLRScheduler) -> _ParsedOptimization:
+        # Distinguishes one optimizer, mappings, optimizer sequences, paired
+        # optimizer and scheduler sequences, and sequences of mappings without
+        # accepting ambiguous arbitrary containers.
         if isinstance(declaration, SyntheticOptimizer):
             return [declaration.optimizer], [], None
         if isinstance(declaration, torch.optim.Optimizer):
@@ -425,6 +540,8 @@ class _OptimizerConfigurationParser:
         self,
         configuration: _OptimizerConfiguration
     ) -> _ParsedOptimization:
+        # Extracts one optimizer, optional scheduler, and optional monitor from
+        # the mapping form after key and type validation.
         self._validate_optimizer_mapping(configuration)
         optimizer_value: _OptimizerConfigurationValue = configuration["optimizer"]
         if not isinstance(optimizer_value, torch.optim.Optimizer):
@@ -448,6 +565,8 @@ class _OptimizerConfigurationParser:
         self,
         configurations: list[_OptimizerConfiguration]
     ) -> _ParsedOptimization:
+        # Extracts several optimizer mappings for manual optimization, retaining
+        # scheduler association through each scheduler's native optimizer link.
         optimizers: list[torch.optim.Optimizer] = []
         schedulers: list[_SchedulerInput] = []
         configuration: _OptimizerConfiguration
@@ -469,6 +588,8 @@ class _OptimizerConfigurationParser:
         schedulers: list[_SchedulerInput],
         monitor: str | None
     ) -> list[LRSchedulerConfig]:
+        # Applies automatic or manual normalization because manual execution
+        # intentionally ignores monitoring and automatic cadence controls.
         configurations: list[LRSchedulerConfig] = []
         scheduler: _SchedulerInput
         for scheduler in schedulers:
@@ -485,6 +606,8 @@ class _OptimizerConfigurationParser:
         scheduler: _SchedulerInput,
         monitor: str | None
     ) -> LRSchedulerConfig:
+        # Converts a scheduler instance, mapping, or normalized model into the
+        # complete automatic policy and infers ReduceLROnPlateau behavior.
         if isinstance(scheduler, LRSchedulerConfig):
             configuration: LRSchedulerConfig = scheduler
         elif isinstance(scheduler, Mapping):
@@ -510,6 +633,8 @@ class _OptimizerConfigurationParser:
         return self._validate_scheduler(configuration)
 
     def _manual_scheduler(self, scheduler: _SchedulerInput) -> LRSchedulerConfig:
+        # Retains scheduler identity, name, interval, and frequency for client
+        # inspection while warning that automatic plateau controls are ignored.
         if isinstance(scheduler, LRSchedulerConfig):
             return LRSchedulerConfig(
                 scheduler=scheduler.scheduler,
@@ -549,6 +674,8 @@ class _OptimizerConfigurationParser:
         self,
         mapping: _SchedulerConfiguration
     ) -> LRSchedulerConfig:
+        # Validates the supported mapping fields and materializes one strict
+        # immutable scheduler configuration.
         supported_keys: set[str] = set(LRSchedulerConfig.model_fields)
         extra_keys: set[str] = set(mapping) - supported_keys
         if extra_keys:
@@ -608,6 +735,8 @@ class _OptimizerConfigurationParser:
         self,
         configuration: LRSchedulerConfig
     ) -> LRSchedulerConfig:
+        # Warns when OneCycleLR is placed on its usually incorrect epoch cadence
+        # without preventing an intentional client override.
         if isinstance(configuration.scheduler, OneCycleLR) and configuration.interval == "epoch":
             warnings.warn(
                 "OneCycleLR normally requires interval='step'.",
@@ -620,6 +749,8 @@ class _OptimizerConfigurationParser:
         self,
         optimizers: list[torch.optim.Optimizer]
     ) -> None:
+        # Rejects ambiguous automatic loss ownership when several optimizers were
+        # declared.
         if self._automatic_optimization and len(optimizers) > 1:
             raise RuntimeError(
                 "Multiple optimizers require manual optimization."
@@ -630,6 +761,8 @@ class _OptimizerConfigurationParser:
         optimizers: list[torch.optim.Optimizer],
         configurations: list[LRSchedulerConfig]
     ) -> None:
+        # Ensures every scheduler references an optimizer returned by the same
+        # configure_optimizers declaration.
         configuration: LRSchedulerConfig
         for configuration in configurations:
             if configuration.scheduler.optimizer not in optimizers:
@@ -641,6 +774,8 @@ class _OptimizerConfigurationParser:
         self,
         configurations: list[LRSchedulerConfig]
     ) -> None:
+        # Requires a Module.lr_scheduler_step override when automatic execution
+        # encounters a custom structural scheduler outside known torch families.
         configuration: LRSchedulerConfig
         for configuration in configurations:
             scheduler: StatefulScheduler = configuration.scheduler
@@ -658,6 +793,7 @@ class _OptimizerConfigurationParser:
         self,
         configuration: _OptimizerConfiguration
     ) -> None:
+        # Warns about unsupported keys and requires a concrete torch optimizer.
         valid_keys: set[str] = {"optimizer", "lr_scheduler", "monitor"}
         extra_keys: set[str] = set(configuration) - valid_keys
         if extra_keys:
@@ -675,6 +811,8 @@ class _OptimizerConfigurationParser:
         self,
         value: torch.optim.Optimizer | Mapping | Sequence
     ) -> bool:
+        # Identifies a non-string sequence containing only native or managed
+        # optimizer instances.
         return (
             isinstance(value, Sequence)
             and not isinstance(value, str | bytes)
@@ -685,6 +823,7 @@ class _OptimizerConfigurationParser:
         self,
         value: torch.optim.Optimizer | Mapping | Sequence
     ) -> list[torch.optim.Optimizer]:
+        # Normalizes a validated sequence to underlying native optimizers.
         if not self._is_optimizer_sequence(value):
             raise self._invalid_declaration()
         return [
@@ -696,11 +835,14 @@ class _OptimizerConfigurationParser:
         self,
         value: torch.optim.Optimizer | Mapping | Sequence
     ) -> list[_SchedulerInput]:
+        # Normalizes one scheduler or a scheduler sequence into parser order.
         if isinstance(value, Sequence) and not isinstance(value, str | bytes):
             return [cast(_SchedulerInput, scheduler) for scheduler in value]
         return [cast(_SchedulerInput, value)]
 
     def _invalid_declaration(self) -> MisconfigurationError:
+        # Produces one corrective error shared by every unrecognized declaration
+        # shape.
         return MisconfigurationError(
             "configure_optimizers must return an Optimizer, optimizer sequence, "
             "optimizer and scheduler sequences, or optimizer configuration mapping."

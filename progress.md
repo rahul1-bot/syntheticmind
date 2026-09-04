@@ -146,12 +146,12 @@
     2. ✅ Training limits, bounded-time default epochs, batch limits, fast-development, overfit, barebones, gradient, validation, logging, deterministic, sampling, and reload policies have one configuration owner; accumulation is available through the Trainer inspection surface.
     3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition through ordered private lifecycle phases; restoration separately applies persisted trajectory coordinates, every method is bounded, and optimizer, DDP, spawn, Timer, callback-state, exact continuation, checkpoint selection, and sharded model-parallel probes pass.
 
-| Progress Complete | Core Module, DataModule, and Metric Reconstruction | Date: 04 September 2026 | Time: 06:45 PM | Name: Ghost |
+| Progress Complete | Core Contract Documentation | Date: 04 September 2026 | Time: 10:18 PM | Name: Ghost |
 
     1. ✅ LoggedMetric lives only in its semantic core module for independent loop and logger consumers; the compatibility re-export from `core.module` was removed and Module remains the sole public metric-production API.
     2. ✅ Module.log decomposes into request, hook context, reduction, TorchMetrics registration, scalar normalization, and observation registration transitions; all fifty-five public Module signatures remain stable and no method exceeds one hundred lines.
-    3. ✅ The complete production tree has zero future imports, conditional type imports, broad `Any` or `object`, source comments, static methods, module functions, lambdas, and unannotated assignments; data-transfer hooks require explicit dataloader identity.
-    4. ✅ CPU, MPS, DDP, spawn, metrics, runtime access, gather, optimizers, model hydration, DataModule local, file-like, remote, override, and state reconstruction, direct and nested data, exact continuation, and model parallelism pass.
+    3. ✅ Every core module now carries the authorized VOCODE header, class ownership, public method, lifecycle, failure, and client-integration comments without docstrings; `core/README.md` documents model authoring, logging, automatic and manual optimization, hooks, hyperparameters, reconstruction, and runtime access against the current API.
+    4. ✅ Core compilation, documentation structure, module runtime access, optimizer execution, local and remote model hydration, strict and relaxed state loading, scalar and TorchMetrics routing, CPU and MPS execution, and existing distributed evidence pass after the prose-only change.
 
 | Progress Complete | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
 

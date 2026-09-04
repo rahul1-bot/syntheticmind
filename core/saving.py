@@ -1,3 +1,33 @@
+# This module:
+# 1. Reconstructs Module subclasses from SyntheticMind schema-v2 checkpoints,
+#    saved or external hyperparameters, explicit constructor overrides, and
+#    model-owned strictness
+# 2. Reconstructs DataModule subclasses through the same payload and
+#    hyperparameter boundary while restoring only DataModule-owned state
+# 3. Handles local, remote, and seekable checkpoint sources with safe device
+#    fallback and corrective incompatible-key reporting
+#
+# Design decisions:
+# - Reconstruction builds the client architecture before applying tensor state:
+#   constructor hyperparameters resolve first, configure_model runs next,
+#   on_load_checkpoint observes the payload, and load_state_dict mutates last
+# - Explicit keyword overrides have highest precedence over hparams files and
+#   saved checkpoint values, allowing a client to change constructor policy
+#   deliberately without modifying the artifact
+# - Constructor arguments are filtered against the subclass signature unless it
+#   accepts arbitrary keywords; a saved single-container argument retains its
+#   original nesting through the persisted hparams-name field
+# - Checkpoint-controlled instantiators are rejected because loading an artifact
+#   must not execute arbitrary imported constructors selected by serialized data
+# - Missing CUDA, MPS, or XLA destinations fall back to CPU only under the
+#   default mapping; an explicit map_location remains fully client-controlled
+# - DataModule reconstruction shares schema and hyperparameter parsing but does
+#   not invoke model configuration, strict parameter loading, or device movement
+# - Every payload and option is validated before model state mutates, keeping a
+#   rejected checkpoint from partially changing the target object
+#
+# Author: Rahul Sawhney
+
 import ast
 import csv
 import inspect
@@ -28,6 +58,9 @@ type _ConstructorArguments = dict[str, HyperparameterValue]
 
 
 class _CheckpointLoader:
+    # Internal model reconstruction owner used by Module.load_from_checkpoint and
+    # Trainer restoration support. Clients use the public classmethod rather than
+    # constructing or invoking this class directly.
     @classmethod
     def load[ModelT: nn.Module](
         cls,
@@ -39,6 +72,9 @@ class _CheckpointLoader:
         weights_only: bool | None = None,
         constructor_overrides: _ConstructorArguments | None = None
     ) -> ModelT:
+        # Executes the complete reconstruction transaction: options and schema,
+        # constructor resolution, model hooks, strict state application,
+        # incompatible-key reporting, and final device placement.
         cls._validate_options(
             checkpoint_path,
             hparams_file,
@@ -97,6 +133,8 @@ class _CheckpointLoader:
         map_location: MapLocation,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Loads one path-backed or seekable payload through torch.load and
+        # enforces the mapping boundary before downstream schema inspection.
         resolved_map_location: MapLocation = (
             cls._default_map_location if map_location is None else map_location
         )
@@ -133,6 +171,9 @@ class _CheckpointLoader:
         hparams_file: str | Path | None,
         overrides: _ConstructorArguments
     ) -> _ConstructorArguments:
+        # Resolves saved, external-file, and explicit hyperparameters against the
+        # component constructor while preserving a saved container argument and
+        # rejecting artifact-selected instantiation behavior.
         hyperparameters_key: str = cls._class_key(
             model_class,
             "_checkpoint_hyperparameters_key"
@@ -198,6 +239,8 @@ class _CheckpointLoader:
         cls,
         hparams_file: str | Path
     ) -> HyperparameterDict:
+        # Loads CSV key/value rows with literal scalar parsing or a YAML mapping
+        # through StoragePath, rejecting malformed rows and unsupported suffixes.
         if not StoragePath(hparams_file).exists():
             raise FileNotFoundError(f"Hyperparameter file not found: {hparams_file}")
         suffix: str = Path(StoragePath(hparams_file).name).suffix.lower()
@@ -233,6 +276,8 @@ class _CheckpointLoader:
         value: HyperparameterValue | CheckpointValue | None,
         source_name: str
     ) -> HyperparameterDict:
+        # Converts an optional mapping-like hyperparameter source into an owned
+        # dictionary and rejects non-mapping checkpoint values.
         if value is None:
             return {}
         if not isinstance(value, Mapping):
@@ -244,6 +289,8 @@ class _CheckpointLoader:
         cls,
         hyperparameters: HyperparameterDict
     ) -> _ConstructorArguments:
+        # Restricts constructor keyword arguments to string keys without
+        # mutating the wider saved hyperparameter mapping.
         return {
             key: value
             for key, value in hyperparameters.items()
@@ -256,6 +303,8 @@ class _CheckpointLoader:
         model_class: type[ComponentT],
         attribute_name: str
     ) -> str:
+        # Reads a component's schema field name from its class contract and
+        # rejects missing or non-string declarations.
         value: HyperparameterValue = getattr(model_class, attribute_name, None)
         if not isinstance(value, str):
             raise TypeError(
@@ -269,6 +318,8 @@ class _CheckpointLoader:
         model: nn.Module,
         strict: bool | None
     ) -> bool:
+        # Applies explicit strictness over the model-owned default while
+        # rejecting a direct conflict with a model that set strict_loading.
         model_strict_loading: HyperparameterValue = getattr(
             model,
             "strict_loading",
@@ -294,6 +345,7 @@ class _CheckpointLoader:
 
     @classmethod
     def _state_dict(cls, checkpoint: CheckpointDict) -> ModelState:
+        # Extracts the string-keyed model state required for parameter loading.
         state_dict: CheckpointValue | None = checkpoint.get("state_dict")
         if not isinstance(state_dict, Mapping):
             raise KeyError("Checkpoint is missing a model state_dict.")
@@ -309,6 +361,8 @@ class _CheckpointLoader:
         strict: bool | None,
         weights_only: bool | None
     ) -> None:
+        # Validates checkpoint source capability and optional loading controls
+        # before filesystem or deserialization work begins.
         if not isinstance(checkpoint_path, str | Path) and not (
             hasattr(checkpoint_path, "read") and hasattr(checkpoint_path, "seek")
         ):
@@ -322,6 +376,8 @@ class _CheckpointLoader:
 
     @classmethod
     def _validate_schema(cls, checkpoint: CheckpointDict) -> None:
+        # Accepts exactly SyntheticMind schema version two and rejects bools that
+        # would otherwise satisfy Python's integer relationship.
         schema_version: CheckpointValue | None = checkpoint.get("schema_version")
         if isinstance(schema_version, bool) or not isinstance(schema_version, int):
             raise TypeError("Checkpoint schema_version must be an integer.")
@@ -336,6 +392,8 @@ class _CheckpointLoader:
         missing_keys: list[str],
         unexpected_keys: list[str]
     ) -> None:
+        # Reports missing and unexpected model keys only under non-strict loading,
+        # preserving strict load_state_dict failure behavior unchanged.
         if missing_keys:
             warnings.warn(
                 "Found model keys missing from the checkpoint: "
@@ -357,6 +415,8 @@ class _CheckpointLoader:
         storage: torch.types.Storage,
         location: str
     ) -> torch.types.Storage | None:
+        # Redirects storage from an unavailable saved accelerator to CPU and
+        # returns None when torch should retain its ordinary mapping.
         if location.startswith("cuda") and not torch.cuda.is_available():
             return storage.cpu()
         if location.startswith("mps") and not torch.backends.mps.is_available():
@@ -367,6 +427,8 @@ class _CheckpointLoader:
 
     @classmethod
     def _parse_scalar(cls, value: str) -> HyperparameterValue:
+        # Parses CSV values through Python literals while retaining ordinary text
+        # verbatim when it is not a literal expression.
         try:
             return cast(HyperparameterValue, ast.literal_eval(value))
         except (SyntaxError, ValueError):
@@ -374,6 +436,8 @@ class _CheckpointLoader:
 
 
 class _DataModuleCheckpointLoader:
+    # DataModule reconstruction owner sharing checkpoint transport and
+    # constructor resolution with models while applying only DataModule state.
     @classmethod
     def load[DataModuleT: HyperparametersMixin](
         cls,
@@ -384,6 +448,9 @@ class _DataModuleCheckpointLoader:
         weights_only: bool | None = None,
         constructor_overrides: _ConstructorArguments | None = None
     ) -> DataModuleT:
+        # Constructs the DataModule from resolved hyperparameters and restores
+        # its class-qualified mapping when present. Missing component state is a
+        # valid stateless checkpoint rather than an error.
         del cls
         _CheckpointLoader._validate_options(
             checkpoint_path,
