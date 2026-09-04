@@ -207,14 +207,14 @@
     4. ✅ `utilities/distributed.py`, its classmethod namespace, and all free aliases were deleted; no old production or ignored verification import remains.
     5. ✅ Local validation, direct two-rank Strategy reduction, standard distributed scalar reductions, TorchMetrics, graph state, callback artifacts, progress rendering, checkpoint selection, spawned metric views, and sharded model parallelism pass.
 
-| Progress Complete | Trainer, Loop, and Hook Lifecycle Reconstruction | Date: 04 September 2026 | Time: 04:01 PM | Name: Ghost |
+| Progress Complete | Trainer, Loop, and Hook Lifecycle Reconstruction | Date: 04 September 2026 | Time: 06:40 PM | Name: Ghost |
 
-    1. ✅ Trainer fit, validation, test, and prediction entrypoints now resolve inputs and launcher dispatch before entering bounded private stage transactions; no new class, Protocol, module, public method, export, or schema field was added.
+    1. ✅ Trainer fit, validation, test, and prediction entrypoints resolve inputs and launcher dispatch before bounded private stage transactions; worker re-entry is Trainer-owned and the stateless one-method StageInvoker class was deleted without a new Protocol, module, public method, export, or schema field.
     2. ✅ Fit preparation, optimization construction, managed-optimizer connection, checkpoint continuation, sanity validation, execution, and finalization are explicit transitions rather than one 288-line method.
     3. ✅ Validation and test reuse one typed local evaluation transaction, while prediction preserves separate retention and result-shape semantics; all three share exact environment, data, model, precision, checkpoint, and teardown preparation.
     4. ✅ One private HookDispatcher now owns typed callback, Module, DataModule, and Strategy invocation, profiling, hook context, current callback selection, unwrapping, and override discovery; six duplicate Trainer dispatch methods were deleted.
     5. ✅ Profiler owns active-stage state and setup-conflict detection, Trainer's shadow boolean is gone, and failed profiler setup rolls back cleanly before the same Trainer and profiler are reused.
-    6. ✅ CPU, MPS, DDP, spawned exact continuation, callback composition, multi-loader evaluation, checkpoint selection, early stopping, rank-zero logging, profiler reports and rollback, causal failure cleanup, and sharded model-parallel exact resume pass.
+    6. ✅ CPU, MPS, subprocess DDP, spawned DDP, external DDP, exact continuation, callback composition, multi-loader evaluation, checkpoint selection, rank-zero logging, profiler rollback, causal cleanup, and sharded model-parallel execution pass.
 
 | Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 

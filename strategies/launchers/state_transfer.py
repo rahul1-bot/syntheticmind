@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import cast
 
 import syntheticmind
@@ -8,7 +7,6 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
-    StageArguments,
     StageResult,
     _GlobalState,
     _WorkerOutput
@@ -22,28 +20,6 @@ from syntheticmind.types import (
 )
 
 __all__: list[str] = []
-
-
-class _StageInvoker:
-    @classmethod
-    def invoke(
-        cls,
-        stage: TrainerStage,
-        trainer: syntheticmind.Trainer,
-        module: Module,
-        datamodule: DataModule | None,
-        stage_kwargs: StageArguments
-    ) -> StageResult:
-        stage_method: Callable[..., StageResult] = cast(
-            Callable[..., StageResult],
-            getattr(trainer, stage)
-        )
-        if not callable(stage_method):
-            raise TypeError(f"Trainer stage {stage!r} is not callable.")
-        return cast(
-            StageResult,
-            stage_method(module, datamodule=datamodule, **stage_kwargs)
-        )
 
 
 class _WorkerStateTransfer:

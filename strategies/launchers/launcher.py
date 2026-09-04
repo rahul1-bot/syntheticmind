@@ -12,7 +12,6 @@ from syntheticmind.strategies.launchers.contracts import (
 )
 from syntheticmind.strategies.launchers.environment import _DistributedEnvironment
 from syntheticmind.strategies.launchers.multiprocessing import _MultiprocessingLauncher
-from syntheticmind.strategies.launchers.state_transfer import _StageInvoker
 from syntheticmind.strategies.launchers.subprocess import _SubprocessLauncher
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.exceptions import MisconfigurationError
@@ -55,9 +54,8 @@ class _ProcessLauncher:
         with trainer._signal_connector.launch_context():
             trainer._raise_if_sigterm()
             if not self.should_launch:
-                result: StageResult = _StageInvoker.invoke(
+                result: StageResult = trainer._invoke_stage(
                     stage,
-                    trainer,
                     module,
                     datamodule,
                     stage_kwargs

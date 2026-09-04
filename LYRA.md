@@ -223,10 +223,10 @@
     4. Managed optimizers select explicit automatic or manual step operations and request deferred synchronization through Strategy instead of carrying a boolean execution flag or inspecting DDP.
     5. Exact local, accelerator, distributed, resumable-data, and model-parallel trajectories establish the decomposition without relying on static-analysis claims.
 
-| Strategic Note | Trainer Stage and Hook Transaction Map | Date: 04 September 2026 | Time: 04:01 PM | Name: Ghost |
+| Strategic Note | Trainer Stage and Hook Transaction Map | Date: 04 September 2026 | Time: 06:40 PM | Name: Ghost |
 
     1. Trainer owns the outer fit, validation, test, and prediction transaction; loops own iterative machine-learning execution, while connectors retain their data, checkpoint, logger, signal, and accelerator boundaries.
-    2. Public entrypoints resolve input semantics and distributed launcher dispatch, bounded private transitions own stage orchestration, and one private dispatcher owns hook invocation mechanics without a parallel runner or callback API.
+    2. Public entrypoints resolve input semantics and launcher selection, Trainer owns dynamic worker-stage re-entry, bounded private transitions own orchestration, and HookDispatcher owns hook mechanics; no stateless runner class remains.
     3. Validation and test share evaluation execution because their metric contracts align, while prediction remains separate because retained outputs and CPU materialization have a distinct lifecycle.
     4. Hook dispatch owns profiler regions, Module hook context, current callback groups, override discovery, and wrapped-callable identity; Profiler owns whether measurement is active for a stage.
     5. Local, MPS, direct DDP, spawn, multi-loader, observability, callback composition, profiler rollback, checkpoint, failure, and model-parallel paths verify the transaction boundaries.

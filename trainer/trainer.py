@@ -49,6 +49,7 @@ from syntheticmind.profilers import (
 from syntheticmind.randomness import _Randomness
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
+from syntheticmind.strategies.launchers.contracts import StageArguments, StageResult
 from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.strategies.strategy import Strategy
@@ -1199,6 +1200,22 @@ class Trainer:
                 training_modes
             )
         return predictions
+
+    def _invoke_stage(
+        self,
+        stage: TrainerStage,
+        module: Module,
+        datamodule: DataModule | None,
+        stage_kwargs: StageArguments
+    ) -> StageResult:
+        stage_method: Callable[..., StageResult] = cast(
+            Callable[..., StageResult],
+            getattr(self, stage)
+        )
+        return cast(
+            StageResult,
+            stage_method(module, datamodule=datamodule, **stage_kwargs)
+        )
 
     def _stage_launcher(self) -> _ProcessLauncher | None:
         return (

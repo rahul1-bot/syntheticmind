@@ -25,10 +25,7 @@ from syntheticmind.strategies.launchers.contracts import (
 )
 from syntheticmind.strategies.launchers.environment import _DistributedEnvironment
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
-from syntheticmind.strategies.launchers.state_transfer import (
-    _StageInvoker,
-    _WorkerStateTransfer
-)
+from syntheticmind.strategies.launchers.state_transfer import _WorkerStateTransfer
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.types import TrainerStage
 
@@ -70,9 +67,8 @@ class _MultiprocessingWorker:
         _WorkerStateTransfer.restore_global_state(trainer, initial_global_state)
         if isinstance(trainer.accelerator, CPUAccelerator):
             _WorkerStateTransfer.unshare_module_storage(module)
-        result: StageResult = _StageInvoker.invoke(
+        result: StageResult = trainer._invoke_stage(
             stage,
-            trainer,
             module,
             datamodule,
             stage_kwargs
