@@ -166,6 +166,13 @@
     3. ✅ Duplicate plugin categories, conflicting Trainer and Strategy configuration, invalid synchronized-layer combinations, unavailable accelerators, unsupported distributed MPS execution, and invalid precision combinations fail at construction.
     4. ✅ CPU, MPS, DDP subprocess, spawn, fork, checkpoint-plugin injection, precision fallback, and full and sharded model-parallel execution pass with production-package compilation and source review.
 
+| Progress Complete | Callback Connector Reconstruction | Date: 04 September 2026 | Time: 09:13 AM | Name: Ghost |
+
+    1. ✅ Callback resolution, default checkpointing, timers, progress display, model summaries, ordering, model callback replacement, and state-key validation now belong to one internal callback connector.
+    2. ✅ Trainer callback hook dispatch remains on Trainer, while callback configuration uses a bound operation and therefore introduces no concrete Trainer dependency, circular import, or host Protocol.
+    3. ✅ Model callback fit, validation, test, prediction, repeated-stage, checkpoint, serialization, invalid-return, duplicate-state, configure-hook logging, spawn, and fork paths pass.
+    4. ✅ The migration removed more than two hundred callback-composition lines from Trainer without changing the public callback list or stage entrypoints.
+
 | Progress Active | Data Connector Reconstruction | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
 
     1. Trainer currently owns data source attachment, DataModule binding, data preparation, dataloader requests, limits, distributed and unrepeated sampler replacement, overfit behavior, loader reconstruction, and reload cadence across one large method region.

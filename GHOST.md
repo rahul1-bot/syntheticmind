@@ -190,3 +190,12 @@
     4. Precision construction remains dependent on accelerator and Strategy compatibility, including CPU float16 fallback, explicitly supplied precision plugins, and model-parallel precision restrictions.
     5. The connector is internal and creates no alternate stage entrypoint; Trainer remains the public orchestration surface and retains direct properties for the resolved runtime graph.
     6. Configuration matrices, CPU and MPS execution, unavailable CUDA rejection, checkpoint-plugin injection, DDP subprocess, spawn and fork launch, and model-parallel full and sharded execution pass after the migration.
+
+| Architecture Decision | Callback Connector Ownership | Date: 04 September 2026 | Time: 09:13 AM | Name: Ghost |
+
+    1. Callback configuration now belongs to one internal `CallbackConnector` covering Trainer-supplied callbacks, framework defaults, checkpoint ordering, timers, progress display, model summaries, and callback state identities.
+    2. Model-provided callbacks are configured once per stage, replace compatible Trainer callbacks through the established inheritance rule, and remain ordered before checkpoint callbacks.
+    3. The connector accepts a bound configuration operation rather than a concrete Trainer reference, preserving module hook context and profiler ownership without introducing a circular import or synthetic Trainer-host Protocol.
+    4. Trainer continues to own callback hook execution and stage sequencing; the connector owns only callback composition and configuration state, so no competing lifecycle entrypoint was introduced.
+    5. Invalid return values, non-callback sequence members, duplicate state keys, illegal configure-hook logging, and callback setup failures leave the configuration boundary reusable for a later stage.
+    6. Fit, validation, test, prediction, checkpoint participation, repeated stages, serialization, DDP spawn, and DDP fork verification pass after the migration.

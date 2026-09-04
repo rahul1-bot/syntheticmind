@@ -211,3 +211,10 @@
     3. Precision selection cannot be owned by a standalone resolver because validity and fallback depend on the chosen accelerator, Strategy, and explicitly supplied plugin.
     4. Strategy instances that already configure accelerators or devices must conflict with explicit Trainer values rather than silently choosing one source, while default `auto` values permit Strategy-owned configuration.
     5. A connector earns its class and module through cross-component ordering and compatibility invariants; deleting several stateless resolvers is evidence that the connector consolidates a real boundary rather than renaming utility code.
+
+| Memory | Callback Composition Without Trainer Coupling | Date: 04 September 2026 | Time: 09:13 AM | Name: Ghost |
+
+    1. Callback configuration and callback execution are separate concepts: the connector owns selection, defaults, replacement, ordering, and identity, while Trainer owns when lifecycle hooks execute.
+    2. Passing a bound hook operation into the connector preserves profiling and module hook context without letting the connector reach into the entire Trainer or requiring a circular annotation dependency.
+    3. Model callback replacement must remove callbacks by compatible parent type, not merely exact class identity, while preserving unrelated Trainer callbacks and placing checkpoint callbacks last.
+    4. Connector state must clear after configuration failure and after every stage so a rejected callback declaration cannot poison later validation, testing, or prediction.

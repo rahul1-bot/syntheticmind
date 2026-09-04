@@ -43,9 +43,10 @@ import inspect
 import math
 import os
 import warnings
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from typing import IO, Literal, Never, cast
 
@@ -65,7 +66,6 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
-from syntheticmind.callbacks.model_summary import ModelSummary
 from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import DataHooks, ModelHooks
@@ -106,6 +106,7 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.accelerator_connector import (
     _AcceleratorConnector
 )
+from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
@@ -542,18 +543,6 @@ class Trainer:
         self._precision_plugin: Precision = (
             self._accelerator_connector.precision_plugin
         )
-        if callbacks is None:
-            resolved_callbacks: list[Callback] = []
-        elif isinstance(callbacks, Callback):
-            resolved_callbacks = [callbacks]
-        elif isinstance(callbacks, list) and all(
-            isinstance(callback, Callback) for callback in callbacks
-        ):
-            resolved_callbacks = list(callbacks)
-        else:
-            raise TypeError(
-                "`callbacks` must be a Callback, a list of Callback instances, or None."
-            )
         resolved_log_every_n_steps: int = (
             50 if log_every_n_steps is None else log_every_n_steps
         )
@@ -675,89 +664,13 @@ class Trainer:
         if seed is not None:
             SeedManager.seed(seed)
 
-        self.callbacks: list[Callback] = resolved_callbacks
-        configured_checkpoint_callbacks: list[Checkpoint] = [
-            callback
-            for callback in self.callbacks
-            if isinstance(callback, Checkpoint)
-        ]
-        if configured_checkpoint_callbacks and not resolved_enable_checkpointing:
-            raise MisconfigurationError(
-                "Trainer was configured with `enable_checkpointing=False` but found "
-                "a Checkpoint callback in `callbacks`."
-            )
-        if not configured_checkpoint_callbacks and resolved_enable_checkpointing:
-            self.callbacks.append(ModelCheckpoint())
-        progress_callbacks: list[ProgressBarCallback] = [
-            callback
-            for callback in self.callbacks
-            if isinstance(callback, ProgressBarCallback)
-        ]
-        if len(progress_callbacks) > 1:
-            raise MisconfigurationError(
-                "Only one progress bar callback is supported. Remove duplicate "
-                "ProgressBarCallback instances from callbacks."
-            )
-        if not resolved_enable_progress_bar and progress_callbacks:
-            raise MisconfigurationError(
-                "Trainer was configured with enable_progress_bar=False but received "
-                "a ProgressBarCallback in callbacks."
-            )
-        from syntheticmind.callbacks.timer import Timer
-
-        timer_callbacks: list[Timer] = [
-            callback
-            for callback in self.callbacks
-            if isinstance(callback, Timer)
-        ]
-        if max_time is not None:
-            if timer_callbacks:
-                warnings.warn(
-                    "Ignoring Trainer(max_time=...) because the callback list already contains a Timer.",
-                    stacklevel=2
-                )
-            else:
-                timer: Timer = Timer(duration=max_time, interval="step", verbose=False)
-                self.callbacks.append(timer)
-                timer_callbacks.append(timer)
-
-        if resolved_enable_progress_bar:
-            progress_index: int | None = next(
-                (
-                    index
-                    for index, callback in enumerate(self.callbacks)
-                    if isinstance(callback, ProgressBarCallback)
-                ),
-                None
-            )
-            if not timer_callbacks:
-                timer = Timer(verbose=False)
-                if progress_index is None:
-                    self.callbacks.append(timer)
-                else:
-                    self.callbacks.insert(progress_index, timer)
-            if not progress_callbacks:
-                self.callbacks.append(ProgressBarCallback())
-
-        if resolved_enable_model_summary and not any(
-            isinstance(callback, ModelSummary)
-            for callback in self.callbacks
-        ):
-            self.callbacks.append(ModelSummary())
-
-        non_checkpoint_callbacks: list[Callback] = [
-            callback
-            for callback in self.callbacks
-            if not isinstance(callback, Checkpoint)
-        ]
-        checkpoint_callbacks: list[Callback] = [
-            callback
-            for callback in self.callbacks
-            if isinstance(callback, Checkpoint)
-        ]
-        self.callbacks = non_checkpoint_callbacks + checkpoint_callbacks
-        self._model_callbacks: list[Callback] = []
-        self._model_callback_configuration: tuple[TrainerStage, Module] | None = None
+        self._callback_connector: _CallbackConnector = _CallbackConnector(
+            callbacks,
+            resolved_enable_checkpointing,
+            resolved_enable_progress_bar,
+            resolved_enable_model_summary,
+            max_time
+        )
 
         self._loggers: list[Logger] = resolved_loggers
         self.profiler: Profiler = _resolve_profiler(profiler)
@@ -1169,7 +1082,7 @@ class Trainer:
                 )
             _optimizers_to_device(self.optimizers, device)
 
-            self._validate_callback_state_keys()
+            self._callback_connector.validate_state_keys()
 
             # Start hooks fire callbacks-first, then the module. The optional
             # sanity pass runs inside the fit stage but before training
@@ -1679,93 +1592,22 @@ class Trainer:
             self.module = module
             module.trainer = self
             self.strategy.connect(module)
-            active_configuration = self._model_callback_configuration
-            if (
-                active_configuration is not None
-                and active_configuration[0] == stage
-                and active_configuration[1] is module
-            ):
-                return
-            self._model_callback_configuration = (stage, module)
-            configured_callbacks: object = self._call_module_hook(
+            self._callback_connector.configure_model_callbacks(
                 module,
-                "configure_callbacks",
-                module.configure_callbacks
-            )
-            if configured_callbacks is None:
-                return
-            if isinstance(configured_callbacks, Callback):
-                raw_callbacks: list[object] = [configured_callbacks]
-            elif isinstance(configured_callbacks, Sequence):
-                raw_callbacks = list(configured_callbacks)
-            else:
-                raise TypeError(
-                    "configure_callbacks() must return a Callback, a sequence of Callback instances, or None."
+                stage,
+                partial(
+                    self._call_module_hook,
+                    module,
+                    "configure_callbacks",
+                    module.configure_callbacks
                 )
-            if not all(isinstance(callback, Callback) for callback in raw_callbacks):
-                raise TypeError(
-                    "configure_callbacks() must return only Callback instances."
-                )
-            model_callbacks: list[Callback] = cast(
-                list[Callback],
-                raw_callbacks
             )
-            if not model_callbacks:
-                return
-            previous_model_callback_ids: set[int] = {
-                id(callback) for callback in self._model_callbacks
-            }
-            trainer_callbacks: list[Callback] = [
-                callback
-                for callback in self.callbacks
-                if id(callback) not in previous_model_callback_ids
-            ]
-            model_callback_types: set[type[Callback]] = {
-                type(callback) for callback in model_callbacks
-            }
-            trainer_callback_types: set[type[Callback]] = {
-                type(callback) for callback in trainer_callbacks
-            }
-            trainer_callback_types.discard(Callback)
-            override_types: set[type[Callback]] = {
-                trainer_callback_type
-                for model_callback_type in model_callback_types
-                for trainer_callback_type in trainer_callback_types
-                if issubclass(model_callback_type, trainer_callback_type)
-            }
-            merged_callbacks: list[Callback] = [
-                callback
-                for callback in trainer_callbacks
-                if type(callback) not in override_types
-            ]
-            merged_callbacks.extend(model_callbacks)
-            merged_callbacks = self._reorder_callbacks(merged_callbacks)
-            self._validate_callback_state_keys(merged_callbacks)
-            self.callbacks = merged_callbacks
-            self._model_callbacks = model_callbacks
         except BaseException:
-            self._model_callback_configuration = None
             self.state.finish()
             raise
 
     def _clear_model_callback_configuration(self, stage: TrainerStage) -> None:
-        active_configuration = self._model_callback_configuration
-        if active_configuration is not None and active_configuration[0] == stage:
-            self._model_callback_configuration = None
-
-    @staticmethod
-    def _reorder_callbacks(callbacks: list[Callback]) -> list[Callback]:
-        regular_callbacks: list[Callback] = [
-            callback
-            for callback in callbacks
-            if not isinstance(callback, Checkpoint)
-        ]
-        checkpoint_callbacks: list[Callback] = [
-            callback
-            for callback in callbacks
-            if isinstance(callback, Checkpoint)
-        ]
-        return regular_callbacks + checkpoint_callbacks
+        self._callback_connector.clear_model_configuration(stage)
 
     def _select_dataloader_source(
         self,
@@ -3270,30 +3112,6 @@ class Trainer:
             description = f"{description}: {detail}"
         exception.add_note(f"{label} raised while handling the stage failure: {description}")
 
-    def _validate_callback_state_keys(
-        self,
-        callback_group: Iterable[Callback] | None = None
-    ) -> None:
-        # Enforces state-key uniqueness across stateful callbacks before
-        # fitting. Only callbacks that override the state methods participate,
-        # so stateless callbacks of the same class may coexist freely, while
-        # two stateful instances sharing a key would silently overwrite each
-        # other inside checkpoints and are rejected instead.
-        seen: dict[str, str] = {}
-        callbacks: Iterable[Callback] = (
-            self.callbacks if callback_group is None else callback_group
-        )
-        for cb in callbacks:
-            if is_overridden("state_dict", cb, Callback) or is_overridden("load_state_dict", cb, Callback):
-                key: str = cb.state_key
-                if key in seen:
-                    raise MisconfigurationError(
-                        f"Duplicate callback state_key {key!r} between "
-                        f"{seen[key]} and {cb!r}. "
-                        f"Each stateful callback must have a unique state_key."
-                    )
-                seen[key] = repr(cb)
-
     def _resolve_total_scheduler_steps(
         self,
         scheduler_definitions: list[LRSchedulerConfig]
@@ -3438,6 +3256,14 @@ class Trainer:
             return bool(comparison)
         except (RuntimeError, TypeError, ValueError):
             return False
+
+    @property
+    def callbacks(self) -> list[Callback]:
+        return self._callback_connector.callbacks
+
+    @callbacks.setter
+    def callbacks(self, callbacks: list[Callback]) -> None:
+        self._callback_connector.callbacks = callbacks
 
     @property
     def checkpoint_callback(self) -> Checkpoint | None:
