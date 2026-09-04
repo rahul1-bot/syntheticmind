@@ -245,12 +245,13 @@
     4. Hook dispatch owns profiler regions, Module hook context, current callback groups, override discovery, and wrapped-callable identity; Profiler owns whether measurement is active for a stage.
     5. Local, MPS, direct DDP, spawn, multi-loader, observability, callback composition, profiler rollback, checkpoint, failure, and model-parallel paths verify the transaction boundaries.
 
-| Strategic Note | Trainer Configuration Boundary | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
+| Strategic Note | Trainer Configuration Boundary | Date: 04 September 2026 | Time: 06:04 PM | Name: Ghost |
 
     1. One private frozen configuration represents scalar Trainer run policy after strict validation and deterministic resolution; it is a real constructor boundary rather than a universal runtime object.
     2. Fast-development, overfit, barebones, limit, validation, gradient, logging, deterministic, sampling, and reload interactions now have one owner before connectors and loops are composed.
     3. Live accelerators, Strategies, precision plugins, callbacks, loggers, profilers, dataloaders, optimizers, modules, and devices remain outside Pydantic and retain their behavioral lifecycle owners.
     4. DataConnector still applies resolved batch limits because loader cardinality is known only at the data boundary, while Trainer retains side-effectful torch flags, seeding, and runtime construction.
+    5. Trainer runtime construction now follows explicit accelerator, policy, connector, loop, and live-state phases, while checkpoint restoration separately applies resumed trajectory coordinates after participant state exists; this preserves order without introducing public builders or pseudo-domain classes.
 
 | Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 

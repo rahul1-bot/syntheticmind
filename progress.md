@@ -140,11 +140,11 @@
     3. ✅ Standard and plateau scheduler operations are explicit, manual clipping avoids configuration mutation, dead precision and scaler state is gone, and every modified assignment is locally typed.
     4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, multi-loader DDP, transfer precedence, stateful continuation, plateau scheduling, and sharded model-parallel resume paths pass.
 
-| Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
+| Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 06:04 PM | Name: Ghost |
 
     1. ✅ One private frozen Pydantic configuration now validates and resolves scalar Trainer run policy without accepting live runtime objects or creating a public configuration API.
     2. ✅ Training limits, batch limits, fast-development, overfit, barebones, gradient, validation, logging, deterministic, sampling, and reload policies have one configuration owner; four duplicate Trainer normalization methods were deleted.
-    3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition, while every Trainer assignment is now explicitly annotated.
+    3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition through ordered private lifecycle phases; restoration separately applies persisted trajectory coordinates, every method is within one hundred lines, and optimizer, direct DDP, spawn, exact stateful continuation, checkpoint selection, and exact sharded model-parallel resume probes pass.
 
 | Progress Complete | Core Module, DataModule, and Metric Reconstruction | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
 

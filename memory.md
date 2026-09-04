@@ -142,13 +142,13 @@
     3. Monitoring callbacks remain separate only when each names a real ML observation or control concept; removing static helpers means their validation, scalar conversion, synchronization, and emission operations stay on the callback instance that owns the policy.
     4. Early-stop decisions require rank consensus, finite checks precede mutation, learning rates follow optimizer use, throughput follows the data-parallel sample axis, and device statistics come from the selected Accelerator.
 
-| Memory | Data Composition, Reconstruction, and Run Policy | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
+| Memory | Data Composition, Reconstruction, and Run Policy | Date: 04 September 2026 | Time: 06:04 PM | Name: Ghost |
 
     1. A training data boundary includes source selection, factory invocation, nested loader combination, finite or unknown length, limits, sampler policy, reload state, and worker-preserving reconstruction; separating these by implementation technique creates contradictory owners.
     2. Direct loaders, model-owned factories, and DataModule-owned factories are alternative sources for the same stage input and must converge before combination, limits, sampling, and loop consumption.
     3. Distributed prediction cannot use padded training partitions because duplicated samples corrupt output identity; an unrepeated rank-strided sampler is a distinct evaluation contract.
-    4. Sampler replacement must reconstruct DataLoader subclasses with their required constructor attributes. Replacing only the sampler on a generic base DataLoader can silently discard stateful-loader behavior and checkpoint continuation.
-    5. Scalar run-policy validation and resolution belong to one immutable Trainer configuration boundary, while applying a resolved stage limit belongs to DataConnector because only that owner knows whether the loader is sized, unsized, nested, or distributed.
+    4. Sampler replacement must reconstruct DataLoader subclasses from their complete inherited constructor contract and available instance attributes. Replacing only the sampler on a generic base DataLoader can silently discard stateful-loader behavior and checkpoint continuation.
+    5. Scalar run-policy validation belongs to one immutable Trainer configuration boundary; ordered private Trainer phases apply the resolved policy and compose accelerator, connectors, loops, and live state, while DataConnector alone applies limits because only it knows loader cardinality and composition.
     6. DataModule checkpoint reconstruction shares payload and hyperparameter parsing with model reconstruction but requires a distinct loader transition because it restores DataModule state without model strictness, configure hooks, parameter application, or device placement.
 
 | Memory | Metric Production, Observation, Weighting, and Routing | Date: 04 September 2026 | Time: 05:39 PM | Name: Ghost |

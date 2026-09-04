@@ -144,13 +144,14 @@
     6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; evaluation and prediction loops plus the Trainer still require separate decomposition, and existing conditional annotation imports remain unresolved until that dependency slice is reconstructed.
     7. CPU and MPS execution, automatic and multi-optimizer manual optimization, two-rank deferred accumulation, manual DDP, transfer precedence across every stage, multiple-loader DDP, exact stateful continuation, plateau cadence, and sharded model-parallel exact resume pass.
 
-| Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
+| Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 06:04 PM | Name: Ghost |
 
     1. The private `_TrainerConfiguration` Pydantic model represents resolved scalar run policy at Trainer construction and is the sole owner of training-limit validation, batch-limit normalization, debugging-mode rewrites, barebones conflicts, validation cadence inputs, and execution flags.
     2. The model contains no live model, optimizer, scheduler, dataloader, logger, profiler, accelerator, Strategy, callback, plugin, device, path handle, or external resource; those remain with their runtime connectors and owners.
     3. Mutable validation-duration dictionaries become owned immutable tuples inside the frozen configuration and are reconstructed as fresh dictionaries only when handed to ValidationSchedule.
-    4. Trainer remains responsible for composition and side effects, including accelerator selection, torch flag application, seeding, logger and profiler construction, callbacks, loops, and live stage state; four duplicate normalization methods were deleted.
-    5. Defaults, invalid types and ranges, fast-development and overfit precedence, barebones policy, duration input, CPU and MPS execution, accumulated spawn, exact stateful continuation, rank-zero DDP logging, callback policy, and sharded model-parallel exact resume pass.
+    4. Trainer remains responsible for composition and side effects, while its constructor now delegates in order to accelerator materialization, resolved policy application, connector construction, loop construction, and live-state initialization; these are private lifecycle phases rather than public builders or fabricated service classes.
+    5. Checkpoint restoration now separates artifact and participant restoration from application of resumed epoch, step, loader cursor, and random-state coordinates, preserving one trajectory authority while keeping each transition within the method limit.
+    6. Defaults, invalid types and ranges, fast-development and overfit precedence, barebones policy, optimizer wiring, custom loader reconstruction, direct DDP, spawn, exact stateful continuation, checkpoint selection, and exact sharded model-parallel resume pass after decomposition.
 
 | Architecture Decision | Core Module, DataModule, Metric, and Hook Surface | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
 

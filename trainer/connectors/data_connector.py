@@ -480,19 +480,9 @@ class _DataConnector:
         constructor_kwargs: dict[str, _DataLoaderConstructorValue]
     ) -> DataLoader:
         constructor: type[DataLoader] = type(dataloader)
-        parameters: dict[str, inspect.Parameter] = dict(
-            inspect.signature(constructor).parameters
+        parameters: dict[str, inspect.Parameter] = (
+            self._dataloader_constructor_parameters(constructor)
         )
-        base_constructor: type
-        for base_constructor in constructor.__mro__[1:]:
-            if not issubclass(base_constructor, DataLoader):
-                continue
-            base_name: str
-            base_parameter: inspect.Parameter
-            for base_name, base_parameter in inspect.signature(
-                base_constructor
-            ).parameters.items():
-                parameters.setdefault(base_name, base_parameter)
         dataloader_parameters: set[str] = set(
             inspect.signature(DataLoader).parameters
         )
@@ -576,6 +566,25 @@ class _DataConnector:
                 f"{type(rebuilt).__qualname__}, not a DataLoader."
             )
         return rebuilt
+
+    def _dataloader_constructor_parameters(
+        self,
+        constructor: type[DataLoader]
+    ) -> dict[str, inspect.Parameter]:
+        parameters: dict[str, inspect.Parameter] = dict(
+            inspect.signature(constructor).parameters
+        )
+        base_constructor: type
+        for base_constructor in constructor.__mro__[1:]:
+            if not issubclass(base_constructor, DataLoader):
+                continue
+            base_name: str
+            base_parameter: inspect.Parameter
+            for base_name, base_parameter in inspect.signature(
+                base_constructor
+            ).parameters.items():
+                parameters.setdefault(base_name, base_parameter)
+        return parameters
 
     def _safe_len(self, dataloader: _DataloaderLeaf) -> int | None:
         if not isinstance(dataloader, Sized):

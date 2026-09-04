@@ -95,6 +95,13 @@ type _CheckpointLoopState = tuple[
     list[DataLoaderState],
     bool
 ]
+type _RestoredTrainingState = tuple[
+    int,
+    int,
+    int,
+    int,
+    CheckpointDict | None
+]
 type _PrintValue = (
     Batch
     | ModelOutput
@@ -184,6 +191,38 @@ class Trainer:
             reload_dataloaders_every_n_epochs=reload_dataloaders_every_n_epochs,
             enable_autolog_hparams=enable_autolog_hparams
         )
+        self._initialize_runtime(
+            configuration=configuration,
+            accelerator=accelerator,
+            strategy=strategy,
+            devices=devices,
+            num_nodes=num_nodes,
+            precision=precision,
+            plugins=plugins,
+            default_root_dir=default_root_dir,
+            seed=seed,
+            logger=logger,
+            callbacks=callbacks,
+            max_time=max_time,
+            profiler=profiler
+        )
+
+    def _initialize_runtime(
+        self,
+        configuration: _TrainerConfiguration,
+        accelerator: str | Accelerator,
+        strategy: str | Strategy,
+        devices: int | str | list[int],
+        num_nodes: int,
+        precision: PrecisionInput | None,
+        plugins: Plugin | list[Plugin] | None,
+        default_root_dir: str | Path | None,
+        seed: int | None,
+        logger: bool | Logger | Iterable[Logger] | None,
+        callbacks: Callback | list[Callback] | None,
+        max_time: str | timedelta | dict[str, int] | None,
+        profiler: Profiler | str | None
+    ) -> None:
         if configuration.barebones and logger is not None and logger is not False:
             raise MisconfigurationError(
                 "Trainer barebones mode does not permit experiment loggers."
@@ -193,6 +232,36 @@ class Trainer:
                 "Trainer barebones mode does not permit profiler instrumentation."
             )
         self._configuration: _TrainerConfiguration = configuration
+        self._initialize_accelerator(
+            configuration,
+            accelerator,
+            strategy,
+            devices,
+            num_nodes,
+            precision,
+            plugins
+        )
+        self._apply_configuration(configuration, default_root_dir, seed)
+        self._initialize_connectors(
+            configuration,
+            logger,
+            callbacks,
+            max_time,
+            profiler
+        )
+        self._initialize_loops(configuration)
+        self._initialize_runtime_state()
+
+    def _initialize_accelerator(
+        self,
+        configuration: _TrainerConfiguration,
+        accelerator: str | Accelerator,
+        strategy: str | Strategy,
+        devices: int | str | list[int],
+        num_nodes: int,
+        precision: PrecisionInput | None,
+        plugins: Plugin | list[Plugin] | None
+    ) -> None:
         self._accelerator_connector: _AcceleratorConnector = _AcceleratorConnector(
             accelerator,
             strategy,
@@ -214,6 +283,13 @@ class Trainer:
         self._randomness: _Randomness = _Randomness(
             [device.type for device in self.parallel_devices]
         )
+
+    def _apply_configuration(
+        self,
+        configuration: _TrainerConfiguration,
+        default_root_dir: str | Path | None,
+        seed: int | None
+    ) -> None:
         if default_root_dir is None:
             self._default_root_dir: str = os.getcwd()
         else:
@@ -264,6 +340,14 @@ class Trainer:
         if seed is not None:
             self._randomness.seed(seed)
 
+    def _initialize_connectors(
+        self,
+        configuration: _TrainerConfiguration,
+        logger: bool | Logger | Iterable[Logger] | None,
+        callbacks: Callback | list[Callback] | None,
+        max_time: str | timedelta | dict[str, int] | None,
+        profiler: Profiler | str | None
+    ) -> None:
         self._callback_connector: _CallbackConnector = _CallbackConnector(
             callbacks,
             configuration.resolved_enable_checkpointing,
@@ -306,6 +390,8 @@ class Trainer:
             self.use_distributed_sampler,
             configuration.reload_dataloaders_every_n_epochs
         )
+
+    def _initialize_loops(self, configuration: _TrainerConfiguration) -> None:
         self.state: TrainerState = TrainerState()
         self._signal_connector: _SignalConnector = _SignalConnector(self.strategy)
         self._is_mid_epoch_validation: bool = False
@@ -347,6 +433,7 @@ class Trainer:
 
         self._connect_loops()
 
+    def _initialize_runtime_state(self) -> None:
         self.module: Module | None = None
         self.datamodule: DataModule | None = None
         self.optimizers: list[torch.optim.Optimizer] = []
@@ -1660,13 +1747,7 @@ class Trainer:
             strict=module.strict_loading,
             restore_optimizers=self.state.stage == "fit"
         )
-        restored_training_state: tuple[
-            int,
-            int,
-            int,
-            int,
-            CheckpointDict | None
-        ] = (
+        restored_training_state: _RestoredTrainingState = (
             self._checkpoint_connector.restore_training_state(
                 checkpoint=loaded_checkpoint,
                 scheduler=(self.scheduler if self.state.stage == "fit" else None),
@@ -1677,13 +1758,25 @@ class Trainer:
                 restore_schedulers=self.state.stage == "fit"
             )
         )
-        epoch: int = restored_training_state[0]
-        global_step: int = restored_training_state[1]
-        completed_batches: int = restored_training_state[2]
-        total_batch_idx: int = restored_training_state[3]
-        epoch_rng_state: CheckpointDict | None = restored_training_state[4]
+        self._apply_restored_training_state(
+            module,
+            loaded_checkpoint,
+            restored_training_state
+        )
+
+    def _apply_restored_training_state(
+        self,
+        module: Module,
+        checkpoint: CheckpointDict,
+        restored_state: _RestoredTrainingState
+    ) -> None:
+        epoch: int = restored_state[0]
+        global_step: int = restored_state[1]
+        completed_batches: int = restored_state[2]
+        total_batch_idx: int = restored_state[3]
+        epoch_rng_state: CheckpointDict | None = restored_state[4]
         combined_loader_states: list[DataLoaderState] = (
-            self._checkpoint_connector.combined_loader_states(loaded_checkpoint)
+            self._checkpoint_connector.combined_loader_states(checkpoint)
             if self.state.stage == "fit"
             else []
         )
@@ -1730,7 +1823,7 @@ class Trainer:
                 self.fit_loop.epoch_loop._resume_rng_state: CheckpointDict | None = (
                     epoch_rng_state
                 )
-            checkpoint_rng_state: CheckpointValue | None = loaded_checkpoint.get(
+            checkpoint_rng_state: CheckpointValue | None = checkpoint.get(
                 "rng_state"
             )
             if (
