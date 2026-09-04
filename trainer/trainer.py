@@ -2057,6 +2057,12 @@ class Trainer:
             )
         return optimizer_states
 
+    def _save_batch_checkpoints(self, module: Module) -> None:
+        checkpoint_callback: Checkpoint
+        for checkpoint_callback in self.checkpoint_callbacks:
+            if isinstance(checkpoint_callback, ModelCheckpoint):
+                checkpoint_callback._save_after_batch(self, module)
+
     def save_checkpoint(
         self,
         filepath: str | Path,

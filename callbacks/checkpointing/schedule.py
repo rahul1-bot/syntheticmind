@@ -48,6 +48,7 @@ class _CheckpointSchedule:
     ) -> tuple[bool, float]:
         step_due: bool = (
             self.every_n_train_steps > 0
+            and trainer.global_step > 0
             and trainer.global_step % self.every_n_train_steps == 0
         )
         trigger_time: float = time.monotonic()

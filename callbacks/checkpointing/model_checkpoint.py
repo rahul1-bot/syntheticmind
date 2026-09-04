@@ -81,6 +81,7 @@ class ModelCheckpoint(Checkpoint):
             configuration.save_last,
             configuration.save_weights_only
         )
+        self._pending_batch_trigger_time: float | None = None
         self._identity_dirpath: str | None = self._paths.dirpath
         self._identity_filename: str | None = configuration.filename
         self.verbose: bool = configuration.verbose
@@ -151,11 +152,6 @@ class ModelCheckpoint(Checkpoint):
     def _resolve_dirpath(self, trainer: syntheticmind.Trainer) -> str:
         return self._paths.resolve_directory(trainer)
 
-    def _should_skip(self, trainer: syntheticmind.Trainer) -> bool:
-        return self._schedule.should_skip(trainer) or (
-            not self.save_weights_only and not trainer._checkpoint_is_durable
-        )
-
     @override
     def setup(
         self,
@@ -177,6 +173,7 @@ class ModelCheckpoint(Checkpoint):
         module: Module
     ) -> None:
         del trainer, module
+        self._pending_batch_trigger_time: float | None = None
         self._schedule.start()
 
     @override
@@ -189,12 +186,25 @@ class ModelCheckpoint(Checkpoint):
         batch_idx: int
     ) -> None:
         del outputs, batch, batch_idx
-        if self._should_skip(trainer):
+        if self._schedule.should_skip(trainer):
             return
         trigger: tuple[bool, float] = self._schedule.batch_trigger(trainer)
         due: bool = trigger[0]
         trigger_time: float = trigger[1]
         if not due:
+            return
+        self._pending_batch_trigger_time: float | None = trigger_time
+
+    def _save_after_batch(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        trigger_time: float | None = self._pending_batch_trigger_time
+        if trigger_time is None or not trainer._checkpoint_is_durable:
+            return
+        self._pending_batch_trigger_time: float | None = None
+        if self._schedule.should_skip(trainer):
             return
         candidates: dict[str, torch.Tensor] = self._synchronize_monitor_candidates(
             trainer,
@@ -211,7 +221,9 @@ class ModelCheckpoint(Checkpoint):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
-        if self._should_skip(trainer):
+        if self._schedule.should_skip(trainer):
+            return
+        if not self.save_weights_only and not trainer._checkpoint_is_durable:
             return
         if not self._schedule.validation_trigger(trainer):
             return
@@ -239,7 +251,7 @@ class ModelCheckpoint(Checkpoint):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
-        if self._should_skip(trainer):
+        if self._schedule.should_skip(trainer):
             return
         if not self._schedule.epoch_trigger(trainer):
             return
@@ -368,6 +380,7 @@ class ModelCheckpoint(Checkpoint):
         exception: BaseException
     ) -> None:
         del module
+        self._pending_batch_trigger_time: float | None = None
         if trainer.fast_dev_run or not self.save_on_exception:
             return
         if trainer.state.stage != "fit" or not trainer.is_global_zero:

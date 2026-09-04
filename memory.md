@@ -161,12 +161,12 @@
     6. CSV schema widening is a commit operation: adopt the existing header, serialize all prior rows under the union, atomically replace the file, and roll back live field state if promotion fails.
     7. A 200-line live observation with several independent consumers earns a semantic module; Module logging remains one public operation decomposed into private transitions rather than a service, manager, Pydantic request family, or 228-line god method.
 
-| Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 06:52 PM | Name: Ghost |
+| Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 06:57 PM | Name: Ghost |
 
     1. A resumable checkpoint is a trajectory aggregate, not a model-weight file: optimizer, scheduler, callbacks, DataModule, precision, resolved configuration, loop progress, loader cursor, random streams, epoch, and global step must share one coordinator.
     2. Strategy owns the representation of model and optimizer state because sharding depends on execution topology; the Trainer connector owns when that representation joins the remaining trajectory and in which order it restores.
     3. `CheckpointIO` owns transport, ModelCheckpoint owns cadence and retention, and CheckpointPaths owns formatting, containment, versions, removal safety, and link publication directly; forwarding aliases create duplicate checkpoint verbs without a boundary.
-    4. Loader progress alone cannot make partial automatic optimization resumable because parameter gradients are not model or optimizer state; resumable saves must wait for optimizer completion and recorded batch progress, while weights-only snapshots may remain available.
+    4. Loader progress and optimizer mutation are insufficient durability because batch-end metrics, validation, and plateau schedulers can still alter resumable state; ModelCheckpoint must record a due trigger at its public hook and persist only through a private post-cadence flush.
     5. Random state must use one immutable validated schema across checkpoint and process boundaries and capture only active accelerators; probing MPS during a CPU fork can initialize unsafe native runtime state.
     6. Effective run configuration is provenance and a compatibility boundary; bounded time makes epochs unbounded unless the user supplies another ceiling, while a higher ceiling may continue a run and trajectory-defining accumulation, data, validation, precision, and synchronization settings must not drift silently.
     7. Stateful restoration warns when saved callbacks are absent and isolates callback mappings; direct and callback-triggered saves, accumulation, weights-only, full, sharded, remote, asynchronous, mid-epoch, linked, distributed, and failure-atomic paths require separate evidence.
