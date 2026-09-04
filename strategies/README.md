@@ -6,6 +6,8 @@
 
 `data_parallel_size` names the replicated sample-processing axis independently from total world size. DDP uses the full world, while model parallelism reports only the data-parallel mesh dimension so throughput and sample accounting never multiply by tensor-parallel workers.
 
+`ModelParallelStrategy` exposes the named data-parallel and tensor-parallel mesh dimensions to `Module.configure_model()`. Research modules apply PyTorch tensor-parallel plans, composable FSDP2 `fully_shard` operations, or both at that boundary; the Strategy owns process topology, materialization, precision compatibility, and distributed checkpoint state without inventing separate wrapper strategies for every composition. Legacy FSDP1 wrappers are rejected explicitly.
+
 ```text
 Strategy
 ├── SingleDeviceStrategy

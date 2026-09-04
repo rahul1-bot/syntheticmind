@@ -109,10 +109,10 @@
     5. Exact resumed progress is insufficient evidence for checkpoint correctness. An uninterrupted trajectory and a resumed trajectory must produce exactly matching model state under identical initialization, data ordering, and optimizer steps.
     6. Cross-format overwrite should fail rather than destroy an existing checkpoint because a portable atomic replacement cannot switch safely between a regular file and a non-empty directory.
 
-| Memory | Strategy Contracts, Initialization, and Process Lifetime | Date: 04 September 2026 | Time: 04:36 PM | Name: Ghost |
+| Memory | Strategy Contracts, Initialization, and Process Lifetime | Date: 04 September 2026 | Time: 06:23 PM | Name: Ghost |
 
     1. Replacing an ABC with a Protocol is correct only when shared state and default lifecycle behavior are removed from the contract; otherwise the syntax changes while the architectural coupling remains.
-    2. DDP, tensor parallelism, and composable fully sharded execution share process coordination but not model-wrapping identity. Shared coordination belongs to a composed process resource, while each concrete strategy retains its own placement and checkpoint semantics.
+    2. DDP, tensor parallelism, and composable FSDP2 share process coordination but not model-wrapping identity. Named mesh axes let the research module compose its plan, while uninterrupted and distributed-checkpoint-resumed two-rank CPU FSDP2 must produce bit-identical model state before the capability is claimed.
     3. A process group used by several sequential Trainer stages or retained DTensors cannot be destroyed during stage teardown. The correct release boundary is exception recovery or process exit unless a separately owned external group proves a different lifecycle.
     4. Even PyTorch's dynamic `__torch_function__` boundary can use a named recursive value schema; broad `object` merely conceals tensor, device, dtype, layout, generator, shape, scalar, and nested-container semantics that model initialization actually accepts.
     5. Checkpoint artifact reading and live-state restoration are separate operations. Metadata may be loaded before model construction, while restoration must occur only after the model and optimizers exist; a bounded preload cache preserves this ordering without duplicate disk reads.

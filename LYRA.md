@@ -103,14 +103,14 @@
     5. Checkpoint format collisions now fail visibly rather than converting a file into a directory or a directory into a file through destructive replacement.
     6. The next architectural target is the Strategy hierarchy and its dependency direction, especially the incorrect inheritance of model parallelism from DDP and the duplicated distributed-step contracts.
 
-| Strategic Note | Strategy and Initialization Boundary | Date: 04 September 2026 | Time: 04:36 PM | Name: Ghost |
+| Strategic Note | Strategy and Initialization Boundary | Date: 04 September 2026 | Time: 06:23 PM | Name: Ghost |
 
     1. The strategy hierarchy now uses earned structural contracts instead of an ABC carrying hundreds of lines of shared mutable implementation.
     2. DDP and model parallelism are independent parallel strategies. Their common process-group resource, launcher capability, and forward-redirection algorithm are composed explicitly rather than represented through false DDP inheritance.
     3. Local and model-parallel checkpoints implement one restoration and persistence contract, while interchangeable storage plugins implement a separate `CheckpointIO` contract. The boundary prevents duplicated strategy aliases and retains distinct distributed-state semantics.
     4. Broad annotations were removed from Strategy, launcher, and model-initialization boundaries through named batch, optimizer, backward, state, stage, storage, and recursive torch-function value contracts.
     5. Process-group lifetime now follows the participating process rather than an individual Trainer stage, which preserves sequential distributed stages and live DTensor access while retaining exception and exit cleanup.
-    6. Empty initialization preserves RNG, precision contexts direct construction dtype, meta tensors materialize through reset operations, and local plus distributed model-parallel probes pass.
+    6. Empty initialization preserves RNG, precision contexts direct construction dtype, meta tensors materialize through reset operations, and exact two-rank tensor-parallel plus composable FSDP2 distributed-checkpoint trajectories pass.
 
 | Strategic Note | Execution Collaborator Reconstruction | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
 

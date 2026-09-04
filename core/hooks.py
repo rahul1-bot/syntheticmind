@@ -55,7 +55,7 @@ class DataHooks:
     def on_before_batch_transfer(
         self,
         batch: Batch,
-        dataloader_idx: int = 0
+        dataloader_idx: int
     ) -> Batch:
         del dataloader_idx
         return batch
@@ -64,7 +64,7 @@ class DataHooks:
         self,
         batch: Batch,
         device: torch.device,
-        dataloader_idx: int = 0
+        dataloader_idx: int
     ) -> Batch:
         del dataloader_idx
         return self._move_data_to_device(batch, device)
@@ -72,7 +72,7 @@ class DataHooks:
     def on_after_batch_transfer(
         self,
         batch: Batch,
-        dataloader_idx: int = 0
+        dataloader_idx: int
     ) -> Batch:
         del dataloader_idx
         return batch

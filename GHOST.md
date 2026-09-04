@@ -70,14 +70,14 @@
     5. `Strategy` is a stateful execution-policy hierarchy rather than a behaviorless Protocol. `ParallelStrategy` is the shared distributed execution concept; DDP and model-parallel strategies inherit it and contain only algorithm-specific deltas.
     6. This decision supersedes the Protocol-only Strategy conclusion recorded at 07:05 AM. The earlier runtime evidence remains valid, but its decomposition judgment was rejected after source-level comparison exposed duplicated concrete behavior.
 
-| Architecture Decision | Stateful Strategy and Model Initialization | Date: 04 September 2026 | Time: 04:36 PM | Name: Ghost |
+| Architecture Decision | Stateful Strategy and Model Initialization | Date: 04 September 2026 | Time: 06:23 PM | Name: Ghost |
 
     1. `Strategy` now owns universal model connection, wrapped-step dispatch, precision-mediated backward and optimizer stepping, single-process collective defaults, initialization context, and ordinary checkpoint collaboration without using an ABC.
     2. `ParallelStrategy` now owns the cluster environment, process-group lifecycle, rank topology, process launcher, distributed collectives, sampler coordinates, and distributed tail-gradient synchronization directly.
-    3. `SingleDeviceStrategy` is a named execution policy with inherited single-device semantics; `DDPStrategy` contains only DDP wrapping, layer synchronization, and manual-optimization forward behavior; `ModelParallelStrategy` contains device-mesh, parallelization, precision restrictions, and distributed checkpoint selection.
+    3. `SingleDeviceStrategy` is a named execution policy with inherited single-device semantics; `DDPStrategy` contains only DDP wrapping, layer synchronization, and manual-optimization forward behavior; `ModelParallelStrategy` exposes named data and tensor mesh axes for researcher-owned tensor-parallel, composable FSDP2, or hybrid plans and rejects legacy FSDP1.
     4. The strategy-owned ModuleInitializer now intercepts the dynamic PyTorch override contract through a named recursive torch-function value schema, validates mode state, preserves RNG under empty initialization, and materializes meta parameters through explicit reset operations without `object` escape hatches.
     5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
-    6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, and full and sharded model-parallel exact resume pass.
+    6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, tensor-parallel full and sharded resume, and composable FSDP2 distributed-checkpoint resume produce exact trajectories.
 
 | Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
 
@@ -156,7 +156,7 @@
 | Architecture Decision | Core Module, DataModule, Metric, and Hook Surface | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
 
     1. Rahul confirmed that established machine-learning concepts and their runtime semantics control SyntheticMind architecture before generic software decomposition rules. The three hook families therefore remain explicit framework contracts rather than being folded into one oversized model implementation.
-    2. `ModelHooks`, `DataHooks`, and `CheckpointHooks` now preserve the recognized lifecycle vocabulary and no-op extension semantics used by the Trainer and loops. `Module` follows a cooperative initialization order equivalent to the proven Lightning class graph, while concrete overrides are marked only where a parent hook or PyTorch method is actually replaced.
+    2. `ModelHooks`, `DataHooks`, and `CheckpointHooks` preserve the recognized lifecycle vocabulary and no-op extension semantics used by Trainer and loops. Data transfer hooks require explicit loader identity, Module follows the proven cooperative initialization graph, and concrete overrides are marked only where a parent hook or PyTorch method is actually replaced.
     3. ModelHooks owns hook-level logging admissibility, Module owns metric production and request validation, and the extracted LoggedMetric owns one observation's identity, cadence, value, graph, reduction, and step or epoch computation for its independent loop and logger consumers.
     4. DataModule and DatasetDataModule retain preparation, setup, teardown, loader construction, batch transfer, state, direct-dataset construction, and the current `load_from_checkpoint` classmethod over constructor hyperparameters plus DataModule state.
     5. Model and DataModule reconstruction share schema-v2 payload reading and hyperparameter precedence but retain distinct private loaders because only models own configure hooks, strict parameter application, and device mapping.

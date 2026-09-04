@@ -63,16 +63,16 @@
     6. ✅ Two-rank injected distributed shard, Trainer-metadata, and pointer-publication failures preserve the active generation and causal error on the failing rank.
     7. ✅ The checkpoint-generation schema rejects unknown versions, malformed UUIDs, and extra fields; all new classes and modules remain within hard structural budgets with no module-level functions, terminal trailing commas, new comments, or static-analysis execution.
 
-| Progress Complete | Strategy, Initialization, and Distributed Execution | Date: 04 September 2026 | Time: 04:36 PM | Name: Ghost |
+| Progress Complete | Strategy, Initialization, and Distributed Execution | Date: 04 September 2026 | Time: 06:23 PM | Name: Ghost |
 
-    1. ✅ `Strategy` and `ParallelStrategy` are contract-only Protocols; all three concrete strategies implement the selected contract explicitly without shared ABC state or default lifecycle code.
-    2. ✅ `ModelParallelStrategy` is independent from `DDPStrategy`, with device-mesh topology, local or distributed checkpoint ownership, DDP wrapping, process coordination, and forward redirection assigned to their natural owners.
+    1. ✅ `Strategy` and `ParallelStrategy` are stateful regular execution-policy classes without ABC machinery; concrete strategies inherit real shared lifecycle and implement only selected algorithmic deltas.
+    2. ✅ `ModelParallelStrategy` is independent from `DDPStrategy`, exposes named data and tensor mesh axes to `configure_model`, supports user-composed tensor parallelism and FSDP2, and rejects legacy FSDP1 wrapping.
     3. ✅ Local and model-parallel checkpoint implementations satisfy one restoration contract, while synchronous, asynchronous, wrapping, and externally supplied storage implementations satisfy the earned `CheckpointIO` plugin contract.
     4. ✅ ModuleInitializer now uses a named recursive torch-function contract, validates its mode, preserves RNG during empty initialization, and materializes meta tensors through precise reset operations without `Any`, `object`, static utility methods, or source prose.
     5. ✅ Process groups persist safely across sequential distributed stages and live DTensor access, while owned failure and process-exit paths retain deterministic cleanup.
     6. ✅ Direct two-rank DDP execution covers automatic and manual optimization, multiple dataloaders, distributed metrics, all-rank and any-rank decisions, wrapped and inner forward hooks, checkpoint selection, validation, test, and prediction.
     7. ✅ Subprocess, spawn, fork, and direct external launch modes pass; SIGTERM reaches the local worker group and leaves no surviving probe process.
-    8. ✅ Empty, normal, precision-directed, and meta initialization plus full and sharded model-parallel baseline, interrupted, and resumed runs pass; distributed failure injection preserves the active generation and asynchronous snapshots preserve pre-mutation tensors.
+    8. ✅ Empty, normal, precision-directed, and meta initialization plus tensor-parallel and composable FSDP2 baseline, interrupted, and distributed-checkpoint-resumed runs pass with exact final state; failure injection preserves the active generation and asynchronous snapshots preserve pre-mutation tensors.
 
 | Progress Complete | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
 
@@ -150,7 +150,7 @@
 
     1. ✅ LoggedMetric moved to its semantic core module with independent loop and logger consumers, while `core.module` explicitly re-exports the same class for compatibility and Module remains the sole public metric-production API.
     2. ✅ Module.log decomposes into request, hook context, reduction, TorchMetrics registration, scalar normalization, and observation registration transitions; all fifty-five public Module signatures remain stable and no method exceeds one hundred lines.
-    3. ✅ The complete production tree has zero future imports, conditional type imports, broad `Any` or `object`, source comments, static methods, module functions, lambdas, and unannotated assignments.
+    3. ✅ The complete production tree has zero future imports, conditional type imports, broad `Any` or `object`, source comments, static methods, module functions, lambdas, and unannotated assignments; data-transfer hooks require explicit dataloader identity.
     4. ✅ CPU, MPS, DDP, spawn, metrics, runtime access, gather, optimizers, model hydration, DataModule local, file-like, remote, override, and state reconstruction, direct and nested data, exact continuation, and model parallelism pass.
 
 | Progress Complete | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
