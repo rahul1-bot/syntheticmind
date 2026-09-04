@@ -303,6 +303,7 @@ class ModelCheckpoint(Checkpoint):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        self._save_after_epoch(trainer, module)
         if (
             not self.save_last
             or self._schedule.last_global_step_saved == trainer.global_step

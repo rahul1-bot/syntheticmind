@@ -13,6 +13,7 @@ from syntheticmind.strategies.launchers.contracts import (
 )
 from syntheticmind.types import (
     CheckpointDict,
+    CheckpointValue,
     DataLoaderState,
     RunningStage,
     StateDict,
@@ -108,6 +109,15 @@ class _WorkerStateTransfer:
             ),
             train_total_batch_idx=trainer._checkpoint_connector.train_total_batch_idx,
             train_epoch_rng_state=trainer._checkpoint_connector.train_epoch_rng_state,
+            train_epoch_metric_states_by_rank=(
+                trainer._checkpoint_connector.train_epoch_metric_states_by_rank
+            ),
+            train_optimizer_states=(
+                trainer._checkpoint_connector.train_optimizer_states
+            ),
+            train_scheduler_states=(
+                trainer._checkpoint_connector.train_scheduler_states
+            ),
             received_sigterm=trainer.received_sigterm,
             is_last_batch=trainer.is_last_batch,
             global_state=cls.capture_global_state(trainer)
@@ -190,6 +200,21 @@ class _WorkerStateTransfer:
         trainer._data_connector.total_predict_batches: list[int | None] | None = (
             worker_output.total_predict_batches
         )
+        cls._restore_checkpoint_state(worker_output, trainer)
+        trainer._signal_connector.received_sigterm: bool = (
+            trainer.received_sigterm or worker_output.received_sigterm
+        )
+        if trainer.fit_loop.epoch_loop is not None:
+            trainer.fit_loop.epoch_loop.is_last_batch: bool = worker_output.is_last_batch
+        cls.restore_global_state(trainer, worker_output.global_state)
+
+    @classmethod
+    def _restore_checkpoint_state(
+        cls,
+        worker_output: _WorkerOutput,
+        trainer: syntheticmind.Trainer
+    ) -> None:
+        del cls
         trainer._checkpoint_connector.train_dataloader_states: list[DataLoaderState] = (
             worker_output.train_dataloader_states
         )
@@ -205,12 +230,15 @@ class _WorkerStateTransfer:
         trainer._checkpoint_connector.train_epoch_rng_state: CheckpointDict | None = (
             worker_output.train_epoch_rng_state
         )
-        trainer._signal_connector.received_sigterm: bool = (
-            trainer.received_sigterm or worker_output.received_sigterm
+        trainer._checkpoint_connector.train_epoch_metric_states_by_rank: list[
+            CheckpointDict
+        ] = worker_output.train_epoch_metric_states_by_rank
+        trainer._checkpoint_connector.train_optimizer_states: list[CheckpointValue] = (
+            worker_output.train_optimizer_states
         )
-        if trainer.fit_loop.epoch_loop is not None:
-            trainer.fit_loop.epoch_loop.is_last_batch: bool = worker_output.is_last_batch
-        cls.restore_global_state(trainer, worker_output.global_state)
+        trainer._checkpoint_connector.train_scheduler_states: list[CheckpointValue] = (
+            worker_output.train_scheduler_states
+        )
 
     @classmethod
     @torch.no_grad()

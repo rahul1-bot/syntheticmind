@@ -161,24 +161,24 @@
     6. CSV schema widening is a commit operation: adopt the existing header, serialize all prior rows under the union, atomically replace the file, and roll back live field state if promotion fails.
     7. A 200-line live observation with several independent consumers earns a semantic module; Module logging remains one public operation decomposed into private transitions rather than a service, manager, Pydantic request family, or 228-line god method.
 
-| Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 07:02 PM | Name: Ghost |
+| Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 
-    1. A resumable checkpoint is a trajectory aggregate, not a model-weight file: optimizer, scheduler, callbacks, DataModule, precision, resolved configuration, loop progress, loader cursor, random streams, epoch, and global step must share one coordinator.
+    1. A resumable checkpoint is a trajectory aggregate: model, optimizer, scheduler, callbacks, DataModule, precision, configuration, loader cursor, random streams, epoch, step, and partial metric windows must share one coordinator.
     2. Strategy owns the representation of model and optimizer state because sharding depends on execution topology; the Trainer connector owns when that representation joins the remaining trajectory and in which order it restores.
     3. `CheckpointIO` owns transport, ModelCheckpoint owns cadence and retention, and CheckpointPaths owns formatting, containment, versions, removal safety, and link publication directly; forwarding aliases create duplicate checkpoint verbs without a boundary.
-    4. Loader progress and optimizer mutation are insufficient durability because hooks, metrics, validation, and schedulers still change state; mid-epoch triggers flush post-cadence, while last-batch and validation triggers roll into the post-scheduler epoch monitoring boundary.
+    4. A run ceiling is not an epoch boundary. Exact continuation retains per-rank scalar accumulators and non-persistent TorchMetrics tensor or list state with update counts, while graph-retaining and custom-process-group metric windows fail instead of claiming serialization.
     5. Random state must use one immutable validated schema across checkpoint and process boundaries and capture only active accelerators; probing MPS during a CPU fork can initialize unsafe native runtime state.
     6. Effective run configuration is provenance and a compatibility boundary; bounded time makes epochs unbounded unless the user supplies another ceiling, while a higher ceiling may continue a run and trajectory-defining accumulation, data, validation, precision, and synchronization settings must not drift silently.
-    7. Stateful restoration warns when saved callbacks are absent and isolates callback mappings; direct and callback-triggered saves, accumulation, weights-only, full, sharded, remote, asynchronous, mid-epoch, linked, distributed, and failure-atomic paths require separate evidence.
+    7. Multiprocessing parents require transferred optimizer, scheduler, metric, loader, random, callback, and precision payloads because they own no live worker optimizers; post-fit saves must use these snapshots without fabricating runtime objects.
 
-| Memory | Optimizer, Epoch, and Topology Semantics | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
+| Memory | Optimizer, Epoch, and Topology Semantics | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 
     1. An optimizer is a model-facing PyTorch object and declaration contract; optimization is the loop lifecycle that invokes forward, loss extraction, zeroing, backward, accumulation, clipping, stepping, and scheduler cadence.
-    2. A training epoch is not one indivisible method: resume, fetch, transfer, batch hooks, optimization, metrics, validation, scheduler, and continuation are named transitions that remain cohesive under one epoch owner.
+    2. A training epoch ends only when its loader epoch completes; a step ceiling pauses its cursor and metric window without running epoch hooks, incrementing epoch, or advancing epoch schedulers.
     3. Shared batch-transfer precedence belongs beside Trainer hook dispatch; repeating it inside each stage loop creates several authorities that can drift independently.
     4. Gradient synchronization belongs to Strategy because the selected wrapper and topology determine how accumulation or manual toggling suppresses communication.
     5. Managed optimizers require distinct automatic and manual step operations; passing a boolean mode through an otherwise identical callable hides progress semantics and invites double step counting.
-    6. Standard cadence and monitor-dependent plateau cadence are separate operations, `Module.lr_scheduler_step` remains the scheduler-specific extension hook, and one public stepping estimate must not coexist with an unused private horizon formula.
+    6. Standard and plateau cadence are separate operations, `Module.lr_scheduler_step` remains the extension hook, and both scheduler state and the metric window feeding it must cross any partial-epoch checkpoint together.
 
 | Memory | Hook Contracts Are Machine-Learning Concepts | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
 

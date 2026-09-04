@@ -124,25 +124,25 @@
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
     7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
 
-| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:02 PM | Name: Ghost |
+| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 
     1. The Trainer checkpoint connector remains the sole trajectory coordinator; stage `ckpt_path` and mutable `trainer.ckpt_path` are the explicit selection controls, while the unused constructor `resume_from_checkpoint` alias and connector accessor were removed.
-    2. Schema version 2 records explicit `training` or `weights` artifact identity, resolved Trainer configuration, strict integer progress, typed state collections, metadata, and one canonical random-state snapshot; malformed structure fails before model or optimizer mutation where runtime construction permits.
+    2. Schema version 2 records artifact identity, resolved configuration, progress, participant state, randomness, and strict per-rank partial-epoch scalar or TorchMetrics accumulator schemas; malformed identity, accumulator, rank count, or world-size state fails before model mutation.
     3. The foundational Randomness owner and immutable Pydantic snapshot now serve seeding, checkpoints, and worker transfer identically across Python, NumPy, torch CPU, and only the active CUDA or MPS backend; the duplicate launcher state and obsolete SeedManager were removed.
-    4. A batch remains non-durable through optimizer, progress, hooks, metrics, validation, and step cadence; mid-epoch triggers flush afterward, while terminal-batch and validation-end triggers defer through epoch metrics and epoch schedulers to the monitoring boundary.
+    4. A partial `max_steps` or stop boundary preserves the current epoch instead of fabricating epoch-end hooks or scheduler steps; loader cursor, rank-local scalar accumulators, non-persistent TorchMetrics tensor or list state, update counts, and metric identity resume together.
     5. A persisted effective configuration snapshot permits larger run ceilings while rejecting drift in accumulation, training and validation limits, cadence, clipping, determinism, sampler policy, barebones state, synchronization, reload cadence, and precision before restoration; bounded Timer runs record their actual unbounded epoch ceiling.
     6. Direct resumable saves during incomplete batches fail; ModelCheckpoint records due batch or validation triggers and flushes at the correct batch or epoch durability boundary, while weights-only output remains safe and cannot continue fit.
-    7. Strict corruption, unsafe-save rejection, no step-zero artifact, exact accumulated, step-plateau, epoch-plateau, and validation-triggered resume, stochastic replay, DDP selection, and full or sharded model-parallel continuation pass.
+    7. Exact scalar reductions, TorchMetrics tensor and list state, epoch and plateau schedulers, local and two-rank differing metric histories, spawned post-fit optimizer and scheduler payloads, world-size rejection, corruption, stateful data, and sharded FSDP2 resume pass.
 
-| Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
+| Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 
-    1. `TrainingEpochLoop.run` now composes explicit epoch start, resumable data iteration, batch advancement, tail optimization, continuation persistence, and epoch-metric completion transitions rather than embedding the complete lifecycle in one 368-line method.
+    1. `TrainingEpochLoop.run` composes epoch start, resumable iteration, batch advancement, tail optimization, partial-state retention, and true epoch completion; reaching a run ceiling inside the loader no longer executes epoch-end hooks, epoch schedulers, or epoch increment.
     2. Fetch, transfer, batch hooks, automatic or manual optimization, metric dispatch, scheduled validation, scheduler cadence, and loader continuation remain private transitions on the one epoch owner; no batch-manager, state-container, helper class, or new public API was introduced.
     3. Trainer now owns one DataModule-over-Module batch-transfer hook transaction used by training, validation, testing, and prediction, deleting three duplicated stage implementations while preserving exact hook dispatch and profiling.
     4. Strategy owns deferred backward synchronization. DDP supplies `no_sync`, while loops and `SyntheticOptimizer` request the policy without importing or inspecting the wrapper; explicit automatic and manual step operations replace the former boolean step contract.
-    5. Standard and plateau scheduler updates have distinct operations; epoch metrics flush and plateau state advances before monitoring callbacks persist the epoch, `estimated_stepping_batches` is the sole horizon calculation, and dead duplicate scheduler state was removed.
+    5. Standard and plateau schedulers advance only at their real step or completed-epoch boundaries; epoch metric state survives partial fit and checkpoint restoration, while `estimated_stepping_batches` remains the sole horizon calculation.
     6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; Trainer, evaluation, and prediction orchestration are already decomposed by lifecycle transition, and conditional annotation imports are absent across production.
-    7. CPU and MPS execution, automatic and multi-optimizer manual optimization, two-rank deferred accumulation, manual DDP, transfer precedence across every stage, multiple-loader DDP, exact stateful continuation, plateau cadence, and sharded model-parallel exact resume pass.
+    7. CPU, MPS, automatic and manual optimization, accumulated DDP, stateful data, scalar and TorchMetrics partial epochs, spawned parent persistence, plateau cadence, tensor parallelism, and sharded FSDP2 exact continuation pass.
 
 | Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
 

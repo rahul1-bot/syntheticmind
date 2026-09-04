@@ -7,9 +7,10 @@ from typing import Literal, cast, override
 import syntheticmind
 import torch
 from torch import nn
+from torchmetrics import Metric
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.core.metric import LoggedMetric
+from syntheticmind.core.metric import LoggedMetric, _LoggedMetricCheckpoint
 from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import SyntheticOptimizer
 from syntheticmind.loops.fetchers import _DataFetcher
@@ -27,6 +28,7 @@ from syntheticmind.types import (
     Batch,
     BackwardInputs,
     CheckpointDict,
+    CheckpointValue,
     ClipAlgorithm,
     DataLoaderState,
     OptimizerClosure,
@@ -34,6 +36,7 @@ from syntheticmind.types import (
     OptimizerStepOutput,
     RunningStage,
     SchedulerInterval,
+    StateDict,
     StepOutput,
     TrainingStepOutput
 )
@@ -48,6 +51,7 @@ type _BatchIteration = tuple[
     int
 ]
 type _BatchLoopResult = tuple[int, bool, bool]
+type _EpochMetricEntry = tuple[LoggedMetric, MetricAccumulator]
 
 
 class TrainingEpochLoop(Loop):
@@ -83,6 +87,8 @@ class TrainingEpochLoop(Loop):
         self._completed_loader_states: list[DataLoaderState] = []
         self._use_completed_loader_states: bool = False
         self._checkpoint_is_durable: bool = True
+        self._epoch_accum: dict[str, _EpochMetricEntry] = {}
+        self.epoch_completed: bool = True
         self.is_last_batch: bool = False
 
     def reset_on_run(self) -> None:
@@ -90,6 +96,7 @@ class TrainingEpochLoop(Loop):
         self.is_last_batch: bool = False
 
     def reset_on_teardown(self) -> None:
+        self._reset_epoch_metrics()
         self._completed_batches: int = 0
         self._total_batches_processed: int = 0
         self._has_entered_batch_loop: bool = False
@@ -99,6 +106,7 @@ class TrainingEpochLoop(Loop):
         self._completed_loader_states: list[DataLoaderState] = []
         self._use_completed_loader_states: bool = False
         self._checkpoint_is_durable: bool = True
+        self.epoch_completed: bool = True
 
     def run(self) -> None:
         self._start_epoch()
@@ -117,7 +125,7 @@ class TrainingEpochLoop(Loop):
         if self._max_steps_reached(state):
             return
 
-        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]] = {}
+        epoch_accum: dict[str, _EpochMetricEntry] = self._epoch_accum
         batch_result: _BatchLoopResult = self._run_batches(
             trainer,
             module,
@@ -127,6 +135,7 @@ class TrainingEpochLoop(Loop):
         batch_idx: int = batch_result[0]
         tail_is_accumulating: bool = batch_result[1]
         epoch_completed: bool = batch_result[2]
+        self.epoch_completed: bool = epoch_completed
         self._restore_checkpoint_random_state()
         self._finish_optimization(
             trainer,
@@ -135,7 +144,8 @@ class TrainingEpochLoop(Loop):
             state,
             optimizer,
             batch_idx,
-            tail_is_accumulating
+            tail_is_accumulating,
+            epoch_completed
         )
         self._store_training_continuation(
             trainer,
@@ -144,7 +154,9 @@ class TrainingEpochLoop(Loop):
         )
         self._has_entered_batch_loop: bool = False
         self._completed_batches: int = 0
-        self._dispatch_epoch_metrics(epoch_accum, state)
+        if epoch_completed:
+            self._dispatch_epoch_metrics(epoch_accum, state)
+            self._epoch_accum: dict[str, _EpochMetricEntry] = {}
 
     def _start_epoch(self) -> None:
         self.validation_ran_this_epoch: bool = False
@@ -211,7 +223,7 @@ class TrainingEpochLoop(Loop):
         trainer: syntheticmind.Trainer,
         module: Module,
         combined_loader: CombinedLoader,
-        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]]
+        epoch_accum: dict[str, _EpochMetricEntry]
     ) -> _BatchLoopResult:
         state: TrainerState = trainer.state
         iteration: _BatchIteration = self._prepare_batch_iteration(
@@ -268,7 +280,7 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         batch_idx: int,
         data_fetcher: _DataFetcher[tuple[Batch, int, int]],
-        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]]
+        epoch_accum: dict[str, _EpochMetricEntry]
     ) -> bool | None:
         self._checkpoint_is_durable: bool = False
         self._restore_checkpoint_random_state()
@@ -361,7 +373,8 @@ class TrainingEpochLoop(Loop):
         state: TrainerState,
         optimizer: torch.optim.Optimizer | None,
         batch_idx: int,
-        tail_is_accumulating: bool
+        tail_is_accumulating: bool,
+        epoch_completed: bool
     ) -> None:
         if module.automatic_optimization and tail_is_accumulating:
             assert optimizer is not None
@@ -381,7 +394,7 @@ class TrainingEpochLoop(Loop):
             )
             self._checkpoint_is_durable: bool = True
             trainer._save_batch_checkpoints(module, True)
-        if module.automatic_optimization:
+        if module.automatic_optimization and epoch_completed:
             self.update_lr_schedulers(
                 trainer,
                 module,
@@ -911,11 +924,111 @@ class TrainingEpochLoop(Loop):
     def checkpoint_is_durable(self) -> bool:
         return self._checkpoint_is_durable
 
+    def epoch_metric_state(self) -> CheckpointDict:
+        state: CheckpointDict = {}
+        storage_key: str
+        metric_entry: _EpochMetricEntry
+        for storage_key, metric_entry in self._epoch_accum.items():
+            metric: LoggedMetric = metric_entry[0]
+            accumulator: MetricAccumulator = metric_entry[1]
+            metric_state: tuple[StateDict, int] = metric._metric_checkpoint_state()
+            state[storage_key]: CheckpointValue = {
+                "identity": metric._checkpoint_state(),
+                "accumulator": accumulator._checkpoint_state(),
+                "metric_state": metric_state[0],
+                "metric_update_count": metric_state[1]
+            }
+        return state
+
+    def load_epoch_metric_state(
+        self,
+        state: CheckpointDict,
+        module: Module
+    ) -> None:
+        self._reset_epoch_metrics()
+        storage_key: str
+        entry_value: CheckpointValue
+        for storage_key, entry_value in state.items():
+            if not isinstance(entry_value, dict):
+                raise TypeError("Checkpoint epoch metric entry must be a mapping.")
+            identity_value: CheckpointValue | None = entry_value.get("identity")
+            accumulator_value: CheckpointValue | None = entry_value.get("accumulator")
+            metric_state_value: CheckpointValue | None = entry_value.get("metric_state")
+            update_count_value: CheckpointValue | None = entry_value.get(
+                "metric_update_count"
+            )
+            if not isinstance(identity_value, dict):
+                raise TypeError("Checkpoint epoch metric identity must be a mapping.")
+            if not isinstance(accumulator_value, dict):
+                raise TypeError("Checkpoint epoch metric accumulator must be a mapping.")
+            if not isinstance(metric_state_value, dict):
+                raise TypeError("Checkpoint epoch Metric state must be a mapping.")
+            identity: _LoggedMetricCheckpoint = LoggedMetric._parse_checkpoint_state(
+                cast(StateDict, identity_value)
+            )
+            metric_value: torch.Tensor | Metric
+            restored_metric: Metric | None = None
+            if identity.is_metric:
+                metric_attribute: str | None = identity.metric_attribute
+                if not metric_attribute:
+                    raise ValueError("Checkpoint TorchMetric identity requires an attribute.")
+                candidate: nn.Module = module.get_submodule(metric_attribute)
+                if not isinstance(candidate, Metric):
+                    raise TypeError(
+                        f"Checkpoint metric attribute {metric_attribute!r} is not a Metric."
+                    )
+                restored_metric: Metric | None = candidate
+                metric_value: torch.Tensor | Metric = candidate
+            else:
+                if metric_state_value:
+                    raise ValueError("A scalar epoch metric cannot contain Metric state.")
+                metric_value: torch.Tensor | Metric = torch.tensor(
+                    0.0,
+                    device=module.device
+                )
+            metric: LoggedMetric = LoggedMetric._from_checkpoint_state(
+                identity,
+                metric_value
+            )
+            if isinstance(update_count_value, bool) or not isinstance(
+                update_count_value,
+                int
+            ):
+                raise TypeError("Checkpoint Metric update count must be an integer.")
+            metric._load_metric_checkpoint_state(
+                cast(StateDict, metric_state_value),
+                update_count_value
+            )
+            if metric.storage_key != storage_key:
+                raise ValueError("Checkpoint epoch metric storage key is inconsistent.")
+            accumulator: MetricAccumulator = MetricAccumulator(
+                reduction=metric.reduction,
+                sync_dist=metric.sync_dist,
+                rank_zero_only=metric.rank_zero_only,
+                enable_graph=False
+            )
+            accumulator._load_checkpoint_state(
+                cast(StateDict, accumulator_value),
+                module.device,
+                restored_metric
+            )
+            self._epoch_accum[storage_key]: _EpochMetricEntry = (
+                metric,
+                accumulator
+            )
+        self.epoch_completed: bool = not bool(state)
+
+    def _reset_epoch_metrics(self) -> None:
+        metric_entry: _EpochMetricEntry
+        for metric_entry in self._epoch_accum.values():
+            metric_entry[1].reset()
+        self._epoch_accum: dict[str, _EpochMetricEntry] = {}
+
     def _dispatch_step_metrics(
         self,
         module: Module,
         state: TrainerState,
-        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]],
+        epoch_accum: dict[str, _EpochMetricEntry],
         batch: Batch,
         is_accumulating: bool = False
     ) -> None:
@@ -955,7 +1068,12 @@ class TrainingEpochLoop(Loop):
                             enable_graph=metric.enable_graph
                         )
                     )
-                accumulator: MetricAccumulator = epoch_accum[metric.storage_key][1]
+                metric_entry: _EpochMetricEntry = epoch_accum[metric.storage_key]
+                if metric_entry[0].metadata != metric.metadata:
+                    raise MisconfigurationError(
+                        "A resumed epoch metric changed its logging configuration."
+                    )
+                accumulator: MetricAccumulator = metric_entry[1]
                 if metric.is_metric:
                     accumulator.update_metric(metric.value)
                 else:
@@ -982,7 +1100,7 @@ class TrainingEpochLoop(Loop):
 
     def _dispatch_epoch_metrics(
         self,
-        epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]],
+        epoch_accum: dict[str, _EpochMetricEntry],
         state: TrainerState
     ) -> None:
         if not epoch_accum:

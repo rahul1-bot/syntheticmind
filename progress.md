@@ -14,12 +14,12 @@
     4. ✅ Subprocess, spawn, fork, notebook-fork, external process groups, distributed samplers, signal coordination, rank ownership, and multiprocessing reconciliation are verified.
     5. ✅ ProgressBarCallback owns rank-zero stage presentation while ConsoleRenderer owns terminal I/O and metric ordering through a bound operation; all-stage local and two-rank rendering, selection, enable or disable, verbose results, and Module printing pass.
 
-| Progress Complete | Data, Continuation, and Metrics | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Progress Complete | Data, Continuation, and Metrics | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 
     1. ✅ Model, datamodule, and direct Trainer dataloaders execute without fabricated ownership adapters.
     2. ✅ Multiple and nested loaders preserve combination modes, indices, limits, metric identity, transfer, prediction ordering, and distributed sharding.
-    3. ✅ Stateful and stateless checkpoint continuation preserves cursor, logical progress, stochastic state, unsized prefetch, subclass reconstruction, and launcher reconciliation.
-    4. ✅ Standard module logging preserves established parameters, scalar validation, step and epoch routing, weighted and distributed reductions, process groups, multiple loaders, and TorchMetrics.
+    3. ✅ Stateful and ordinary continuation preserves cursor, stochastic state, subclass reconstruction, rank-local partial scalar and TorchMetrics windows, update counts, optimizer and scheduler payloads, and launcher reconciliation.
+    4. ✅ Module logging preserves scalar validation, step and epoch routing, weighted, sum, minimum, maximum, distributed, tensor-list, multiple-loader, and TorchMetrics semantics across uninterrupted and resumed epochs.
     5. ✅ Callback, logged, progress, logger, evaluation, scheduler, early-stopping, and checkpoint-monitor state retain distinct routing and correct tensor or scalar boundaries.
 
 | Progress Complete | Model Extension Surface | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
@@ -126,19 +126,19 @@
     3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
     4. ✅ Weighted, dataclass, ambiguity, tensor-state, TorchMetrics, CPU, MPS, remote fsspec, external DDP, spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
 
-| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 07:02 PM | Name: Ghost |
+| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 
-    1. ✅ Schema version 2 now validates artifact identity, resolved Trainer configuration, progress coordinates, state collections, metadata, and immutable multi-backend randomness before restoration.
+    1. ✅ Schema version 2 validates artifact identity, configuration, progress, participant state, randomness, and strict per-rank partial metric identity, accumulator, TorchMetrics, update-count, rank-count, and world-size structure before restoration.
     2. ✅ One Randomness owner replaces SeedManager and duplicate launcher or checkpoint RNG logic, captures only active accelerator generators, and preserves exact Python, NumPy, torch CPU, CUDA, and MPS state.
-    3. ✅ A batch remains non-durable through optimizer, progress, hooks, metrics, validation, and step cadence; ModelCheckpoint flushes mid-epoch triggers afterward and carries terminal or validation triggers through epoch schedulers to monitoring.
-    4. ✅ Weights-only artifacts remain non-resumable, no step-zero artifact is emitted, and exact accumulated, step-plateau, epoch-plateau, and explicit validation-trigger continuation joins CPU, MPS, DDP selection, and model-parallel evidence.
+    3. ✅ A partial run retains the current epoch, loader, scalar reductions, TorchMetrics tensor or list state, and schedulers without synthetic epoch hooks; graph/custom-group metrics and changed worlds reject explicitly.
+    4. ✅ Exact local, differing-rank DDP, spawned parent post-fit, stateful-loader, accumulated, step- and epoch-plateau, validation-trigger, tensor-parallel, and sharded FSDP2 continuation pass.
 
-| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
+| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
 
-    1. ✅ TrainingEpochLoop now composes bounded resume, iteration, batch, optimization, cadence, continuation, and completion transitions; the public run path and inner iterator meet method hard limits without new classes or APIs.
+    1. ✅ TrainingEpochLoop composes bounded resume, iteration, optimization, cadence, partial state, and true completion; max-step termination preserves the epoch rather than firing end hooks or schedulers.
     2. ✅ One Trainer transfer transaction serves every stage, Strategy owns deferred gradient synchronization, and SyntheticOptimizer uses distinct automatic and manual step operations without direct DDP inspection or a boolean step mode.
     3. ✅ Standard and plateau scheduler operations are explicit, epoch plateau state advances before monitoring persistence, `estimated_stepping_batches` is the sole horizon calculation, manual clipping avoids configuration mutation, and dead duplicate scheduler state is gone.
-    4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, durable accumulated checkpoint resume, multi-loader DDP, transfer precedence, stateful continuation, plateau scheduling, and sharded model-parallel paths pass.
+    4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, partial metric and scheduler resume, spawned persistence, stateful continuation, plateau scheduling, and sharded model-parallel paths pass.
 
 | Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
 

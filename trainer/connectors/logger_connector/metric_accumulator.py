@@ -1,17 +1,38 @@
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import Field, fields, is_dataclass
-from typing import cast
+from typing import Annotated, ClassVar, Literal, cast
 
 import torch
 import torch.distributed as dist
+from pydantic import BaseModel, ConfigDict, Field as ModelField, ValidationError
 from torchmetrics import Metric
 
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import Batch, ModelOutput, Reduction, TensorReducer
+from syntheticmind.types import Batch, ModelOutput, Reduction, StateDict, TensorReducer
 
 __all__: list[str] = ["MetricAccumulator"]
 
 type _MetricCandidate = torch.nn.Module | ModelOutput
+
+
+class _MetricAccumulatorCheckpoint(BaseModel):
+    schema_version: Literal[1] = 1
+    reduction: Reduction
+    count: Annotated[int, ModelField(ge=0)]
+    sum_value: torch.Tensor | None
+    minimum: torch.Tensor | None
+    maximum: torch.Tensor | None
+    weighted_sum: torch.Tensor | None
+    total_weight: Annotated[float, ModelField(ge=0.0)]
+    is_metric: bool
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        arbitrary_types_allowed=True,
+        frozen=True,
+        extra="forbid",
+        strict=True,
+        validate_default=True,
+        allow_inf_nan=False
+    )
 
 
 class MetricAccumulator:
@@ -204,6 +225,108 @@ class MetricAccumulator:
         if self._metric is not None:
             self._metric.reset()
             self._metric: Metric | None = None
+
+    def _checkpoint_state(self) -> StateDict:
+        state: _MetricAccumulatorCheckpoint = _MetricAccumulatorCheckpoint(
+            reduction=self._reduction,
+            count=self._count,
+            sum_value=self._checkpoint_tensor(self._sum),
+            minimum=self._checkpoint_tensor(self._min),
+            maximum=self._checkpoint_tensor(self._max),
+            weighted_sum=self._checkpoint_tensor(self._weighted_sum),
+            total_weight=self._total_weight,
+            is_metric=self._metric is not None
+        )
+        return cast(StateDict, state.model_dump(mode="python"))
+
+    def _load_checkpoint_state(
+        self,
+        state: StateDict,
+        device: torch.device,
+        metric: Metric | None
+    ) -> None:
+        checkpoint: _MetricAccumulatorCheckpoint = self._parse_checkpoint_state(
+            state
+        )
+        if checkpoint.reduction != self._reduction:
+            raise MisconfigurationError(
+                "Checkpoint epoch metric reduction does not match its identity."
+            )
+        if checkpoint.is_metric != (metric is not None):
+            raise TypeError("Checkpoint epoch metric accumulator has the wrong kind.")
+        self._validate_checkpoint_values(checkpoint)
+        self._sum: torch.Tensor | None = self._restore_tensor(
+            checkpoint.sum_value,
+            device
+        )
+        self._count: int = checkpoint.count
+        self._min: torch.Tensor | None = self._restore_tensor(
+            checkpoint.minimum,
+            device
+        )
+        self._max: torch.Tensor | None = self._restore_tensor(
+            checkpoint.maximum,
+            device
+        )
+        self._weighted_sum: torch.Tensor | None = self._restore_tensor(
+            checkpoint.weighted_sum,
+            device
+        )
+        self._total_weight: float = checkpoint.total_weight
+        self._metric: Metric | None = metric
+
+    @classmethod
+    def _parse_checkpoint_state(
+        cls,
+        state: StateDict
+    ) -> _MetricAccumulatorCheckpoint:
+        del cls
+        try:
+            return _MetricAccumulatorCheckpoint.model_validate(state, strict=True)
+        except ValidationError as exception:
+            raise ValueError("Checkpoint epoch metric accumulator is invalid.") from exception
+
+    @classmethod
+    def _validate_checkpoint_values(
+        cls,
+        checkpoint: _MetricAccumulatorCheckpoint
+    ) -> None:
+        del cls
+        scalar_values: tuple[torch.Tensor | None, ...] = (
+            checkpoint.sum_value,
+            checkpoint.minimum,
+            checkpoint.maximum
+        )
+        checkpoint_values: tuple[torch.Tensor | None, ...] = (
+            *scalar_values,
+            checkpoint.weighted_sum
+        )
+        scalar_value: torch.Tensor | None
+        for scalar_value in checkpoint_values:
+            if scalar_value is not None and scalar_value.numel() != 1:
+                raise ValueError("Checkpoint epoch accumulator tensors must be scalar.")
+        if checkpoint.count == 0 and any(value is not None for value in scalar_values):
+            raise ValueError("An empty epoch accumulator cannot contain scalar state.")
+        if checkpoint.count > 0 and any(value is None for value in scalar_values):
+            raise ValueError("A populated epoch accumulator requires complete scalar state.")
+        if (checkpoint.total_weight > 0.0) != (checkpoint.weighted_sum is not None):
+            raise ValueError("Epoch accumulator weight state is inconsistent.")
+
+    def _checkpoint_tensor(self, value: torch.Tensor | None) -> torch.Tensor | None:
+        if value is None:
+            return None
+        return value.detach().cpu().clone()
+
+    def _restore_tensor(
+        self,
+        value: torch.Tensor | None,
+        device: torch.device
+    ) -> torch.Tensor | None:
+        if value is None:
+            return None
+        if value.numel() != 1:
+            raise ValueError("Checkpoint epoch accumulator tensors must be scalar.")
+        return value.detach().to(device).clone()
 
     @property
     def reduction(self) -> Reduction:

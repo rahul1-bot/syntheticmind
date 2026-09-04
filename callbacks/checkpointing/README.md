@@ -2,6 +2,8 @@
 
 The checkpoint callback family translates training lifecycle events into durable checkpoint policy without owning checkpoint serialization. `ModelCheckpoint` coordinates the public callback contract, the private schedule owns trigger and resume coordinates, ranking owns scalar top-k state, and paths own filename, version, containment, link, and retention decisions. The Trainer checkpoint connector still owns full-trajectory assembly, Strategy owns topology-specific model and optimizer representation, and `CheckpointIO` owns transport.
 
+Batch triggers record intent at the public callback hook and persist only after optimizer, hook, metric, validation, and step-scheduler cadence is durable. Triggers from a terminal batch or validation boundary carry forward through epoch metrics and epoch schedulers before monitoring callbacks persist them. A resumable direct save inside an incomplete automatic batch fails explicitly; a weights-only snapshot remains available because it carries no continuation claim.
+
 | Module | Contents |
 |---|---|
 | `callback.py` | The checkpoint callback category used for ordering and extension. |

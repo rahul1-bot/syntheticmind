@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from syntheticmind.randomness import _RandomStateSnapshot
 from syntheticmind.types import (
     CheckpointDict,
+    CheckpointValue,
     DataLoaderState,
     DataLoaderSource,
     ModelOutput,
@@ -77,6 +78,9 @@ class _WorkerOutput(BaseModel):
     train_dataloader_batches_completed: int
     train_total_batch_idx: int
     train_epoch_rng_state: CheckpointDict | None
+    train_epoch_metric_states_by_rank: list[CheckpointDict]
+    train_optimizer_states: list[CheckpointValue]
+    train_scheduler_states: list[CheckpointValue]
     received_sigterm: bool
     is_last_batch: bool
     global_state: _GlobalState

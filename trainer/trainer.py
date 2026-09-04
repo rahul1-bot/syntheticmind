@@ -1232,6 +1232,9 @@ class Trainer:
         completed: bool,
         training_modes: dict[str, bool]
     ) -> None:
+        epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
+        if stage == "fit" and completed and epoch_loop is not None:
+            self._preserve_fit_checkpoint_state(epoch_loop)
         modes_to_restore: dict[str, bool] | None = (
             None if completed else training_modes
         )
@@ -1251,6 +1254,21 @@ class Trainer:
             self.fit_loop.epoch_loop.reset_on_teardown()
         if cleanup_exception is not None:
             raise cleanup_exception
+
+    def _preserve_fit_checkpoint_state(
+        self,
+        epoch_loop: TrainingEpochLoop
+    ) -> None:
+        launcher: _ProcessLauncher | None = self._stage_launcher()
+        if launcher is not None and launcher.start_method != "popen":
+            self._checkpoint_connector.train_optimizer_states: list[
+                CheckpointValue
+            ] = self._checkpoint_optimizer_states(False)
+            self._checkpoint_connector.train_scheduler_states: list[
+                CheckpointValue
+            ] = self._checkpoint_scheduler_states()
+        if not epoch_loop.epoch_completed:
+            self._checkpoint_epoch_metric_states(False)
 
     @contextmanager
     def init_module(
@@ -1838,6 +1856,10 @@ class Trainer:
         module._current_epoch: int = epoch
         module._global_step: int = global_step
         if self.fit_loop.epoch_loop is not None:
+            self.fit_loop.epoch_loop.load_epoch_metric_state(
+                self._checkpoint_connector.epoch_metric_state(checkpoint),
+                module
+            )
             loader_state_restored: bool = bool(
                 combined_loader_states
                 and self._data_connector.train_combined_loader is not None
@@ -1913,6 +1935,10 @@ class Trainer:
         optimizer_states: list[CheckpointValue] = self._checkpoint_optimizer_states(
             weights_only
         )
+        scheduler_states: list[CheckpointValue] = self._checkpoint_scheduler_states()
+        epoch_metric_states: list[CheckpointDict] = (
+            self._checkpoint_epoch_metric_states(weights_only)
+        )
         configuration_snapshot: _TrainerConfigurationSnapshot = (
             _TrainerConfigurationSnapshot.capture(
                 self._configuration,
@@ -1922,8 +1948,6 @@ class Trainer:
         )
         checkpoint: CheckpointDict = self._checkpoint_connector.build(
             model=module,
-            scheduler=self.scheduler,
-            schedulers=self.schedulers,
             epoch=epoch,
             global_step=self.state.global_step,
             datamodule=self.datamodule,
@@ -1931,6 +1955,7 @@ class Trainer:
             total_batch_idx=checkpoint_total_batch_idx,
             epoch_rng_state=epoch_rng_state,
             combined_loader_states=combined_loader_states,
+            epoch_metric_states=epoch_metric_states,
             precision_plugin=self.precision_plugin,
             weights_only=weights_only,
             model_state_dict=cast(
@@ -1938,6 +1963,7 @@ class Trainer:
                 self._checkpoint_connector.model_state_dict()
             ),
             optimizer_states=optimizer_states,
+            scheduler_states=scheduler_states,
             trainer_configuration=cast(
                 CheckpointValue,
                 configuration_snapshot.model_dump(mode="python")
@@ -2026,6 +2052,35 @@ class Trainer:
             is_mid_epoch
         )
 
+    def _checkpoint_epoch_metric_states(
+        self,
+        weights_only: bool
+    ) -> list[CheckpointDict]:
+        epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
+        if weights_only:
+            return []
+        if self.state.stage != "fit" or epoch_loop is None:
+            return list(
+                self._checkpoint_connector.train_epoch_metric_states_by_rank
+            )
+        local_state: CheckpointDict = epoch_loop.epoch_metric_state()
+        has_epoch_state: bool = self.strategy.reduce_boolean_decision(
+            bool(local_state),
+            all=False
+        )
+        if not has_epoch_state:
+            self._checkpoint_connector.train_epoch_metric_states_by_rank: list[
+                CheckpointDict
+            ] = []
+            return []
+        gathered_states: list[CheckpointDict] = (
+            self.strategy._gather_checkpoint_states(local_state)
+        )
+        self._checkpoint_connector.train_epoch_metric_states_by_rank: list[
+            CheckpointDict
+        ] = gathered_states
+        return gathered_states
+
     def _checkpoint_epoch(self, module: Module, is_mid_epoch: bool) -> int:
         epoch: int = self.state.current_epoch
         if (
@@ -2047,6 +2102,8 @@ class Trainer:
         optimizer_states: list[CheckpointValue] = []
         if weights_only:
             return optimizer_states
+        if not self.optimizers:
+            return list(self._checkpoint_connector.train_optimizer_states)
         optimizer: torch.optim.Optimizer
         for optimizer in self.optimizers:
             optimizer_states.append(
@@ -2056,6 +2113,14 @@ class Trainer:
                 )
             )
         return optimizer_states
+
+    def _checkpoint_scheduler_states(self) -> list[CheckpointValue]:
+        if not self.schedulers:
+            return list(self._checkpoint_connector.train_scheduler_states)
+        return [
+            cast(CheckpointValue, scheduler.state_dict())
+            for scheduler in self.schedulers
+        ]
 
     def _save_batch_checkpoints(
         self,

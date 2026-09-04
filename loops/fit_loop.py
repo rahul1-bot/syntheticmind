@@ -110,6 +110,8 @@ class FitLoop(Loop):
         self._run_epoch_start(trainer, module, callbacks)
         with trainer.profiler.profile("run_training_epoch"):
             self.epoch_loop.run()
+        if not self.epoch_loop.epoch_completed:
+            return
         self._run_epoch_end(
             trainer,
             module,

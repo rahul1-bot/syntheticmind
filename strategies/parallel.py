@@ -15,7 +15,7 @@ from syntheticmind.strategies.launchers.launcher import ProcessStartMethod, _Pro
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import OptimizerStateValue, Reduction
+from syntheticmind.types import CheckpointDict, OptimizerStateValue, Reduction
 
 __all__: list[str] = ["ParallelStrategy"]
 
@@ -212,6 +212,23 @@ class ParallelStrategy(Strategy, LaunchStrategy):
             gathered.append(torch.zeros_like(contiguous_tensor))
         dist.all_gather(gathered, contiguous_tensor, group=group)
         return torch.stack(gathered)
+
+    @override
+    def _gather_checkpoint_states(
+        self,
+        state: CheckpointDict
+    ) -> list[CheckpointDict]:
+        if not dist.is_initialized():
+            return [state]
+        gathered: list[CheckpointDict | None] = [None] * self.world_size
+        dist.all_gather_object(gathered, state)
+        states: list[CheckpointDict] = []
+        gathered_state: CheckpointDict | None
+        for gathered_state in gathered:
+            if not isinstance(gathered_state, dict):
+                raise TypeError("Distributed epoch metric state must be a mapping.")
+            states.append(gathered_state)
+        return states
 
     @override
     def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:

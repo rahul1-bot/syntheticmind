@@ -18,6 +18,7 @@ from syntheticmind.strategies.model_initialization import _ModuleInitializer
 from syntheticmind.types import (
     BackwardInputs,
     Batch,
+    CheckpointDict,
     ModelOutput,
     OptimizerClosure,
     OptimizerStepOutput,
@@ -235,6 +236,12 @@ class Strategy:
     ) -> torch.Tensor:
         del group, sync_grads
         return tensor
+
+    def _gather_checkpoint_states(
+        self,
+        state: CheckpointDict
+    ) -> list[CheckpointDict]:
+        return [state]
 
     def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
         del optimizer

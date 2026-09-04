@@ -11,6 +11,7 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpointing import ModelCheckpoint
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hyperparameters import HyperparametersMixin
+from syntheticmind.core.metric import LoggedMetric, _LoggedMetricCheckpoint
 from syntheticmind.core.optimizer import _SchedulerInstance
 from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.randomness import _Randomness, _RandomStateSnapshot
@@ -20,6 +21,10 @@ from syntheticmind.plugins.checkpoint_io import (
 )
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
+from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
+    MetricAccumulator,
+    _MetricAccumulatorCheckpoint
+)
 from syntheticmind.trainer.configuration import _TrainerConfigurationSnapshot
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.storage.filesystem import StoragePath
@@ -54,6 +59,9 @@ class _CheckpointConnector:
         self.train_dataloader_batches_completed: int = 0
         self.train_total_batch_idx: int = -1
         self.train_epoch_rng_state: CheckpointDict | None = None
+        self.train_epoch_metric_states_by_rank: list[CheckpointDict] = []
+        self.train_optimizer_states: list[CheckpointValue] = []
+        self.train_scheduler_states: list[CheckpointValue] = []
 
     def select_path(
         self,
@@ -107,12 +115,13 @@ class _CheckpointConnector:
         self.train_dataloader_batches_completed: int = 0
         self.train_total_batch_idx: int = -1
         self.train_epoch_rng_state: CheckpointDict | None = None
+        self.train_epoch_metric_states_by_rank: list[CheckpointDict] = []
+        self.train_optimizer_states: list[CheckpointValue] = []
+        self.train_scheduler_states: list[CheckpointValue] = []
 
     def build(
         self,
         model: torch.nn.Module,
-        scheduler: _SchedulerInstance | None,
-        schedulers: list[_SchedulerInstance] | None,
         epoch: int,
         global_step: int,
         datamodule: DataModule | None,
@@ -120,10 +129,12 @@ class _CheckpointConnector:
         total_batch_idx: int,
         epoch_rng_state: CheckpointDict | None,
         combined_loader_states: list[DataLoaderState],
+        epoch_metric_states: list[CheckpointDict],
         precision_plugin: Precision,
         weights_only: bool,
         model_state_dict: CheckpointValue,
         optimizer_states: list[CheckpointValue],
+        scheduler_states: list[CheckpointValue],
         trainer_configuration: CheckpointValue
     ) -> CheckpointDict:
         checkpoint: CheckpointDict = {
@@ -144,26 +155,23 @@ class _CheckpointConnector:
             checkpoint["total_batch_idx"]: CheckpointValue = total_batch_idx
         if not weights_only and epoch_rng_state is not None:
             checkpoint["epoch_rng_state"]: CheckpointValue = epoch_rng_state
+        fit_loop_state: CheckpointDict = {}
         if not weights_only and combined_loader_states:
+            fit_loop_state["combined_loader"]: CheckpointValue = (
+                combined_loader_states
+            )
+        if not weights_only and epoch_metric_states:
+            fit_loop_state["epoch_metrics_by_rank"]: CheckpointValue = (
+                epoch_metric_states
+            )
+        if fit_loop_state:
             checkpoint["loops"]: CheckpointValue = {
                 "fit_loop": {
-                    "state_dict": {
-                        "combined_loader": combined_loader_states
-                    }
+                    "state_dict": fit_loop_state
                 }
             }
         if not weights_only:
-            scheduler_list: list[_SchedulerInstance] = (
-                list(schedulers)
-                if schedulers is not None
-                else [scheduler]
-                if scheduler is not None
-                else []
-            )
-            checkpoint["lr_schedulers"]: CheckpointValue = [
-                current_scheduler.state_dict()
-                for current_scheduler in scheduler_list
-            ]
+            checkpoint["lr_schedulers"]: CheckpointValue = scheduler_states
             callback_states: dict[str, StateDict] = {}
             callback: Callback
             for callback in self._callback_connector.callbacks:
@@ -494,22 +502,8 @@ class _CheckpointConnector:
         self,
         checkpoint: CheckpointDict
     ) -> list[DataLoaderState]:
-        loops_value: CheckpointValue | None = checkpoint.get("loops")
-        if loops_value is None:
-            return []
-        if not isinstance(loops_value, dict):
-            raise TypeError("Checkpoint loops state must be a mapping.")
-        fit_loop_value: CheckpointValue | None = loops_value.get("fit_loop")
-        if fit_loop_value is None:
-            return []
-        if not isinstance(fit_loop_value, dict):
-            raise TypeError("Checkpoint fit-loop state must be a mapping.")
-        state_dict_value: CheckpointValue | None = fit_loop_value.get("state_dict")
-        if state_dict_value is None:
-            return []
-        if not isinstance(state_dict_value, dict):
-            raise TypeError("Checkpoint fit-loop state_dict must be a mapping.")
-        combined_loader_value: CheckpointValue | None = state_dict_value.get(
+        state_dict: CheckpointDict = self._fit_loop_state(checkpoint)
+        combined_loader_value: CheckpointValue | None = state_dict.get(
             "combined_loader"
         )
         if combined_loader_value is None:
@@ -523,6 +517,130 @@ class _CheckpointConnector:
                 raise TypeError("Checkpoint loader state must be a mapping.")
             states.append(cast(DataLoaderState, state))
         return states
+
+    def epoch_metric_state(self, checkpoint: CheckpointDict) -> CheckpointDict:
+        states: list[CheckpointDict] = self._epoch_metric_states(checkpoint)
+        if not states:
+            return {}
+        if len(states) != self._strategy.world_size:
+            raise MisconfigurationError(
+                "Partial-epoch metric state requires the checkpoint world size."
+            )
+        return states[self._strategy.global_rank]
+
+    def _epoch_metric_states(
+        self,
+        checkpoint: CheckpointDict
+    ) -> list[CheckpointDict]:
+        state_dict: CheckpointDict = self._fit_loop_state(checkpoint)
+        states_value: CheckpointValue | None = state_dict.get(
+            "epoch_metrics_by_rank"
+        )
+        if states_value is None:
+            return []
+        if not isinstance(states_value, list):
+            raise TypeError("Checkpoint epoch metric states must be a list.")
+        states: list[CheckpointDict] = []
+        state_value: CheckpointValue
+        for state_value in states_value:
+            if not isinstance(state_value, dict):
+                raise TypeError("Checkpoint rank metric state must be a mapping.")
+            states.append(cast(CheckpointDict, state_value))
+        return states
+
+    def _validate_epoch_metric_states(self, checkpoint: CheckpointDict) -> int:
+        states: list[CheckpointDict] = self._epoch_metric_states(checkpoint)
+        rank_state: CheckpointDict
+        for rank_state in states:
+            storage_key: str
+            entry_value: CheckpointValue
+            for storage_key, entry_value in rank_state.items():
+                if not isinstance(storage_key, str) or not storage_key:
+                    raise TypeError("Checkpoint epoch metric keys must be strings.")
+                if not isinstance(entry_value, dict):
+                    raise TypeError("Checkpoint epoch metric entry must be a mapping.")
+                self._validate_epoch_metric_entry(storage_key, entry_value)
+        return len(states)
+
+    def _validate_epoch_metric_entry(
+        self,
+        storage_key: str,
+        entry: CheckpointDict
+    ) -> None:
+        expected_fields: set[str] = {
+            "identity",
+            "accumulator",
+            "metric_state",
+            "metric_update_count"
+        }
+        if set(entry) != expected_fields:
+            raise ValueError("Checkpoint epoch metric entry fields are invalid.")
+        identity_value: CheckpointValue | None = entry.get("identity")
+        accumulator_value: CheckpointValue | None = entry.get("accumulator")
+        metric_state_value: CheckpointValue | None = entry.get("metric_state")
+        update_count_value: CheckpointValue | None = entry.get("metric_update_count")
+        if not isinstance(identity_value, dict):
+            raise TypeError("Checkpoint epoch metric identity must be a mapping.")
+        if not isinstance(accumulator_value, dict):
+            raise TypeError("Checkpoint epoch metric accumulator must be a mapping.")
+        if not isinstance(metric_state_value, dict):
+            raise TypeError("Checkpoint epoch Metric state must be a mapping.")
+        identity: _LoggedMetricCheckpoint = LoggedMetric._parse_checkpoint_state(
+            cast(StateDict, identity_value)
+        )
+        accumulator: _MetricAccumulatorCheckpoint = (
+            MetricAccumulator._parse_checkpoint_state(
+                cast(StateDict, accumulator_value)
+            )
+        )
+        MetricAccumulator._validate_checkpoint_values(accumulator)
+        if accumulator.reduction != identity.reduction:
+            raise ValueError("Checkpoint epoch metric reductions are inconsistent.")
+        if accumulator.is_metric != identity.is_metric:
+            raise ValueError("Checkpoint epoch metric kinds are inconsistent.")
+        dataloader_key: str = (
+            f".{identity.dataloader_idx}"
+            if identity.add_dataloader_idx and identity.dataloader_idx is not None
+            else ""
+        )
+        expected_storage_key: str = (
+            f"{identity.hook_name}.{identity.name}{dataloader_key}"
+        )
+        if storage_key != expected_storage_key:
+            raise ValueError("Checkpoint epoch metric storage key is inconsistent.")
+        if isinstance(update_count_value, bool) or not isinstance(
+            update_count_value,
+            int
+        ):
+            raise TypeError("Checkpoint Metric update count must be an integer.")
+        if update_count_value < 0:
+            raise ValueError("Checkpoint Metric update count must be non-negative.")
+        LoggedMetric._validate_metric_checkpoint_state(
+            cast(StateDict, metric_state_value)
+        )
+        if identity.is_metric:
+            if not identity.metric_attribute:
+                raise ValueError("Checkpoint TorchMetric identity requires an attribute.")
+        elif metric_state_value or update_count_value != 0:
+            raise ValueError("A scalar epoch metric cannot contain Metric state.")
+
+    def _fit_loop_state(self, checkpoint: CheckpointDict) -> CheckpointDict:
+        loops_value: CheckpointValue | None = checkpoint.get("loops")
+        if loops_value is None:
+            return {}
+        if not isinstance(loops_value, dict):
+            raise TypeError("Checkpoint loops state must be a mapping.")
+        fit_loop_value: CheckpointValue | None = loops_value.get("fit_loop")
+        if fit_loop_value is None:
+            return {}
+        if not isinstance(fit_loop_value, dict):
+            raise TypeError("Checkpoint fit-loop state must be a mapping.")
+        state_dict_value: CheckpointValue | None = fit_loop_value.get("state_dict")
+        if state_dict_value is None:
+            return {}
+        if not isinstance(state_dict_value, dict):
+            raise TypeError("Checkpoint fit-loop state_dict must be a mapping.")
+        return cast(CheckpointDict, state_dict_value)
 
     def load_datamodule_state(
         self,
@@ -672,6 +790,7 @@ class _CheckpointConnector:
         self._checkpoint_type(checkpoint)
         self._training_progress(checkpoint)
         self.combined_loader_states(checkpoint)
+        epoch_metric_rank_count: int = self._validate_epoch_metric_states(checkpoint)
         self._validate_state_list(checkpoint, "optimizer_states")
         self._validate_state_list(checkpoint, "lr_schedulers")
         self._validate_callback_states(checkpoint)
@@ -694,6 +813,17 @@ class _CheckpointConnector:
             raise TypeError("Checkpoint metadata `world_size` must be an integer.")
         if world_size < 1:
             raise ValueError("Checkpoint metadata `world_size` must be positive.")
+        if epoch_metric_rank_count not in {0, world_size}:
+            raise ValueError(
+                "Checkpoint epoch metric rank state does not match metadata world size."
+            )
+        if (
+            epoch_metric_rank_count > 0
+            and epoch_metric_rank_count != self._strategy.world_size
+        ):
+            raise MisconfigurationError(
+                "Partial-epoch metric state cannot resume under a different world size."
+            )
 
     def _checkpoint_type(self, checkpoint: CheckpointDict) -> str:
         metadata: CheckpointValue | None = checkpoint.get("metadata")
