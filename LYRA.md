@@ -237,13 +237,13 @@
     4. Managed optimizers select explicit automatic or manual step operations and request deferred synchronization through Strategy instead of carrying a boolean execution flag or inspecting DDP.
     5. Exact local, accelerator, distributed, resumable-data, and model-parallel trajectories establish the decomposition without relying on static-analysis claims.
 
-| Strategic Note | Trainer Stage Transaction Map | Date: 04 September 2026 | Time: 03:43 PM | Name: Ghost |
+| Strategic Note | Trainer Stage and Hook Transaction Map | Date: 04 September 2026 | Time: 04:01 PM | Name: Ghost |
 
     1. Trainer owns the outer fit, validation, test, and prediction transaction; loops own iterative machine-learning execution, while connectors retain their data, checkpoint, logger, signal, and accelerator boundaries.
-    2. Public entrypoints resolve input semantics and distributed launcher dispatch, then bounded private transitions perform stage beginning, preparation, execution, restoration, and finalization without a parallel runner abstraction.
+    2. Public entrypoints resolve input semantics and distributed launcher dispatch, bounded private transitions own stage orchestration, and one private dispatcher owns hook invocation mechanics without a parallel runner or callback API.
     3. Validation and test share evaluation execution because their metric contracts align, while prediction remains separate because retained outputs and CPU materialization have a distinct lifecycle.
-    4. Teardown continues across all cleanup failures, preserves the original stage exception, and records secondary failures as causal notes; the currently attached Module is used after strategy or precision replacement.
-    5. Local, MPS, direct DDP, spawn, multi-loader, observability, callback, checkpoint, failure, and model-parallel paths verify the transaction boundaries.
+    4. Hook dispatch owns profiler regions, Module hook context, current callback groups, override discovery, and wrapped-callable identity; Profiler owns whether measurement is active for a stage.
+    5. Local, MPS, direct DDP, spawn, multi-loader, observability, callback composition, profiler rollback, checkpoint, failure, and model-parallel paths verify the transaction boundaries.
 
 | Strategic Note | Trainer Configuration Boundary | Date: 04 September 2026 | Time: 03:53 PM | Name: Ghost |
 

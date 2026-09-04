@@ -207,14 +207,14 @@
     4. ✅ `utilities/distributed.py`, its classmethod namespace, and all free aliases were deleted; no old production or ignored verification import remains.
     5. ✅ Local validation, direct two-rank Strategy reduction, standard distributed scalar reductions, TorchMetrics, graph state, callback artifacts, progress rendering, checkpoint selection, spawned metric views, and sharded model parallelism pass.
 
-| Progress Complete | Trainer and Loop Lifecycle Reconstruction | Date: 04 September 2026 | Time: 03:43 PM | Name: Ghost |
+| Progress Complete | Trainer, Loop, and Hook Lifecycle Reconstruction | Date: 04 September 2026 | Time: 04:01 PM | Name: Ghost |
 
     1. ✅ Trainer fit, validation, test, and prediction entrypoints now resolve inputs and launcher dispatch before entering bounded private stage transactions; no new class, Protocol, module, public method, export, or schema field was added.
     2. ✅ Fit preparation, optimization construction, managed-optimizer connection, checkpoint continuation, sanity validation, execution, and finalization are explicit transitions rather than one 288-line method.
     3. ✅ Validation and test reuse one typed local evaluation transaction, while prediction preserves separate retention and result-shape semantics; all three share exact environment, data, model, precision, checkpoint, and teardown preparation.
-    4. ✅ Teardown collects mode-restoration and framework, loader, user-hook, logger, progress, and profiler failures without skipping later cleanup or replacing a primary stage exception.
-    5. ✅ Trainer callback variadics and dataloader properties no longer use generic `object`, the static hook-unwrapping utility is now owner-bound, and the reconstructed stage surface contains no nested function, lambda, conditional type import, future annotation import, or source prose.
-    6. ✅ CPU, MPS, DDP, spawned exact continuation, multi-loader evaluation, checkpoint selection, early stopping, rank-zero logging, profiler reports, causal failure cleanup, and sharded model-parallel exact resume pass.
+    4. ✅ One private HookDispatcher now owns typed callback, Module, DataModule, and Strategy invocation, profiling, hook context, current callback selection, unwrapping, and override discovery; six duplicate Trainer dispatch methods were deleted.
+    5. ✅ Profiler owns active-stage state and setup-conflict detection, Trainer's shadow boolean is gone, and failed profiler setup rolls back cleanly before the same Trainer and profiler are reused.
+    6. ✅ CPU, MPS, DDP, spawned exact continuation, callback composition, multi-loader evaluation, checkpoint selection, early stopping, rank-zero logging, profiler reports and rollback, causal failure cleanup, and sharded model-parallel exact resume pass.
 
 | Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 

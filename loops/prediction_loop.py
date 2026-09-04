@@ -103,27 +103,27 @@ class PredictionLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_predict_model_eval",
             module.on_predict_model_eval
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_predict_start",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_predict_start",
             module.on_predict_start
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_predict_epoch_start",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_predict_epoch_start",
             module.on_predict_epoch_start
@@ -136,22 +136,22 @@ class PredictionLoop(Loop):
         callbacks: list[Callback],
         training_modes: dict[str, bool]
     ) -> None:
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_predict_epoch_end",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_predict_epoch_end",
             module.on_predict_epoch_end
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_predict_end",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_predict_end",
             module.on_predict_end
@@ -227,13 +227,13 @@ class PredictionLoop(Loop):
             batch_idx,
             hook_dataloader_idx
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_predict_batch_start",
             *hook_arguments,
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_predict_batch_start",
             module.on_predict_batch_start,
@@ -254,14 +254,14 @@ class PredictionLoop(Loop):
                     )
                 )
             )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_predict_batch_end",
             outputs,
             *hook_arguments,
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_predict_batch_end",
             module.on_predict_batch_end,
@@ -306,7 +306,7 @@ class PredictionLoop(Loop):
         assert model is not None
         with trainer.precision_plugin.predict_step_context():
             with module._hook_context("predict_step"):
-                return trainer._call_strategy_hook(
+                return trainer._hook_dispatcher.call_strategy(
                     "predict_step",
                     trainer.strategy.predict_step,
                     model,

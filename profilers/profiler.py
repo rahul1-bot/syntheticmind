@@ -67,6 +67,10 @@ class Profiler:
         local_rank: int | None = None,
         log_dir: str | Path | None = None
     ) -> None:
+        if self._stage is not None:
+            raise RuntimeError(
+                f"Profiler is already active for stage {self._stage!r}."
+            )
         self._stage: TrainerStage | None = stage
         self._local_rank: int | None = local_rank
         if self.dirpath is None:
@@ -78,6 +82,8 @@ class Profiler:
         self._write_stream: _WriteStream | None = None
         self._output_file: io.TextIOBase | None = None
         self._module: nn.Module | None = None
+        self._stage: TrainerStage | None = None
+        self._local_rank: int | None = None
         if output_file is not None:
             output_file.close()
 
@@ -97,6 +103,10 @@ class Profiler:
     @property
     def local_rank(self) -> int:
         return 0 if self._local_rank is None else self._local_rank
+
+    @property
+    def is_active(self) -> bool:
+        return self._stage is not None
 
     def _attach_module(self, module: nn.Module) -> None:
         self._module: nn.Module | None = module

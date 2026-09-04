@@ -32,10 +32,14 @@ class FitLoop(Loop):
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
         monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if isinstance(callback, (EarlyStopping, Checkpoint))
+            callback
+            for callback in callbacks
+            if isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         non_monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, Checkpoint))
+            callback
+            for callback in callbacks
+            if not isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         assert self.epoch_loop is not None
         max_train_batches: int | None = trainer._data_connector.total_train_batches
@@ -71,12 +75,12 @@ class FitLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_start",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_train_start",
             module.on_train_start
@@ -148,12 +152,12 @@ class FitLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_epoch_start",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_train_epoch_start",
             module.on_train_epoch_start
@@ -167,18 +171,18 @@ class FitLoop(Loop):
         monitoring_callbacks: list[Callback],
         non_monitoring_callbacks: list[Callback]
     ) -> None:
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_epoch_end",
             callback_group=non_monitoring_callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_train_epoch_end",
             module.on_train_epoch_end
         )
         self._flush_hook_metrics(module, trainer, state)
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_epoch_end",
             callback_group=monitoring_callbacks
@@ -191,12 +195,12 @@ class FitLoop(Loop):
         module: Module,
         callbacks: list[Callback]
     ) -> None:
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_end",
             callback_group=callbacks
         )
-        trainer._call_module_hook(module, "on_train_end", module.on_train_end)
+        trainer._hook_dispatcher.call_module(module, "on_train_end", module.on_train_end)
         trainer._raise_if_sigterm()
 
     def _max_epochs_reached(self, state: TrainerState) -> bool:
@@ -216,7 +220,12 @@ class FitLoop(Loop):
             )
         )
 
-    def _flush_hook_metrics(self, module: Module, trainer: syntheticmind.Trainer, state: TrainerState) -> None:
+    def _flush_hook_metrics(
+        self,
+        module: Module,
+        trainer: syntheticmind.Trainer,
+        state: TrainerState
+    ) -> None:
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return

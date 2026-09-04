@@ -8,7 +8,6 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from types import CodeType
 from typing import IO, Literal, Never, cast
 
 import torch
@@ -63,6 +62,7 @@ from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
 from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
 from syntheticmind.trainer.configuration import _TrainerConfiguration
 from syntheticmind.trainer.console import ConsoleRenderer
+from syntheticmind.trainer.hook_dispatcher import _HookDispatcher
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.storage.filesystem import (
@@ -90,8 +90,6 @@ from syntheticmind.types import (
 __all__: list[str] = ["Trainer"]
 
 type _TeardownFailure = tuple[str, BaseException]
-type _HookOwner = Module | DataModule | DataHooks | ModelHooks
-type _HookCallable = Callable[..., ModelOutput | DataLoaderSource | None]
 type _PrintValue = (
     Batch
     | ModelOutput
@@ -288,6 +286,12 @@ class Trainer:
             configuration.enable_autolog_hparams
         )
         self.profiler: Profiler = self._resolve_profiler(profiler)
+        self._hook_dispatcher: _HookDispatcher[Trainer] = _HookDispatcher(
+            self,
+            self._callback_connector,
+            self.profiler,
+            self.strategy
+        )
         self._data_connector: _DataConnector = _DataConnector(
             self.strategy,
             self.profiler,
@@ -350,7 +354,6 @@ class Trainer:
         self.scheduler: _SchedulerInstance | None = None
         self.scheduler_config: LRSchedulerConfig | None = None
         self._active_exception: BaseException | None = None
-        self._profiler_is_setup: bool = False
         self._layer_sync_model: Module | None = None
 
     def fit(
@@ -541,7 +544,7 @@ class Trainer:
         )
         if (
             self.limit_train_batches != 0
-            and self._hook_is_overridden("training_step", module, Module)
+            and self._hook_dispatcher.is_overridden("training_step", module, Module)
         ):
             self._request_dataloaders("train")
         else:
@@ -616,7 +619,7 @@ class Trainer:
                 "set automatic_optimization = False, and access optimizers through "
                 "self.optimizers()."
             )
-        optimization_configuration: OptimizerLRScheduler = self._call_module_hook(
+        optimization_configuration: OptimizerLRScheduler = self._hook_dispatcher.call_module(
             module,
             "configure_optimizers",
             module.configure_optimizers
@@ -624,7 +627,7 @@ class Trainer:
         optimizer_parser: _OptimizerConfigurationParser = (
             _OptimizerConfigurationParser(
                 module.automatic_optimization,
-                self._hook_is_overridden("lr_scheduler_step", module, Module)
+                self._hook_dispatcher.is_overridden("lr_scheduler_step", module, Module)
             )
         )
         optimizer_initialization: tuple[
@@ -736,8 +739,8 @@ class Trainer:
         resume_path: str | Path | None
     ) -> None:
         self._callback_connector.validate_state_keys()
-        self._call_callback_hooks(module, "on_fit_start")
-        self._call_module_hook(module, "on_fit_start", module.on_fit_start)
+        self._hook_dispatcher.call_callbacks(module, "on_fit_start")
+        self._hook_dispatcher.call_module(module, "on_fit_start", module.on_fit_start)
         self._autolog_hyperparameters(module, datamodule)
         if (
             self.enable_validation
@@ -751,8 +754,8 @@ class Trainer:
     def _run_fit_stage(self, module: Module) -> None:
         with torch.autograd.set_detect_anomaly(self._detect_anomaly):
             self.fit_loop.run()
-        self._call_callback_hooks(module, "on_fit_end")
-        self._call_module_hook(module, "on_fit_end", module.on_fit_end)
+        self._hook_dispatcher.call_callbacks(module, "on_fit_end")
+        self._hook_dispatcher.call_module(module, "on_fit_end", module.on_fit_end)
         self._raise_if_sigterm()
 
     def validate(
@@ -1187,7 +1190,7 @@ class Trainer:
                 module,
                 stage,
                 partial(
-                    self._call_module_hook,
+                    self._hook_dispatcher.call_module,
                     module,
                     "configure_callbacks",
                     module.configure_callbacks
@@ -1207,31 +1210,31 @@ class Trainer:
         stage: TrainerStage
     ) -> None:
         if self.is_global_zero and datamodule is not None:
-            self._call_datamodule_hook(
+            self._hook_dispatcher.call_datamodule(
                 datamodule,
                 "prepare_data",
                 datamodule.prepare_data
             )
-        if self.is_global_zero and self._hook_is_overridden(
+        if self.is_global_zero and self._hook_dispatcher.is_overridden(
             "prepare_data",
             module,
             DataHooks
         ):
-            self._call_module_hook(
+            self._hook_dispatcher.call_module(
                 module,
                 "prepare_data",
                 module.prepare_data
             )
-        self._call_strategy_hook("barrier", self.strategy.barrier)
+        self._hook_dispatcher.call_strategy("barrier", self.strategy.barrier)
         if datamodule is not None:
-            self._call_datamodule_hook(
+            self._hook_dispatcher.call_datamodule(
                 datamodule,
                 "setup",
                 datamodule.setup,
                 stage
             )
-        self._call_callback_hooks(module, "setup", stage)
-        self._call_module_hook(module, "setup", module.setup, stage)
+        self._hook_dispatcher.call_callbacks(module, "setup", stage)
+        self._hook_dispatcher.call_module(module, "setup", module.setup, stage)
 
     def _request_dataloaders(
         self,
@@ -1244,8 +1247,8 @@ class Trainer:
             stage,
             trainer_stage,
             self.current_epoch,
-            self._call_module_hook,
-            self._call_datamodule_hook
+            self._hook_dispatcher.call_module,
+            self._hook_dispatcher.call_datamodule
         )
 
     def _ensure_train_dataloader(self) -> None:
@@ -1269,13 +1272,13 @@ class Trainer:
         )
         source_is_defined: bool = source is not None
         if isinstance(source, DataModule):
-            source_is_defined: bool = self._hook_is_overridden(
+            source_is_defined: bool = self._hook_dispatcher.is_overridden(
                 "val_dataloader",
                 source,
                 DataModule
             )
         elif isinstance(source, Module):
-            source_is_defined: bool = self._hook_is_overridden(
+            source_is_defined: bool = self._hook_dispatcher.is_overridden(
                 "val_dataloader",
                 source,
                 DataHooks
@@ -1283,7 +1286,7 @@ class Trainer:
         validation_enabled: bool = (
             self.limit_val_batches != 0
             and module is not None
-            and self._hook_is_overridden("validation_step", module, Module)
+            and self._hook_dispatcher.is_overridden("validation_step", module, Module)
             and source_is_defined
         )
         if validation_enabled and self._data_connector.total_val_batches is not None:
@@ -1363,7 +1366,7 @@ class Trainer:
                 )
 
     def _setup_profiler(self, stage: TrainerStage, module: Module) -> None:
-        if self._profiler_is_setup:
+        if self.profiler.is_active:
             raise RuntimeError("The profiler is already active for another Trainer stage.")
         self.profiler._attach_module(module)
         local_rank: int | None = self.local_rank if self.world_size > 1 else None
@@ -1385,85 +1388,11 @@ class Trainer:
                     f"{type(teardown_exception).__name__}: {teardown_exception}"
                 )
             raise
-        self._profiler_is_setup: bool = True
 
     def _teardown_profiler(self) -> None:
-        if not self._profiler_is_setup:
+        if not self.profiler.is_active:
             return
-        try:
-            self.profiler.describe()
-        finally:
-            self._profiler_is_setup: bool = False
-
-    def _call_callback_hook[**Parameters, ReturnT](
-        self,
-        callback: Callback,
-        module: Module,
-        hook_name: str,
-        hook: Callable[..., ReturnT],
-        *args: Parameters.args,
-        **kwargs: Parameters.kwargs
-    ) -> ReturnT:
-        action_name: str = f"[Callback]{callback.state_key}.{hook_name}"
-        if not self._profiler_is_setup:
-            with module._hook_context(hook_name):
-                return hook(self, module, *args, **kwargs)
-        with module._hook_context(hook_name), self.profiler.profile(action_name):
-            return hook(self, module, *args, **kwargs)
-
-    def _call_callback_hooks[**Parameters](
-        self,
-        module: Module,
-        hook_name: str,
-        *args: Parameters.args,
-        callback_group: Iterable[Callback] | None = None,
-        **kwargs: Parameters.kwargs
-    ) -> None:
-        callbacks: Iterable[Callback] = (
-            self.callbacks if callback_group is None else callback_group
-        )
-        for callback in callbacks:
-            hook: Callable[..., None] = cast(
-                Callable[..., None],
-                getattr(callback, hook_name)
-            )
-            self._call_callback_hook(
-                callback,
-                module,
-                hook_name,
-                hook,
-                *args,
-                **kwargs
-            )
-
-    def _call_module_hook[**Parameters, ReturnT](
-        self,
-        module: Module,
-        hook_name: str,
-        hook: Callable[Parameters, ReturnT],
-        *args: Parameters.args,
-        **kwargs: Parameters.kwargs
-    ) -> ReturnT:
-        action_name: str = f"[Module]{type(module).__name__}.{hook_name}"
-        if not self._profiler_is_setup:
-            with module._hook_context(hook_name):
-                return hook(*args, **kwargs)
-        with self.profiler.profile(action_name), module._hook_context(hook_name):
-            return hook(*args, **kwargs)
-
-    def _call_datamodule_hook[**Parameters, ReturnT](
-        self,
-        datamodule: DataModule,
-        hook_name: str,
-        hook: Callable[Parameters, ReturnT],
-        *args: Parameters.args,
-        **kwargs: Parameters.kwargs
-    ) -> ReturnT:
-        action_name: str = f"[DataModule]{type(datamodule).__name__}.{hook_name}"
-        if not self._profiler_is_setup:
-            return hook(*args, **kwargs)
-        with self.profiler.profile(action_name):
-            return hook(*args, **kwargs)
+        self.profiler.describe()
 
     def _transfer_batch(
         self,
@@ -1473,12 +1402,12 @@ class Trainer:
         dataloader_idx: int
     ) -> Batch:
         datamodule: DataModule | None = self.datamodule
-        if datamodule is not None and self._hook_is_overridden(
+        if datamodule is not None and self._hook_dispatcher.is_overridden(
             "on_before_batch_transfer",
             datamodule,
             DataModule
         ):
-            batch: Batch = self._call_datamodule_hook(
+            batch: Batch = self._hook_dispatcher.call_datamodule(
                 datamodule,
                 "on_before_batch_transfer",
                 datamodule.on_before_batch_transfer,
@@ -1486,19 +1415,19 @@ class Trainer:
                 dataloader_idx=dataloader_idx
             )
         else:
-            batch: Batch = self._call_module_hook(
+            batch: Batch = self._hook_dispatcher.call_module(
                 module,
                 "on_before_batch_transfer",
                 module.on_before_batch_transfer,
                 batch,
                 dataloader_idx=dataloader_idx
             )
-        if datamodule is not None and self._hook_is_overridden(
+        if datamodule is not None and self._hook_dispatcher.is_overridden(
             "transfer_batch_to_device",
             datamodule,
             DataModule
         ):
-            batch: Batch = self._call_datamodule_hook(
+            batch: Batch = self._hook_dispatcher.call_datamodule(
                 datamodule,
                 "transfer_batch_to_device",
                 datamodule.transfer_batch_to_device,
@@ -1507,7 +1436,7 @@ class Trainer:
                 dataloader_idx=dataloader_idx
             )
         else:
-            batch: Batch = self._call_module_hook(
+            batch: Batch = self._hook_dispatcher.call_module(
                 module,
                 "transfer_batch_to_device",
                 module.transfer_batch_to_device,
@@ -1515,12 +1444,12 @@ class Trainer:
                 device,
                 dataloader_idx=dataloader_idx
             )
-        if datamodule is not None and self._hook_is_overridden(
+        if datamodule is not None and self._hook_dispatcher.is_overridden(
             "on_after_batch_transfer",
             datamodule,
             DataModule
         ):
-            batch: Batch = self._call_datamodule_hook(
+            batch: Batch = self._hook_dispatcher.call_datamodule(
                 datamodule,
                 "on_after_batch_transfer",
                 datamodule.on_after_batch_transfer,
@@ -1528,7 +1457,7 @@ class Trainer:
                 dataloader_idx=dataloader_idx
             )
         else:
-            batch: Batch = self._call_module_hook(
+            batch: Batch = self._hook_dispatcher.call_module(
                 module,
                 "on_after_batch_transfer",
                 module.on_after_batch_transfer,
@@ -1537,80 +1466,10 @@ class Trainer:
             )
         return batch
 
-    def _call_strategy_hook[**Parameters, ReturnT](
-        self,
-        hook_name: str,
-        hook: Callable[Parameters, ReturnT],
-        *args: Parameters.args,
-        **kwargs: Parameters.kwargs
-    ) -> ReturnT:
-        action_name: str = f"[Strategy]{type(self.strategy).__name__}.{hook_name}"
-        if not self._profiler_is_setup:
-            return hook(*args, **kwargs)
-        with self.profiler.profile(action_name):
-            return hook(*args, **kwargs)
-
-    def _hook_is_overridden(
-        self,
-        method_name: str,
-        instance: _HookOwner,
-        parent: type[_HookOwner]
-    ) -> bool:
-        instance_attribute: _HookCallable | None = cast(
-            _HookCallable | None,
-            getattr(instance, method_name, None)
-        )
-        if instance_attribute is None:
-            return False
-        parent_attribute: _HookCallable | None = cast(
-            _HookCallable | None,
-            getattr(parent, method_name, None)
-        )
-        if parent_attribute is None:
-            raise ValueError(f"{parent.__name__} does not define {method_name}().")
-        instance_callable: _HookCallable = self._unwrap_hook(instance_attribute)
-        parent_callable: _HookCallable = self._unwrap_hook(parent_attribute)
-        instance_code: CodeType | None = cast(
-            CodeType | None,
-            getattr(instance_callable, "__code__", None)
-        )
-        parent_code: CodeType | None = cast(
-            CodeType | None,
-            getattr(parent_callable, "__code__", None)
-        )
-        if instance_code is None or parent_code is None:
-            return instance_callable is not parent_callable
-        return instance_code is not parent_code
-
-    def _unwrap_hook(self, hook: _HookCallable) -> _HookCallable:
-        unwrapped_hook: _HookCallable = hook
-        while True:
-            wrapped_hook: _HookCallable | None = cast(
-                _HookCallable | None,
-                getattr(unwrapped_hook, "__wrapped__", None)
-            )
-            if wrapped_hook is not None:
-                unwrapped_hook: _HookCallable = wrapped_hook
-                continue
-            mock_wrap: _HookCallable | None = cast(
-                _HookCallable | None,
-                getattr(unwrapped_hook, "_mock_wraps", None)
-            )
-            if mock_wrap is not None:
-                unwrapped_hook: _HookCallable = mock_wrap
-                continue
-            if isinstance(unwrapped_hook, partial):
-                unwrapped_hook: _HookCallable = cast(
-                    _HookCallable,
-                    unwrapped_hook.func
-                )
-                continue
-            return unwrapped_hook
-
     def _configure_model(self, module: Module) -> None:
-        if not self._hook_is_overridden("configure_model", module, ModelHooks):
+        if not self._hook_dispatcher.is_overridden("configure_model", module, ModelHooks):
             return
-        self._call_module_hook(
+        self._hook_dispatcher.call_module(
             module,
             "configure_model",
             module.configure_model
@@ -1681,7 +1540,7 @@ class Trainer:
         self.module: Module | None = resolved_module
         self.strategy.connect(resolved_module)
         self.profiler._attach_module(resolved_module)
-        self._call_strategy_hook(
+        self._hook_dispatcher.call_strategy(
             "setup",
             self.strategy.setup,
             resolved_module,
@@ -1735,7 +1594,7 @@ class Trainer:
         return module, connected_optimizers, connected_lr_schedulers
 
     def _call_on_validation_model_zero_grad(self, module: Module) -> None:
-        self._call_module_hook(
+        self._hook_dispatcher.call_module(
             module,
             "on_validation_model_zero_grad",
             module.on_validation_model_zero_grad
@@ -1750,7 +1609,7 @@ class Trainer:
 
         try:
             self._ensure_val_dataloader()
-            self._call_callback_hooks(module, "on_sanity_check_start")
+            self._hook_dispatcher.call_callbacks(module, "on_sanity_check_start")
             self.validate_loop.run()
             if not self._validation_schedule.is_epoch_eligible(self.current_epoch):
                 self._data_connector.last_val_reload_epoch: int | None = None
@@ -1759,7 +1618,7 @@ class Trainer:
             module._reset_logging_state()
             self._logger_connector.clear_metric_views()
             self._reset_progress_bar_metrics("validating")
-            self._call_callback_hooks(module, "on_sanity_check_end")
+            self._hook_dispatcher.call_callbacks(module, "on_sanity_check_end")
         finally:
             self.sanity_checking: bool = False
             self.training: bool = True
@@ -1778,13 +1637,13 @@ class Trainer:
             if checkpoint is None
             else checkpoint
         )
-        self._call_module_hook(
+        self._hook_dispatcher.call_module(
             module,
             "on_load_checkpoint",
             module.on_load_checkpoint,
             loaded_checkpoint
         )
-        self._call_callback_hooks(module, "on_load_checkpoint", loaded_checkpoint)
+        self._hook_dispatcher.call_callbacks(module, "on_load_checkpoint", loaded_checkpoint)
         self.precision_plugin.on_load_checkpoint(loaded_checkpoint)
         self._checkpoint_connector.restore_strategy_state(
             loaded_checkpoint,
@@ -1988,8 +1847,8 @@ class Trainer:
         )
         if not weights_only:
             self.precision_plugin.on_save_checkpoint(checkpoint)
-        self._call_callback_hooks(module, "on_save_checkpoint", checkpoint)
-        self._call_module_hook(
+        self._hook_dispatcher.call_callbacks(module, "on_save_checkpoint", checkpoint)
+        self._hook_dispatcher.call_module(
             module,
             "on_save_checkpoint",
             module.on_save_checkpoint,
@@ -2027,7 +1886,7 @@ class Trainer:
     ) -> None:
         profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
             self.profiler.profile("save_checkpoint")
-            if self._profiler_is_setup
+            if self.profiler.is_active
             else nullcontext()
         )
         with profile_context:
@@ -2058,7 +1917,7 @@ class Trainer:
         self.state.interrupt()
         for index, callback in enumerate(self.callbacks):
             try:
-                self._call_callback_hook(
+                self._hook_dispatcher.call_callback(
                     callback,
                     module,
                     "on_exception",
@@ -2073,7 +1932,7 @@ class Trainer:
                 )
         if datamodule is not None:
             try:
-                self._call_datamodule_hook(
+                self._hook_dispatcher.call_datamodule(
                     datamodule,
                     "on_exception",
                     datamodule.on_exception,
@@ -2086,7 +1945,7 @@ class Trainer:
                     hook_exception
                 )
         try:
-            self._call_strategy_hook(
+            self._hook_dispatcher.call_strategy(
                 "on_exception",
                 self.strategy.on_exception,
                 exception
@@ -2191,7 +2050,7 @@ class Trainer:
         if datamodule is not None:
             self._attempt_teardown(
                 "datamodule.teardown",
-                self._call_datamodule_hook,
+                self._hook_dispatcher.call_datamodule,
                 failures,
                 datamodule,
                 "teardown",
@@ -2297,7 +2156,7 @@ class Trainer:
         module: Module,
         stage: TrainerStage
     ) -> None:
-        self._call_callback_hook(
+        self._hook_dispatcher.call_callback(
             callback,
             module,
             "teardown",
@@ -2306,7 +2165,7 @@ class Trainer:
         )
 
     def _call_module_teardown(self, module: Module, stage: TrainerStage) -> None:
-        self._call_module_hook(
+        self._hook_dispatcher.call_module(
             module,
             "teardown",
             module.teardown,

@@ -19,7 +19,10 @@ from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
+from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
+    MetricAccumulator,
+    extract_batch_size
+)
 from syntheticmind.types import (
     Batch,
     BackwardInputs,
@@ -404,14 +407,14 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         batch_idx: int
     ) -> bool:
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_batch_start",
             batch,
             batch_idx,
             callback_group=callbacks
         )
-        hook_response: int | None = trainer._call_module_hook(
+        hook_response: int | None = trainer._hook_dispatcher.call_module(
             module,
             "on_train_batch_start",
             module.on_train_batch_start,
@@ -502,7 +505,7 @@ class TrainingEpochLoop(Loop):
         batch_idx: int
     ) -> None:
         trainer._preview_logged_metrics(module, "training")
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_train_batch_end",
             outputs,
@@ -510,7 +513,7 @@ class TrainingEpochLoop(Loop):
             batch_idx,
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_train_batch_end",
             module.on_train_batch_end,
@@ -561,7 +564,7 @@ class TrainingEpochLoop(Loop):
     ) -> TrainingStepOutput:
         with self.trainer.precision_plugin.train_step_context():
             with module._hook_context("training_step"):
-                outputs: TrainingStepOutput = self.trainer._call_strategy_hook(
+                outputs: TrainingStepOutput = self.trainer._hook_dispatcher.call_strategy(
                     "training_step",
                     strategy.training_step,
                     model,
@@ -650,7 +653,7 @@ class TrainingEpochLoop(Loop):
         inputs: BackwardInputs = None
     ) -> None:
         del module
-        trainer._call_strategy_hook(
+        trainer._hook_dispatcher.call_strategy(
             "backward",
             trainer.strategy.backward,
             loss,
@@ -719,7 +722,7 @@ class TrainingEpochLoop(Loop):
             if wrapped_optimizer.optimizer is optimizer
         )
         with synthetic_optimizer.automatic_step_context():
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "optimizer_step",
                 module.optimizer_step,
@@ -798,7 +801,7 @@ class TrainingEpochLoop(Loop):
                         raise MisconfigurationError(message)
                     warnings.warn(message, RuntimeWarning, stacklevel=3)
                     continue
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "lr_scheduler_step",
                 module.lr_scheduler_step,
@@ -816,7 +819,7 @@ class TrainingEpochLoop(Loop):
     ) -> OptimizerStepOutput:
         step_kwargs: OptimizerStepOptions = {} if kwargs is None else kwargs
         resolved_closure: OptimizerClosure = closure or self._empty_closure
-        return trainer._call_strategy_hook(
+        return trainer._hook_dispatcher.call_strategy(
             "optimizer_step",
             trainer.strategy.optimizer_step,
             optimizer,
@@ -836,19 +839,19 @@ class TrainingEpochLoop(Loop):
         batch_idx: int
     ) -> None:
         callbacks: list[Callback] = trainer.callbacks
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_before_zero_grad",
             optimizer,
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_before_zero_grad",
             module.on_before_zero_grad,
             optimizer
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "optimizer_zero_grad",
             module.optimizer_zero_grad,

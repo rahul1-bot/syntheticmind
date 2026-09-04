@@ -16,7 +16,10 @@ from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
+from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
+    MetricAccumulator,
+    extract_batch_size
+)
 from syntheticmind.types import Batch, RunningStage, StepArgument, StepOutput
 
 __all__: list[str] = ["EvaluationLoop"]
@@ -68,10 +71,14 @@ class EvaluationLoop(Loop):
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
         monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if isinstance(callback, (EarlyStopping, Checkpoint))
+            callback
+            for callback in callbacks
+            if isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         non_monitoring_callbacks: list[Callback] = [
-            callback for callback in callbacks if not isinstance(callback, (EarlyStopping, Checkpoint))
+            callback
+            for callback in callbacks
+            if not isinstance(callback, (EarlyStopping, Checkpoint))
         ]
         evaluation_setup: _EvaluationSetup = self._prepare_evaluation(
             trainer,
@@ -211,38 +218,38 @@ class EvaluationLoop(Loop):
         trainer._logger_connector.callback_metrics.update(
             self._callback_epoch_metrics
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_validation_epoch_end",
             callback_group=non_monitoring_callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_validation_epoch_end",
             module.on_validation_epoch_end
         )
         self._merge_epoch_end_hook_metrics(module, state, running_stage)
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_validation_epoch_end",
             callback_group=monitoring_callbacks
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_validation_end",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_validation_end",
             module.on_validation_end
         )
-        if trainer._hook_is_overridden(
+        if trainer._hook_dispatcher.is_overridden(
             "on_validation_model_train",
             module,
             Module
         ):
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "on_validation_model_train",
                 module.on_validation_model_train
@@ -262,33 +269,33 @@ class EvaluationLoop(Loop):
         trainer._logger_connector.callback_metrics.update(
             self._callback_epoch_metrics
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_test_epoch_end",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_test_epoch_end",
             module.on_test_epoch_end
         )
         self._merge_epoch_end_hook_metrics(module, state, running_stage)
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_test_end",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_test_end",
             module.on_test_end
         )
-        if trainer._hook_is_overridden(
+        if trainer._hook_dispatcher.is_overridden(
             "on_test_model_train",
             module,
             Module
         ):
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "on_test_model_train",
                 module.on_test_model_train
@@ -371,13 +378,13 @@ class EvaluationLoop(Loop):
         module: Module
     ) -> None:
         if self.stage == "validate":
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "on_validation_model_eval",
                 module.on_validation_model_eval
             )
             return
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_test_model_eval",
             module.on_test_model_eval
@@ -390,43 +397,43 @@ class EvaluationLoop(Loop):
         callbacks: list[Callback]
     ) -> None:
         if self.stage == "validate":
-            trainer._call_callback_hooks(
+            trainer._hook_dispatcher.call_callbacks(
                 module,
                 "on_validation_start",
                 callback_group=callbacks
             )
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "on_validation_start",
                 module.on_validation_start
             )
-            trainer._call_callback_hooks(
+            trainer._hook_dispatcher.call_callbacks(
                 module,
                 "on_validation_epoch_start",
                 callback_group=callbacks
             )
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "on_validation_epoch_start",
                 module.on_validation_epoch_start
             )
             return
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_test_start",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_test_start",
             module.on_test_start
         )
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_test_epoch_start",
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_test_epoch_start",
             module.on_test_epoch_start
@@ -576,26 +583,26 @@ class EvaluationLoop(Loop):
         hook_arguments: _BatchHookArguments
     ) -> None:
         if self.stage == "validate":
-            trainer._call_callback_hooks(
+            trainer._hook_dispatcher.call_callbacks(
                 module,
                 "on_validation_batch_start",
                 *hook_arguments,
                 callback_group=callbacks
             )
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "on_validation_batch_start",
                 module.on_validation_batch_start,
                 *hook_arguments
             )
             return
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_test_batch_start",
             *hook_arguments,
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_test_batch_start",
             module.on_test_batch_start,
@@ -618,14 +625,14 @@ class EvaluationLoop(Loop):
         with step_context:
             if self.stage == "validate":
                 with module._hook_context("validation_step"):
-                    return trainer._call_strategy_hook(
+                    return trainer._hook_dispatcher.call_strategy(
                         "validation_step",
                         trainer.strategy.validation_step,
                         model,
                         *step_arguments
                     )
             with module._hook_context("test_step"):
-                return trainer._call_strategy_hook(
+                return trainer._hook_dispatcher.call_strategy(
                     "test_step",
                     trainer.strategy.test_step,
                     model,
@@ -641,14 +648,14 @@ class EvaluationLoop(Loop):
         hook_arguments: _BatchHookArguments
     ) -> None:
         if self.stage == "validate":
-            trainer._call_callback_hooks(
+            trainer._hook_dispatcher.call_callbacks(
                 module,
                 "on_validation_batch_end",
                 outputs,
                 *hook_arguments,
                 callback_group=callbacks
             )
-            trainer._call_module_hook(
+            trainer._hook_dispatcher.call_module(
                 module,
                 "on_validation_batch_end",
                 module.on_validation_batch_end,
@@ -656,14 +663,14 @@ class EvaluationLoop(Loop):
                 *hook_arguments
             )
             return
-        trainer._call_callback_hooks(
+        trainer._hook_dispatcher.call_callbacks(
             module,
             "on_test_batch_end",
             outputs,
             *hook_arguments,
             callback_group=callbacks
         )
-        trainer._call_module_hook(
+        trainer._hook_dispatcher.call_module(
             module,
             "on_test_batch_end",
             module.on_test_batch_end,

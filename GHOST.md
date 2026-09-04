@@ -197,15 +197,15 @@
     4. The former `DistributedUtils` namespace and its seven duplicate free-function entrypoints were deleted without a replacement utility module. Process-group teardown remains exclusively owned by `ParallelStrategy`.
     5. Local reduction validation, two-rank sum and mean, standard distributed mean, sum, minimum and maximum metrics, TorchMetrics, tensor graph state, progress rendering, checkpoint selection, callback artifacts, spawned metric views, and sharded model parallelism pass through Strategy ownership.
 
-| Architecture Decision | Trainer Stage Transaction and Loop Ownership | Date: 04 September 2026 | Time: 03:43 PM | Name: Ghost |
+| Architecture Decision | Trainer Stage, Loop, and Hook Ownership | Date: 04 September 2026 | Time: 04:01 PM | Name: Ghost |
 
     1. Trainer remains the canonical owner of fit, validation, test, and prediction orchestration because it alone composes strategy, connectors, loops, hooks, checkpoint restoration, and teardown; the public entrypoints now delegate to bounded private transitions instead of containing monolithic workflows.
     2. Validation and test continue through one EvaluationLoop because their no-gradient execution, step-output, and metric-reduction contracts align, while prediction retains its separate output-retention and CPU-materialization lifecycle.
     3. Stage beginning now owns state reset, metric reset, data attachment, and source attachment; stage preparation owns environment, profiler, data setup, model setup, precision, and checkpoint restoration; loops own only iterative machine-learning execution.
     4. Fit optimization configuration, managed-optimizer connection, manual-optimization validation, primary optimizer aliases, checkpoint continuation, sanity validation, and fit hooks are explicit private transitions on Trainer without a new runner, manager, Protocol, module, or public API.
-    5. Stage teardown now treats model-mode restoration and every framework, loader, data-module, callback, module, logger, progress, and profiler cleanup as one failure-collecting transaction; a primary stage exception remains authoritative and receives causal notes from secondary cleanup failures.
-    6. Exact recursive device movement remains on DataHooks, Trainer retains inherited-hook discovery and shared DataModule-over-Module transfer dispatch, and callback invocation retains typed variadic forwarding without generic `object` annotations or a callable wrapper class.
-    7. CPU, MPS, true two-rank DDP, spawned continuation, multi-loader evaluation, checkpoint selection, early stopping, logger rank ownership, profiler reports, failure composition, and full and sharded model-parallel resume pass; the independently reproduced macOS multi-Trainer spawn shutdown defect remains an environment boundary rather than a stage-semantic failure.
+    5. The private HookDispatcher now owns callback, Module, DataModule, and Strategy invocation mechanics, module hook context, profiler regions, callback-group lookup, wrapper unwrapping, and override discovery; its generic Trainer host avoids a circular import, conditional type import, quoted annotation, or synthetic host Protocol.
+    6. Profiler owns active-stage truth directly, replacing Trainer's shadow profiler boolean, while stage teardown still treats model-mode restoration and every framework, loader, user-hook, logger, progress, and profiler cleanup as one failure-collecting transaction.
+    7. CPU, MPS, true two-rank DDP, spawned continuation, callback configuration, multi-loader evaluation, checkpoint selection, early stopping, logger rank ownership, profiler reports and rollback, failure composition, and sharded model-parallel resume pass; the macOS multi-Trainer spawn shutdown defect remains an environment boundary.
 
 | Architecture Decision | Model Summary Capability Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 

@@ -67,12 +67,12 @@ class Precision(CheckpointHooks):
         return data
 
     def pre_backward(self, tensor: torch.Tensor, module: Module) -> torch.Tensor:
-        module.trainer._call_callback_hooks(
+        module.trainer._hook_dispatcher.call_callbacks(
             module,
             "on_before_backward",
             tensor
         )
-        module.trainer._call_module_hook(
+        module.trainer._hook_dispatcher.call_module(
             module,
             "on_before_backward",
             module.on_before_backward,
@@ -91,7 +91,7 @@ class Precision(CheckpointHooks):
         inputs: BackwardInputs = None
     ) -> None:
         del optimizer
-        model.trainer._call_module_hook(
+        model.trainer._hook_dispatcher.call_module(
             model,
             "backward",
             model.backward,
@@ -104,8 +104,8 @@ class Precision(CheckpointHooks):
 
     def post_backward(self, tensor: torch.Tensor, module: Module) -> torch.Tensor:
         detached_tensor: torch.Tensor = tensor.detach()
-        module.trainer._call_callback_hooks(module, "on_after_backward")
-        module.trainer._call_module_hook(
+        module.trainer._hook_dispatcher.call_callbacks(module, "on_after_backward")
+        module.trainer._hook_dispatcher.call_module(
             module,
             "on_after_backward",
             module.on_after_backward
@@ -226,7 +226,7 @@ class Precision(CheckpointHooks):
     ) -> None:
         if not model.automatic_optimization:
             return
-        model.trainer._call_module_hook(
+        model.trainer._hook_dispatcher.call_module(
             model,
             "configure_gradient_clipping",
             model.configure_gradient_clipping,
@@ -240,12 +240,12 @@ class Precision(CheckpointHooks):
         model: Module,
         optimizer: torch.optim.Optimizer
     ) -> None:
-        model.trainer._call_callback_hooks(
+        model.trainer._hook_dispatcher.call_callbacks(
             model,
             "on_before_optimizer_step",
             optimizer
         )
-        model.trainer._call_module_hook(
+        model.trainer._hook_dispatcher.call_module(
             model,
             "on_before_optimizer_step",
             model.on_before_optimizer_step,

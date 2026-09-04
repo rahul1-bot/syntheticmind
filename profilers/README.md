@@ -1,6 +1,6 @@
 # syntheticmind.profilers: Runtime Measurement
 
-Profilers observe named Trainer, loop, hook, data, optimization, and persistence actions without owning those operations. `Profiler` owns shared stage setup, scoped action lifetime, report output, and deterministic teardown. Each concrete profiler owns one measurement technique.
+Profilers observe named Trainer, loop, hook, data, optimization, and persistence actions without owning those operations. `Profiler` owns active-stage state, shared setup, scoped action lifetime, report output, and deterministic teardown. Each concrete profiler owns one measurement technique.
 
 | Module | Contents |
 |---|---|

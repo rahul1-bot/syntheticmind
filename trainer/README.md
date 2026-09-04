@@ -4,8 +4,9 @@
 
 | Capability | Ownership |
 |---|---|
-| `trainer.py` | Public stage entrypoints, top-level lifecycle sequencing, and deterministic hook dispatch. |
+| `trainer.py` | Public stage entrypoints and top-level lifecycle sequencing across connectors and loops. |
 | `configuration.py` | Private validated run policy, scalar invariants, default resolution, and fast-development, overfit, and barebones interactions. |
+| `hook_dispatcher.py` | Private callback, module, data-module, and Strategy hook invocation, profiling, context, and override discovery. |
 | `states.py` | Trainer function, stage, status, progress, interruption, and stop state. |
 | `seed.py` | Python, NumPy, PyTorch, accelerator, and dataloader-worker random-state initialization. |
 | `console.py` | Rank-safe lifecycle and metric rendering for the Trainer and progress callbacks. |

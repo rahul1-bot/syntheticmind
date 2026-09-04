@@ -218,13 +218,13 @@
     4. Rank-zero presentation and persistence gates should read the Trainer's selected Strategy, while collective participation must remain symmetric across ranks before any rank-specific return.
     5. A utility namespace that duplicates Strategy ranks and collectives creates two authorities and free-function aliases; deletion is safer than relocation once every real consumer already carries Trainer or Strategy.
 
-| Memory | Hook Knowledge and Stage Transactions | Date: 04 September 2026 | Time: 03:43 PM | Name: Ghost |
+| Memory | Hook Dispatch and Stage Transactions | Date: 04 September 2026 | Time: 04:01 PM | Name: Ghost |
 
-    1. Recursive model mode and step-signature knowledge are live Module concerns, while Trainer owns cross-component hook dispatch and the outer transaction that connects strategy, data, model, precision, checkpoint, loop, and teardown phases.
+    1. Recursive model mode and step-signature knowledge are live Module concerns, Trainer owns the outer transaction, and one HookDispatcher owns the mechanics of invoking and profiling callback, Module, DataModule, and Strategy hooks.
     2. A loop owns iterative lifecycle order rather than environment construction or resource cleanup; validation and test share EvaluationLoop only because their inputs, no-gradient steps, metric reduction, and result contracts align.
     3. Public stage methods should resolve user inputs and launcher dispatch, then enter one local implementation whose private transitions name preparation, optimization, restoration, execution, and finalization without inventing a second stage authority.
     4. Failure cleanup is part of stage semantics: mode restoration and every teardown action must continue after a secondary failure, while the original execution exception remains primary and accumulates causal notes.
-    5. A different Module can become active during precision or strategy setup, so exception notification and teardown must resolve the currently attached module rather than blindly retaining the pre-setup reference.
+    5. Dispatch can store its Trainer host through a generic class parameter and depend directly on existing callback and profiler owners; this prevents a circular Trainer import without inventing a Protocol, quoted annotation, conditional import, or forwarding method family.
 
 | Memory | Model Summary Is Inspection Plus Presentation | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 
