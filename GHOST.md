@@ -134,3 +134,12 @@
     4. The default `Module.predict_step` now invokes the inherited PyTorch module call path, preserving registered forward hooks and compiled-call machinery instead of calling `forward` directly.
     5. Executable evidence covers two-rank CPU tensor-parallel training and resume for both sharded and full checkpoints, rejection of optimizer-incomplete resumable state before model mutation, meta-parameter materialization, ordinary checkpoint loading, callback composition, DDP multiple-loader execution, distributed logging, and local or MPS gathering.
     6. Sharded checkpoint replacement still removes the prior directory before the next distributed generation commits and therefore remains outside the accepted durability contract; atomic generation publication is the next bounded checkpoint task.
+
+| Architecture Decision | Atomic Sharded Checkpoint Generations | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
+
+    1. Sharded checkpoints now store immutable distributed generations beneath one checkpoint directory and publish visibility through a strict versioned `active_generation` record rather than deleting the readable checkpoint before writing its replacement.
+    2. The pointer records the active and immediately previous published UUIDv7 generation identifiers; readers that resolved the former active generation remain valid across one publication, while failed and unpublished generations are removed after the next successful commit.
+    3. Local pointer replacement uses a same-directory temporary file, file synchronization, atomic replacement, and directory synchronization; non-local fsspec publication runs within the filesystem transaction boundary.
+    4. The storage owner rejects incomplete generations, invalid or future pointer schemas, optimizer-incomplete resume state, and destructive full-to-sharded or sharded-to-full path collisions before replacing the existing artifact.
+    5. Model-parallel checkpoint internals now occupy the semantic `strategies/model_parallel_checkpointing/` subpackage, preserving the established `ModelParallelStrategy` import and class identity while reducing the top-level strategy package from the topology-review threshold to five direct modules.
+    6. Full and sharded uninterrupted-versus-resumed runs produce bit-identical three-step model state, and distributed failure injection confirms that shard, metadata, and pointer failures preserve the previously published generation on both ranks.

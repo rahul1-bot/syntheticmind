@@ -93,3 +93,12 @@
     4. The model call contract was corrected so default prediction passes through inherited `nn.Module.__call__` behavior and registered forward hooks.
     5. The next checkpoint slice must provide atomic sharded generation publication and failure recovery before model-parallel checkpoint durability can be marked complete.
     6. Subsequent work remains sequential: finish checkpoint durability, repair strategy ownership and dependency direction, then recompute missing core Trainer capability against pinned and current Lightning evidence.
+
+| Strategic Note | Model-Parallel Checkpoint Durability | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
+
+    1. Sharded checkpoint overwrite is now generation-based, so new shards and Trainer metadata remain invisible until one versioned pointer is atomically published.
+    2. The active pointer retains the exact preceding published generation instead of guessing from directory modification times, preventing failed or orphaned writes from displacing the recovery generation.
+    3. Legacy flat sharded directories remain readable and migrate on their next successful save without deleting the legacy generation before publication.
+    4. Exact model-state comparison establishes trajectory equivalence for full and sharded resume, while injected distributed shard, metadata, and publication failures establish preservation of the active artifact.
+    5. Checkpoint format collisions now fail visibly rather than converting a file into a directory or a directory into a file through destructive replacement.
+    6. The next architectural target is the Strategy hierarchy and its dependency direction, especially the incorrect inheritance of model parallelism from DDP and the duplicated distributed-step contracts.

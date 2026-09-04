@@ -167,3 +167,12 @@
     4. A weights-only model artifact is not resumable training state; optimizer-count validation must occur before live model mutation so a rejected resume leaves the target model unchanged.
     5. Calling `forward` directly from a default step bypasses PyTorch module hooks and compiled-call machinery even when the returned tensor is numerically correct; framework-owned forward computation must enter through the module instance.
     6. Distributed checkpoint shards completing successfully does not prove atomic replacement. Publication requires an explicit generation-commit protocol so readers observe the previous complete generation or the next complete generation, never a deleted or partial path.
+
+| Memory | Atomic Generation Publication | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
+
+    1. A distributed checkpoint directory cannot be atomically overwritten portably because replacing a non-empty directory is not a cross-platform filesystem contract; immutable generation directories plus an atomic pointer provide the required commit point.
+    2. The pointer must identify both the active and previous published generations. Selecting the newest inactive directory is unsafe because a complete but unpublished failed generation can be newer than the last valid recovery generation.
+    3. Generation metadata and all distributed shards must exist before pointer publication; incomplete data remains unreachable and therefore cannot masquerade as a checkpoint.
+    4. The pointer is a durable schema rather than an implementation string, so it carries an explicit schema version, rejects extra fields and unknown versions, and constrains generation identifiers to canonical UUIDv7 values.
+    5. Exact resumed progress is insufficient evidence for checkpoint correctness. An uninterrupted trajectory and a resumed trajectory must produce exactly matching model state under identical initialization, data ordering, and optimizer steps.
+    6. Cross-format overwrite should fail rather than destroy an existing checkpoint because a portable atomic replacement cannot switch safely between a regular file and a non-empty directory.

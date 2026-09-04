@@ -16,7 +16,9 @@ from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.plugins.io import CheckpointIO, CheckpointPath
 from syntheticmind.strategies.ddp import DDPStrategy
-from syntheticmind.strategies.model_parallel_checkpoint import _ModelParallelCheckpointIO
+from syntheticmind.strategies.model_parallel_checkpointing.checkpoint_io import (
+    _ModelParallelCheckpointIO
+)
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.filesystem import normalize_path
 from syntheticmind.utilities.model_helpers import is_overridden
@@ -248,7 +250,8 @@ class ModelParallelStrategy(DDPStrategy):
             checkpoint,
             path,
             self.global_rank,
-            self.barrier
+            self.barrier,
+            self.broadcast
         )
 
     @override

@@ -91,3 +91,20 @@
     2. The next bounded implementation must stage a complete generation, publish it through one atomic commit point, retain the previous generation until publication succeeds, reject incomplete generations, and clean failed staging data without corrupting the readable checkpoint.
     3. Verification must cover first publication, overwrite, concurrent-reader visibility at the commit boundary, injected shard or metadata failure, recovery of the previous generation, full-checkpoint compatibility, and two-rank resume.
     4. Model-parallel strategy inheritance, broader dependency direction, and remaining Trainer capability parity remain queued after the durability contract is accepted.
+
+| Progress Complete | Atomic Sharded Checkpoint Publication | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
+
+    1. ✅ Sharded checkpoint writes use immutable UUIDv7 generations and a strict versioned pointer as the only publication boundary.
+    2. ✅ The active and previous published generations remain readable, incomplete or unpublished generations never become active, and a successful recovery write prunes failed generation debris.
+    3. ✅ Local publication uses atomic pointer replacement with file and directory synchronization, while an in-memory fsspec backend verifies the transaction-scoped remote path.
+    4. ✅ Legacy flat sharded checkpoints resume and migrate, full checkpoints retain their atomic file path, and cross-format collisions preserve the existing artifact by failing visibly.
+    5. ✅ Full and sharded two-rank baseline, interrupted, and resumed runs reach the same global step and produce bit-identical final model state.
+    6. ✅ Two-rank injected distributed shard, Trainer-metadata, and pointer-publication failures preserve the active generation and causal error on the failing rank.
+    7. ✅ The checkpoint-generation schema rejects unknown versions, malformed UUIDs, and extra fields; all new classes and modules remain within hard structural budgets with no module-level functions, terminal trailing commas, new comments, or static-analysis execution.
+
+| Progress Active | Strategy Ownership and Distributed Execution | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
+
+    1. `ModelParallelStrategy` currently inherits `DDPStrategy` even though tensor or fully sharded model parallelism does not satisfy the DDP wrapping contract; shared process-launch and collective behavior requires an honest parallel-strategy owner.
+    2. DDP duplicates forward-redirection logic and bypasses the wrapper during validation, testing, and prediction, while boolean decision reduction exposes logical-OR semantics where the standard contract distinguishes all-rank and any-rank consensus.
+    3. The next bounded phase must establish the shared parallel strategy boundary, preserve the public DDP and model-parallel classes, route every stage through the correct wrapper call path, and retain launcher, collective, checkpoint, precision, and failure behavior.
+    4. Verification must include two-rank automatic and manual optimization, validation, test, prediction, buffer and forward-hook participation, all-rank and any-rank decisions, signal propagation, full and sharded model-parallel resume, and existing launcher modes.

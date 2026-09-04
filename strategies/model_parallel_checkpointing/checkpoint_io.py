@@ -3,14 +3,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 import torch
-import torch.distributed.checkpoint as distributed_checkpoint
 from torch import nn
-from torch.distributed.checkpoint import (
-    FileSystemReader,
-    FileSystemWriter,
-    StorageReader,
-    StorageWriter
-)
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
     get_model_state_dict,
@@ -19,14 +12,12 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict
 )
 
+from syntheticmind.strategies.model_parallel_checkpointing.generation import CheckpointBroadcast
+from syntheticmind.strategies.model_parallel_checkpointing.sharded_store import _ShardedCheckpointStore
 from syntheticmind.utilities.checkpoint import load_checkpoint, save_checkpoint
 from syntheticmind.utilities.filesystem import (
     is_directory,
     is_file,
-    is_local_path,
-    join_path,
-    make_directory,
-    normalize_path,
     remove_path
 )
 from syntheticmind.utilities.types import CheckpointDict
@@ -39,21 +30,18 @@ type ModelParallelCheckpointFormat = Literal["full", "sharded"]
 class _ModelParallelCheckpointIO:
     def __init__(self, checkpoint_format: ModelParallelCheckpointFormat) -> None:
         self._checkpoint_format: ModelParallelCheckpointFormat = checkpoint_format
-        self._metadata_filename: str = "meta.pt"
+        self._sharded_store: _ShardedCheckpointStore = _ShardedCheckpointStore()
 
     def is_checkpoint(self, path: str | Path) -> bool:
-        return is_file(path) or self._is_sharded_checkpoint(path)
+        return is_file(path) or self._sharded_store.is_checkpoint(path)
 
     def load_metadata(
         self,
         path: str | Path,
         weights_only: bool | None
     ) -> CheckpointDict:
-        if self._is_sharded_checkpoint(path):
-            return load_checkpoint(
-                join_path(path, self._metadata_filename),
-                weights_only=weights_only
-            )
+        if self._sharded_store.is_checkpoint(path):
+            return self._sharded_store.load_metadata(path, weights_only)
         if is_file(path):
             return load_checkpoint(path, weights_only=weights_only)
         raise ValueError(
@@ -65,12 +53,19 @@ class _ModelParallelCheckpointIO:
         checkpoint: CheckpointDict,
         path: str | Path,
         global_rank: int,
-        barrier: Callable[[], None]
+        barrier: Callable[[], None],
+        broadcast: CheckpointBroadcast
     ) -> None:
         if self._checkpoint_format == "sharded":
-            self._save_sharded(checkpoint, path, global_rank, barrier)
+            self._save_sharded(
+                checkpoint,
+                path,
+                global_rank,
+                barrier,
+                broadcast
+            )
             return
-        self._save_full(checkpoint, path, global_rank, barrier)
+        self._save_full(checkpoint, path, global_rank)
 
     def load(
         self,
@@ -81,7 +76,7 @@ class _ModelParallelCheckpointIO:
         weights_only: bool | None,
         preloaded_checkpoint: CheckpointDict | None = None
     ) -> CheckpointDict:
-        if self._is_sharded_checkpoint(path):
+        if self._sharded_store.is_checkpoint(path):
             return self._load_sharded(
                 path,
                 model,
@@ -132,37 +127,34 @@ class _ModelParallelCheckpointIO:
         checkpoint: CheckpointDict,
         path: str | Path,
         global_rank: int,
-        barrier: Callable[[], None]
+        barrier: Callable[[], None],
+        broadcast: CheckpointBroadcast
     ) -> None:
-        if global_rank == 0:
-            remove_path(path, recursive=True)
-            make_directory(path)
-        barrier()
         distributed_state: dict[str, object]
         metadata: dict[str, object]
         distributed_state, metadata = self._split_checkpoint(checkpoint)
-        writer: StorageWriter = self._storage_writer(path)
-        distributed_checkpoint.save(distributed_state, storage_writer=writer)
-        if global_rank == 0:
-            save_checkpoint(
-                cast(CheckpointDict, metadata),
-                join_path(path, self._metadata_filename)
-            )
-        barrier()
+        self._sharded_store.save(
+            distributed_state,
+            cast(CheckpointDict, metadata),
+            path,
+            global_rank,
+            barrier,
+            broadcast
+        )
 
     def _save_full(
         self,
         checkpoint: CheckpointDict,
         path: str | Path,
-        global_rank: int,
-        barrier: Callable[[], None]
+        global_rank: int
     ) -> None:
-        if is_directory(path) and not self._is_sharded_checkpoint(path):
+        if is_directory(path):
+            if self._sharded_store.is_checkpoint(path):
+                raise FileExistsError(
+                    "A sharded checkpoint already owns this path. Save the full "
+                    f"checkpoint to a different path: {path}"
+                )
             raise IsADirectoryError(f"The checkpoint path exists and is a directory: {path}")
-        if self._is_sharded_checkpoint(path):
-            if global_rank == 0:
-                remove_path(path, recursive=True)
-            barrier()
         if global_rank == 0:
             save_checkpoint(checkpoint, path)
 
@@ -177,8 +169,7 @@ class _ModelParallelCheckpointIO:
         state: dict[str, object] = {"state_dict": get_model_state_dict(model)}
         for index, optimizer in enumerate(optimizers):
             state[f"optimizer_{index}"] = get_optimizer_state_dict(model, optimizer)
-        reader: StorageReader = self._storage_reader(path)
-        distributed_checkpoint.load(state, storage_reader=reader)
+        self._sharded_store.load_state(state, path)
         options: StateDictOptions = StateDictOptions(strict=strict)
         set_model_state_dict(
             model,
@@ -288,20 +279,3 @@ class _ModelParallelCheckpointIO:
             full_state_dict=self._checkpoint_format == "full",
             cpu_offload=True
         )
-
-    def _is_sharded_checkpoint(self, path: str | Path) -> bool:
-        return is_directory(path) and is_file(join_path(path, self._metadata_filename))
-
-    def _storage_writer(self, path: str | Path) -> StorageWriter:
-        if is_local_path(path):
-            return FileSystemWriter(normalize_path(path))
-        from torch.distributed.checkpoint._fsspec_filesystem import FsspecWriter
-
-        return FsspecWriter(path)
-
-    def _storage_reader(self, path: str | Path) -> StorageReader:
-        if is_local_path(path):
-            return FileSystemReader(normalize_path(path))
-        from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader
-
-        return FsspecReader(path)
