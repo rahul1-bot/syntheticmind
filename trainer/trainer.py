@@ -16,9 +16,8 @@ from loguru import logger as log
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.accelerators.cpu import CPUAccelerator
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.callbacks.checkpoint import Checkpoint
+from syntheticmind.callbacks.checkpointing import Checkpoint, ModelCheckpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
-from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import DataHooks, ModelHooks

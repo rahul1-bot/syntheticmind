@@ -159,14 +159,15 @@
     4. Logger selection, default version discovery, and hyperparameter emission share destination identity and therefore belong to the connector rather than a free configuration module.
     5. Multiprocessing launch must transfer all three metric views and the last displayed stage as one observation snapshot; transferring only public logged metrics loses callback and progress semantics.
 
-| Memory | Checkpoint Trajectory Ownership | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
+| Memory | Checkpoint Trajectory and Policy Ownership | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
 
     1. A resumable checkpoint is a trajectory aggregate, not a model-weight file: optimizer, scheduler, callbacks, DataModule, precision, loop progress, loader cursor, random streams, epoch, and global step must share one coordinator.
     2. Strategy owns the representation of model and optimizer state because sharding depends on execution topology; the Trainer connector owns when that representation joins the remaining trajectory and in which order it restores.
     3. `CheckpointIO` owns transport and atomic persistence but must not interpret training lifecycle state. `ModelCheckpoint` owns cadence and retention but must not construct a competing payload.
-    4. A stateless class named `CheckpointState` obscures behavior and lifecycle. Path preload caches, user-managed selection, continuation coordinates, and schema validation prove that checkpoint coordination is a live connector responsibility.
-    5. Private checkpoints require one explicit schema version and one canonical key per semantic field. Emitting singular and plural aliases increases ambiguity and restoration branches without serving current SyntheticMind consumers.
-    6. Full, sharded, asynchronous, weights-only, mid-epoch, and failure-atomic paths must be verified separately because success in one persistence representation does not prove another.
+    4. Checkpoint callback state must mutate before payload assembly and roll back when transport fails; mutating after persistence makes every saved callback snapshot describe the preceding artifact.
+    5. A last artifact is current only when its saved optimizer-step coordinate equals the Trainer's final global step; path existence alone cannot prove final-state durability.
+    6. Deferred-validation triggers must clear before serialization, and a rejected top-k candidate must not make link mode point `last` at an older best artifact.
+    7. Full, sharded, remote, asynchronous, weights-only, mid-epoch, linked, distributed, and failure-atomic paths require separate evidence because success in one representation proves nothing about another.
 
 | Memory | Optimizer Versus Optimization Semantics | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
 

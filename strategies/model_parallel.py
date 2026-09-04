@@ -159,6 +159,11 @@ class ModelParallelStrategy(ParallelStrategy):
         )
 
     @property
+    @override
+    def checkpoint_requires_all_ranks(self) -> bool:
+        return True
+
+    @property
     def device_mesh(self) -> DeviceMesh:
         if self._device_mesh is None:
             raise RuntimeError("The device mesh is unavailable before process setup.")

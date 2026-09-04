@@ -205,3 +205,10 @@
     1. Timer separates continuous resumable budget time from active training progress time and latest stage durations.
     2. Rank-zero broadcast controls distributed stopping, and depleted restored state stops before new optimizer work.
     3. Validation pauses progress timing without hiding its wall-clock cost from the run budget.
+
+| Strategic Note | Model Checkpoint Policy Boundary | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
+
+    1. ModelCheckpoint translates lifecycle events into schedule, ranking, retention, and last-artifact decisions without duplicating Trainer checkpoint assembly or storage transport.
+    2. Persisted callback state now describes the save being written rather than the preceding save, restores after transport failure, and records consumed deferred-validation triggers correctly.
+    3. Final training state refreshes a stale last artifact even when the configured cadence last fired at an earlier optimizer step.
+    4. Local, remote, asynchronous, DDP, and sharded model-parallel execution establish the reconstructed boundary across every supported persistence topology.

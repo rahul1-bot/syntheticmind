@@ -5,7 +5,7 @@
 | Module | Contents |
 |---|---|
 | `callback.py` | `Callback`, the hook surface every callback selectively overrides. |
-| `model_checkpoint.py` | `ModelCheckpoint`, which writes durable checkpoints on a configured cadence with monitored-metric selection; this is the mechanism behind the study's registered checkpoint gate. |
+| `checkpointing/` | The `ModelCheckpoint` lifecycle, trigger schedule, scalar top-k ranking, and artifact path policy. |
 | `early_stopping.py` | `EarlyStopping`, which stops a run on a monitored metric with patience. |
 | `timer.py` | `TimerCallback`, which enforces wall-time budgets. |
 | `finite_value_guard.py` | `FiniteValueGuard`, which rejects non-finite loss before backward and optional non-finite gradients before optimizer stepping. |

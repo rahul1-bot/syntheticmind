@@ -3,8 +3,7 @@ from collections.abc import Callable, Sequence
 from datetime import timedelta
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.callbacks.checkpoint import Checkpoint
-from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
+from syntheticmind.callbacks.checkpointing import Checkpoint, ModelCheckpoint
 from syntheticmind.callbacks.model_summary import ModelSummary
 from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.callbacks.timer import Timer

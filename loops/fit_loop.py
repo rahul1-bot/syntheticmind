@@ -36,7 +36,7 @@ import torch
 from torch.utils.data import DataLoader, DistributedSampler
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.callbacks.checkpoint import Checkpoint
+from syntheticmind.callbacks.checkpointing import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.loop import Loop

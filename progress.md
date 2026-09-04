@@ -235,11 +235,15 @@
     3. ✅ Callback package width fell to eleven direct modules; the existing model-summary package remains the only multi-module callback family because its lifecycle, report, and optional renderer are independently meaningful.
     4. ✅ SimpleProfiler still records dataloader and training-step actions, and local execution, spawned DDP metric views, progress rendering, and sharded model parallelism pass.
 
-| Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
+| Progress Complete | Transactional Model Checkpoint Policy | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
 
-    1. ModelCheckpoint remains the final accepted callback concept with unresolved validation, lifecycle, retention, and persisted-state defects.
-    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose distributed quantities or persisted state remain semantically wrong.
-    3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
+    1. ✅ Model checkpoint lifecycle, strict configuration, trigger scheduling, scalar ranking, path policy, and atomic save-state transition now form one semantic callback capability package.
+    2. ✅ Invalid trigger combinations, invalid ranking, non-scalar monitors, path traversal, remote link mode, and unsupported collective exception saves fail explicitly at their owning boundaries.
+    3. ✅ Top-k and last state serialize before persistence, transport failures restore callback state, deferred-validation triggers serialize as consumed, and train-end logic refreshes stale final-step artifacts.
+    4. ✅ Local link mode never points a current last path at a rejected candidate's older best artifact; remote fsspec paths persist regular checkpoint and ranking artifacts without pretending to support symbolic links.
+    5. ✅ The checkpoint responsibility census rejects arbitrary line-count splitting while retaining distinct schedule, ranking, path, and transaction concepts with one public ModelCheckpoint entrypoint.
+    6. ✅ CPU configuration, ranking, retention, final-step, failure, and resume probes plus remote persistence and asynchronous snapshot isolation pass.
+    7. ✅ Callback composition, tensor metric state, two-rank DDP checkpoint selection, and two-rank sharded model-parallel uninterrupted-versus-resumed trajectories pass.
 
 | Progress Complete | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
 
