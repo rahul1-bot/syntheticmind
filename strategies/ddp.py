@@ -1,4 +1,5 @@
 from datetime import timedelta
+from contextlib import AbstractContextManager
 from typing import override
 
 import torch
@@ -67,6 +68,12 @@ class DDPStrategy(ParallelStrategy):
         if layer_sync is not None and not isinstance(layer_sync, LayerSync):
             raise TypeError("layer_sync must be a LayerSync instance or None.")
         self._layer_sync: LayerSync | None = layer_sync
+
+    @override
+    def defer_backward_sync(self) -> AbstractContextManager[None]:
+        if not isinstance(self.model, DistributedDataParallel):
+            raise RuntimeError("DDP gradient synchronization requires a wrapped model.")
+        return self.model.no_sync()
 
     @property
     def layer_sync(self) -> LayerSync | None:

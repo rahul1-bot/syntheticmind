@@ -42,7 +42,6 @@ from torch.utils.data import DataLoader, DistributedSampler
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpointing import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
-from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
@@ -243,69 +242,12 @@ class EvaluationLoop(Loop):
                 dataloader_idx if include_dataloader_idx else None
             )
             batch: Batch = trainer.precision_plugin.convert_input(batch)
-            dm: DataModule | None = trainer.datamodule
-            if dm is not None and trainer._hook_is_overridden(
-                "on_before_batch_transfer",
-                dm,
-                DataModule
-            ):
-                batch: Batch = trainer._call_datamodule_hook(
-                    dm,
-                    "on_before_batch_transfer",
-                    dm.on_before_batch_transfer,
-                    batch,
-                    dataloader_idx=dataloader_idx
-                )
-            else:
-                batch = trainer._call_module_hook(
-                    module,
-                    "on_before_batch_transfer",
-                    module.on_before_batch_transfer,
-                    batch,
-                    dataloader_idx=dataloader_idx
-                )
-            if dm is not None and trainer._hook_is_overridden(
-                "transfer_batch_to_device",
-                dm,
-                DataModule
-            ):
-                batch = trainer._call_datamodule_hook(
-                    dm,
-                    "transfer_batch_to_device",
-                    dm.transfer_batch_to_device,
-                    batch,
-                    device,
-                    dataloader_idx=dataloader_idx
-                )
-            else:
-                batch = trainer._call_module_hook(
-                    module,
-                    "transfer_batch_to_device",
-                    module.transfer_batch_to_device,
-                    batch,
-                    device,
-                    dataloader_idx=dataloader_idx
-                )
-            if dm is not None and trainer._hook_is_overridden(
-                "on_after_batch_transfer",
-                dm,
-                DataModule
-            ):
-                batch = trainer._call_datamodule_hook(
-                    dm,
-                    "on_after_batch_transfer",
-                    dm.on_after_batch_transfer,
-                    batch,
-                    dataloader_idx=dataloader_idx
-                )
-            else:
-                batch = trainer._call_module_hook(
-                    module,
-                    "on_after_batch_transfer",
-                    module.on_after_batch_transfer,
-                    batch,
-                    dataloader_idx=dataloader_idx
-                )
+            batch: Batch = trainer._transfer_batch(
+                module,
+                batch,
+                device,
+                dataloader_idx
+            )
 
             hook_dataloader_idx: int | None = (
                 dataloader_idx if include_dataloader_idx else None

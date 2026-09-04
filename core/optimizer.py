@@ -17,7 +17,6 @@ from typing import (
 import torch
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import nn
-from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import LRScheduler, OneCycleLR, ReduceLROnPlateau
 
 from syntheticmind.exceptions import MisconfigurationError
@@ -47,13 +46,14 @@ __all__: list[str] = [
 ]
 
 type _ManagedOptimizerStep = Callable[
-    [torch.optim.Optimizer, OptimizerClosure | None, OptimizerStepOptions, bool],
+    [torch.optim.Optimizer, OptimizerClosure | None, OptimizerStepOptions],
     OptimizerStepOutput
 ]
 type _OptimizerToggle = Callable[
     [torch.optim.Optimizer],
     AbstractContextManager[None]
 ]
+type _GradientSyncDeferral = Callable[[], AbstractContextManager[None]]
 type _SchedulerMetric = torch.Tensor | float | None
 type LRSchedulerTypeUnion = LRScheduler | ReduceLROnPlateau
 type LRSchedulerType = type[LRScheduler] | type[ReduceLROnPlateau]
@@ -146,8 +146,10 @@ class SyntheticOptimizer:
             raise TypeError("SyntheticOptimizer requires a torch optimizer.")
         self._optimizer: torch.optim.Optimizer = optimizer
         self._model: nn.Module | None = None
-        self._step_operation: _ManagedOptimizerStep | None = None
+        self._manual_step_operation: _ManagedOptimizerStep | None = None
+        self._automatic_step_operation: _ManagedOptimizerStep | None = None
         self._toggle_operation: _OptimizerToggle | None = None
+        self._defer_backward_sync_operation: _GradientSyncDeferral | None = None
         self._on_before_step: Callable[[], None] = self._noop
         self._on_after_step: Callable[[], None] = self._noop
         self._automatic_step: bool = False
@@ -155,16 +157,31 @@ class SyntheticOptimizer:
     def connect(
         self,
         model: nn.Module,
-        step_operation: _ManagedOptimizerStep,
-        toggle_operation: _OptimizerToggle
+        manual_step_operation: _ManagedOptimizerStep,
+        automatic_step_operation: _ManagedOptimizerStep,
+        toggle_operation: _OptimizerToggle,
+        defer_backward_sync_operation: _GradientSyncDeferral
     ) -> None:
         if not isinstance(model, nn.Module):
             raise TypeError("SyntheticOptimizer model must be a torch module.")
-        if not callable(step_operation) or not callable(toggle_operation):
+        if (
+            not callable(manual_step_operation)
+            or not callable(automatic_step_operation)
+            or not callable(toggle_operation)
+            or not callable(defer_backward_sync_operation)
+        ):
             raise TypeError("SyntheticOptimizer operations must be callable.")
         self._model: nn.Module | None = model
-        self._step_operation: _ManagedOptimizerStep | None = step_operation
+        self._manual_step_operation: _ManagedOptimizerStep | None = (
+            manual_step_operation
+        )
+        self._automatic_step_operation: _ManagedOptimizerStep | None = (
+            automatic_step_operation
+        )
         self._toggle_operation: _OptimizerToggle | None = toggle_operation
+        self._defer_backward_sync_operation: _GradientSyncDeferral | None = (
+            defer_backward_sync_operation
+        )
 
     def step(
         self,
@@ -175,11 +192,15 @@ class SyntheticOptimizer:
             raise MisconfigurationError("optimizer.step closure must be callable.")
         self._on_before_step()
         try:
-            return self._require_step_operation()(
+            step_operation: _ManagedOptimizerStep = (
+                self._require_automatic_step_operation()
+                if self._automatic_step
+                else self._require_manual_step_operation()
+            )
+            return step_operation(
                 self._optimizer,
                 closure,
-                dict(kwargs),
-                self._automatic_step
+                dict(kwargs)
             )
         finally:
             self._on_after_step()
@@ -222,10 +243,12 @@ class SyntheticOptimizer:
 
     @contextmanager
     def toggle_model(self, sync_grad: bool = True) -> Iterator[None]:
-        model: nn.Module = self._require_model()
+        self._require_model()
         synchronization_context: AbstractContextManager[None] = nullcontext()
-        if not sync_grad and isinstance(model, DistributedDataParallel):
-            synchronization_context: AbstractContextManager[None] = model.no_sync()
+        if not sync_grad:
+            synchronization_context: AbstractContextManager[None] = (
+                self._require_defer_backward_sync_operation()()
+            )
         with synchronization_context, self._require_toggle_operation()(self._optimizer):
             yield
 
@@ -242,15 +265,25 @@ class SyntheticOptimizer:
             raise RuntimeError("SyntheticOptimizer is not connected to a model.")
         return self._model
 
-    def _require_step_operation(self) -> _ManagedOptimizerStep:
-        if self._step_operation is None:
-            raise RuntimeError("SyntheticOptimizer is not connected to a step operation.")
-        return self._step_operation
+    def _require_manual_step_operation(self) -> _ManagedOptimizerStep:
+        if self._manual_step_operation is None:
+            raise RuntimeError("SyntheticOptimizer has no manual step operation.")
+        return self._manual_step_operation
+
+    def _require_automatic_step_operation(self) -> _ManagedOptimizerStep:
+        if self._automatic_step_operation is None:
+            raise RuntimeError("SyntheticOptimizer has no automatic step operation.")
+        return self._automatic_step_operation
 
     def _require_toggle_operation(self) -> _OptimizerToggle:
         if self._toggle_operation is None:
             raise RuntimeError("SyntheticOptimizer is not connected to a toggle operation.")
         return self._toggle_operation
+
+    def _require_defer_backward_sync_operation(self) -> _GradientSyncDeferral:
+        if self._defer_backward_sync_operation is None:
+            raise RuntimeError("SyntheticOptimizer has no gradient-sync deferral operation.")
+        return self._defer_backward_sync_operation
 
     def _move_state_value(
         self,

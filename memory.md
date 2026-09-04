@@ -171,14 +171,14 @@
     6. Deferred-validation triggers must clear before serialization, and a rejected top-k candidate must not make link mode point `last` at an older best artifact.
     7. Full, sharded, remote, asynchronous, weights-only, mid-epoch, linked, distributed, and failure-atomic paths require separate evidence because success in one representation proves nothing about another.
 
-| Memory | Optimizer Versus Optimization Semantics | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
+| Memory | Optimizer, Epoch, and Topology Semantics | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 
     1. An optimizer is a model-facing PyTorch object and declaration contract; optimization is the loop lifecycle that invokes forward, loss extraction, zeroing, backward, accumulation, clipping, stepping, and scheduler cadence.
-    2. Automatic and manual optimization are recognized execution modes and justify a loop subpackage. A `core/optimization/` package mixing parser, wrapper, and execution behavior erases that distinction.
-    3. A managed optimizer should adapt hook-aware stepping and parameter toggling through explicit connected operations. Dynamic subclass fabrication and generic attribute forwarding make runtime identity dishonest and hide the supported API.
-    4. PyTorch optimizer closures remain ordinary callables, but SyntheticMind can supply a bound `run` method instead of defining a custom callable object or nested function.
-    5. Strategy and precision jointly own the actual optimizer step because wrapping, sharding, scaling, unscaling, and overflow behavior depend on execution topology and numerical policy.
-    6. Scheduler cadence belongs to the training epoch lifecycle, while `Module.lr_scheduler_step` remains the explicit extension hook for schedulers outside the standard PyTorch API.
+    2. A training epoch is not one indivisible method: resume, fetch, transfer, batch hooks, optimization, metrics, validation, scheduler, and continuation are named transitions that remain cohesive under one epoch owner.
+    3. Shared batch-transfer precedence belongs beside Trainer hook dispatch; repeating it inside each stage loop creates several authorities that can drift independently.
+    4. Gradient synchronization belongs to Strategy because the selected wrapper and topology determine how accumulation or manual toggling suppresses communication.
+    5. Managed optimizers require distinct automatic and manual step operations; passing a boolean mode through an otherwise identical callable hides progress semantics and invites double step counting.
+    6. Standard scheduler cadence and monitor-dependent plateau cadence are separate operations, while `Module.lr_scheduler_step` remains the explicit extension hook for scheduler-specific behavior.
 
 | Memory | Hook Contracts Are Machine-Learning Concepts | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
 

@@ -494,7 +494,6 @@ class Trainer:
             min_steps=min_steps,
             max_steps=effective_max_steps,
             accumulate_grad_batches=accumulate_grad_batches,
-            precision=self.precision,
             gradient_clip_val=self.gradient_clip_val,
             gradient_clip_algorithm=self.gradient_clip_algorithm,
             log_every_n_steps=resolved_log_every_n_steps
@@ -725,7 +724,9 @@ class Trainer:
                 synthetic_optimizer.connect(
                     strategy_model,
                     partial(epoch_loop.optimizer_step, self, module),
-                    module.toggled_optimizer
+                    partial(epoch_loop._automatic_optimizer_step, self, module),
+                    module.toggled_optimizer,
+                    self.strategy.defer_backward_sync
                 )
                 self._synthetic_optimizers.append(synthetic_optimizer)
 
@@ -1488,6 +1489,78 @@ class Trainer:
             return hook(*args, **kwargs)
         with self.profiler.profile(action_name):
             return hook(*args, **kwargs)
+
+    def _transfer_batch(
+        self,
+        module: Module,
+        batch: Batch,
+        device: torch.device,
+        dataloader_idx: int
+    ) -> Batch:
+        datamodule: DataModule | None = self.datamodule
+        if datamodule is not None and self._hook_is_overridden(
+            "on_before_batch_transfer",
+            datamodule,
+            DataModule
+        ):
+            batch: Batch = self._call_datamodule_hook(
+                datamodule,
+                "on_before_batch_transfer",
+                datamodule.on_before_batch_transfer,
+                batch,
+                dataloader_idx=dataloader_idx
+            )
+        else:
+            batch: Batch = self._call_module_hook(
+                module,
+                "on_before_batch_transfer",
+                module.on_before_batch_transfer,
+                batch,
+                dataloader_idx=dataloader_idx
+            )
+        if datamodule is not None and self._hook_is_overridden(
+            "transfer_batch_to_device",
+            datamodule,
+            DataModule
+        ):
+            batch: Batch = self._call_datamodule_hook(
+                datamodule,
+                "transfer_batch_to_device",
+                datamodule.transfer_batch_to_device,
+                batch,
+                device,
+                dataloader_idx=dataloader_idx
+            )
+        else:
+            batch: Batch = self._call_module_hook(
+                module,
+                "transfer_batch_to_device",
+                module.transfer_batch_to_device,
+                batch,
+                device,
+                dataloader_idx=dataloader_idx
+            )
+        if datamodule is not None and self._hook_is_overridden(
+            "on_after_batch_transfer",
+            datamodule,
+            DataModule
+        ):
+            batch: Batch = self._call_datamodule_hook(
+                datamodule,
+                "on_after_batch_transfer",
+                datamodule.on_after_batch_transfer,
+                batch,
+                dataloader_idx=dataloader_idx
+            )
+        else:
+            batch: Batch = self._call_module_hook(
+                module,
+                "on_after_batch_transfer",
+                module.on_after_batch_transfer,
+                batch,
+                dataloader_idx=dataloader_idx
+            )
+        return batch
 
     def _call_strategy_hook[**Parameters, ReturnT](
         self,

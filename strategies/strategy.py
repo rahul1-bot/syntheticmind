@@ -1,5 +1,5 @@
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import Literal, cast
 
 import torch
@@ -238,6 +238,9 @@ class Strategy:
 
     def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
         del optimizer
+
+    def defer_backward_sync(self) -> AbstractContextManager[None]:
+        return nullcontext()
 
     def attach_precision_plugin(self, precision_plugin: Precision) -> None:
         if not isinstance(precision_plugin, Precision):

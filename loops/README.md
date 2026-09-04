@@ -1,12 +1,12 @@
 # syntheticmind.loops: The Execution Loops
 
-`loops/` implements the stage execution the trainer dispatches to. The loops define hook order, batch transfer, metric aggregation, optimizer and scheduler stepping, and validation cadence, so these semantics are identical for every model the framework runs.
+`loops/` implements the stage execution the Trainer dispatches. Loops own stage and batch cadence, metric aggregation, optimization progress, scheduler stepping, validation timing, and continuation coordinates. Trainer owns the shared DataModule-or-Module batch-transfer hook transaction so training, validation, testing, and prediction cannot drift into separate transfer orders.
 
 | Module | Contents |
 |---|---|
 | `loop.py` | `Loop`, the shared stateful attachment and stop behavior for stage loops. |
 | `fit_loop.py` | `FitLoop`, the outer training driver covering epoch iteration, validation scheduling, stopping conditions, and checkpoint cadence. |
-| `training_epoch_loop.py` | `TrainingEpochLoop`, one training epoch covering batch iteration, forward and backward execution under automatic or manual optimization, gradient accumulation and clipping, optimizer and scheduler stepping, and step-level logging. |
+| `training_epoch_loop.py` | `TrainingEpochLoop`, one training epoch composed from explicit resume, fetch, transfer, hook, optimization, metric, validation, scheduler, and continuation transitions. |
 | `evaluation_loop.py` | `EvaluationLoop`, validation and test execution with metric aggregation over complete dataloaders. |
 | `prediction_loop.py` | `PredictionLoop`, inference execution that collects model outputs without loss computation. |
 | `optimization/automatic.py` | Automatic loss normalization, closure execution, zeroing, and backward ownership. |

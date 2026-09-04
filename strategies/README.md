@@ -2,7 +2,7 @@
 
 `Strategy` is the complete policy governing how a model participates in training, validation, testing, and prediction. It owns the model connection, wrapped-model identity, accelerator and precision collaboration, optimizer stepping, step dispatch, collective defaults, initialization context, and ordinary checkpoint behavior.
 
-`ParallelStrategy` is the shared distributed execution policy. It owns parallel devices, cluster ranks, process-group initialization, tensor reduction, distributed collectives, gradient synchronization, process launch, and process-scoped cleanup. DDP and model-parallel execution inherit these semantics instead of reproducing them. Mean, sum, minimum, and maximum metric reductions therefore execute through the selected Strategy rather than ambient process-global helpers.
+`ParallelStrategy` is the shared distributed execution policy. It owns parallel devices, cluster ranks, process-group initialization, tensor reduction, distributed collectives, gradient synchronization, process launch, and process-scoped cleanup. DDP supplies its own deferred-backward synchronization context for gradient accumulation; loops and managed optimizers request that policy without importing or inspecting the DDP wrapper. Mean, sum, minimum, and maximum metric reductions execute through the selected Strategy rather than ambient process-global helpers.
 
 `data_parallel_size` names the replicated sample-processing axis independently from total world size. DDP uses the full world, while model parallelism reports only the data-parallel mesh dimension so throughput and sample accounting never multiply by tensor-parallel workers.
 

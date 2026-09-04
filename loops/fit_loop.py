@@ -43,6 +43,7 @@ from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.combined_loader import CombinedLoader
+from syntheticmind.types import RunningStage
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer
@@ -128,11 +129,11 @@ class FitLoop(Loop):
                         train_dl.sampler.set_epoch(epoch)
 
             state.set_running_stage("training")
-            module._running_stage = "training"
+            module._running_stage: RunningStage | None = "training"
             trainer._reset_progress_bar_metrics("training")
             trainer._reset_progress_bar_metrics("validating")
             module.train()
-            self.epoch_loop.is_last_batch = False
+            self.epoch_loop.is_last_batch: bool = False
 
             trainer._call_callback_hooks(
                 module,
@@ -176,16 +177,15 @@ class FitLoop(Loop):
             # metric; a missing monitor key is a configuration error, never a
             # silent skip.
             if module.automatic_optimization:
-                self.epoch_loop.update_lr_schedulers(
+                self.epoch_loop.update_plateau_schedulers(
                     trainer,
                     module,
                     "epoch",
-                    state.current_epoch + 1,
-                    update_plateau_schedulers=True
+                    state.current_epoch + 1
                 )
 
             state.increment_epoch()
-            module._current_epoch = state.current_epoch
+            module._current_epoch: int = state.current_epoch
             trainer._raise_if_sigterm()
 
             # A stop raised at trainer level (early stopping, strategies)

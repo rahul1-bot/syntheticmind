@@ -134,14 +134,15 @@
     6. The cohesive connector exceeds the generic source-size budget under the explicit concept-integrity rule; splitting path, payload, restoration, random streams, and continuation would recreate competing checkpoint owners.
     7. Best and last selection, user-managed paths, weights-only artifacts, strict schema rejection, asynchronous storage, callback and hyperparameter state, exact stateful-loader continuation, DDP spawn and fork, full and sharded model-parallel resume, and injected distributed publication failure pass.
 
-| Architecture Decision | Optimization Concept Boundaries | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
+| Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 
-    1. `core/optimizer.py` now owns the model-facing `configure_optimizers` vocabulary, strict scheduler configuration, managed optimizer access, no-op optimizer, and declaration normalization without defining optimizer or scheduler factory families.
-    2. `loops/optimization/automatic.py` owns automatic loss extraction, accumulation normalization, closure execution, zeroing, and backward invocation; `manual.py` owns manual-step output normalization while the research Module controls backward and optimizer calls.
-    3. TrainingEpochLoop retains batch iteration, accumulation boundaries, scheduler cadence, metric dispatch, and validation scheduling. Strategy retains topology-sensitive model and optimizer execution, and precision retains closure wrapping, numerical stepping, scaling, unscaling, hooks, and clipping.
-    4. `SyntheticOptimizer` now uses explicitly connected step and toggle operations. Dynamic `__class__` mutation, generic attribute forwarding, concrete Trainer references, and four optimizer-only Trainer Protocols were removed.
-    5. The previous optimizer and scheduler factory configurations and their free-function utility builders were dead parallel APIs that renamed PyTorch algorithms and were deleted.
-    6. Automatic, multi-optimizer manual, managed manual DDP, LBFGS repeated closure, accumulation tail, clipping, mixed precision, step scheduling, plateau monitoring, invalid configuration, spawn, fork, full model-parallel resume, and sharded model-parallel resume pass.
+    1. `TrainingEpochLoop.run` now composes explicit epoch start, resumable data iteration, batch advancement, tail optimization, continuation persistence, and epoch-metric completion transitions rather than embedding the complete lifecycle in one 368-line method.
+    2. Fetch, transfer, batch hooks, automatic or manual optimization, metric dispatch, scheduled validation, scheduler cadence, and loader continuation remain private transitions on the one epoch owner; no batch-manager, state-container, helper class, or new public API was introduced.
+    3. Trainer now owns one DataModule-over-Module batch-transfer hook transaction used by training, validation, testing, and prediction, deleting three duplicated stage implementations while preserving exact hook dispatch and profiling.
+    4. Strategy owns deferred backward synchronization. DDP supplies `no_sync`, while loops and `SyntheticOptimizer` request the policy without importing or inspecting the wrapper; explicit automatic and manual step operations replace the former boolean step contract.
+    5. Standard and plateau scheduler updates now have distinct canonical operations, manual clipping no longer mutates loop configuration temporarily, and dead loop precision and scaler fields were removed.
+    6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; evaluation and prediction loops plus the Trainer still require separate decomposition, and existing conditional annotation imports remain unresolved until that dependency slice is reconstructed.
+    7. CPU and MPS execution, automatic and multi-optimizer manual optimization, two-rank deferred accumulation, manual DDP, transfer precedence across every stage, multiple-loader DDP, exact stateful continuation, plateau cadence, and sharded model-parallel exact resume pass.
 
 | Architecture Decision | Canonical Trainer Package | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
 

@@ -133,12 +133,12 @@
     3. ✅ Checkpoints use one strict schema version and canonical field set without duplicated legacy aliases, while weights-only artifacts omit optimizer, scheduler, callback, precision, and random state.
     4. ✅ Best, last, user-managed, asynchronous, stateful-loader, DDP launcher, full model-parallel, sharded model-parallel, invalid-schema, and failure-atomic publication paths pass.
 
-| Progress Complete | Optimization Execution Reconstruction | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
+| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 
-    1. ✅ Core optimizer ownership now contains managed optimizer access, accepted live optimizer and scheduler declarations, strict scheduler configuration, declaration normalization, and no-op execution without factory baggage.
-    2. ✅ Automatic and manual optimization are explicit loop concepts, optimizer closures use bound verb methods, and TrainingEpochLoop retains only the surrounding epoch and cadence responsibilities.
-    3. ✅ Dynamic optimizer subclassing, generic attribute forwarding, free optimizer functions, dead factory configurations, utility builders, broad closure values, custom callable objects, and optimizer-only Trainer Protocols were removed.
-    4. ✅ Automatic, managed manual, multiple optimizer, DDP manual, LBFGS closure, accumulation tail, clipping, bf16 mixed precision, step scheduler, plateau scheduler, invalid configuration, spawn, fork, and exact full or sharded model-parallel resume paths pass.
+    1. ✅ TrainingEpochLoop now composes bounded resume, iteration, batch, optimization, cadence, continuation, and completion transitions; the public run path and inner iterator meet method hard limits without new classes or APIs.
+    2. ✅ One Trainer transfer transaction serves every stage, Strategy owns deferred gradient synchronization, and SyntheticOptimizer uses distinct automatic and manual step operations without direct DDP inspection or a boolean step mode.
+    3. ✅ Standard and plateau scheduler operations are explicit, manual clipping avoids configuration mutation, dead precision and scaler state is gone, and every modified assignment is locally typed.
+    4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, multi-loader DDP, transfer precedence, stateful continuation, plateau scheduling, and sharded model-parallel resume paths pass.
 
 | Progress Complete | Canonical Trainer Package Migration | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
 

@@ -228,3 +228,11 @@
     3. CSV schema growth is a persistence transaction and must reconcile state written by prior spawned workers before widening later-stage records.
     4. Hyperparameters cross the logger boundary only after deterministic portable normalization and remain a one-time run record across worker replacement.
     5. TensorBoard is a local event backend, while CSV owns local and fsspec records; neither backend pretends to support storage semantics it cannot execute.
+
+| Strategic Note | Training Epoch Transition Map | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
+
+    1. A training epoch is one lifecycle composed from resume coordinates, batch fetching, transfer hooks, optimization, metric cadence, validation, scheduling, and continuation state.
+    2. These transitions remain private methods on TrainingEpochLoop because extracting one-use manager classes would hide rather than clarify the ML concept.
+    3. Batch transfer is shared Trainer hook orchestration, while gradient synchronization is selected Strategy behavior; neither belongs to a stage-specific loop implementation.
+    4. Managed optimizers select explicit automatic or manual step operations and request deferred synchronization through Strategy instead of carrying a boolean execution flag or inspecting DDP.
+    5. Exact local, accelerator, distributed, resumable-data, and model-parallel trajectories establish the decomposition without relying on static-analysis claims.
