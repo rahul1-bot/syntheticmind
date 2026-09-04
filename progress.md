@@ -283,3 +283,8 @@
 
     1. ✅ Evaluation context selection moved to Loop and process-wide deterministic or benchmark configuration moved to Trainer; both one-function utility modules were removed.
     2. ✅ Local stage execution, deterministic flag transitions, and spawned distributed evaluation pass after the ownership change.
+
+| Progress Complete | Checkpoint Serialization Ownership | Date: 04 September 2026 | Time: 11:22 AM | Name: Ghost |
+
+    1. ✅ Local and remote torch serialization moved onto `TorchCheckpointIO`, model-parallel metadata composes that owner, and the free checkpoint utility module was removed.
+    2. ✅ Model hydration, asynchronous snapshot isolation, sharded two-rank persistence, and injected distributed failure atomicity pass after consolidation.

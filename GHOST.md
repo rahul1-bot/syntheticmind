@@ -292,3 +292,9 @@
     1. Evaluation and prediction gradient context selection moved onto the shared `Loop` base because inference mode, no-gradient fallback, and Gloo compatibility are execution-loop semantics used by both non-training stages.
     2. Deterministic-algorithm mode, warning mode, cuDNN benchmarking, and the required cuBLAS workspace setting moved into Trainer construction because they configure the complete run rather than expose a reusable utility operation.
     3. The two former one-function utility modules were deleted without wrappers or aliases. Local validation, prediction, deterministic configuration, and spawned two-rank TorchMetrics evaluation pass through the new owners.
+
+| Architecture Decision | Checkpoint Serialization Ownership | Date: 04 September 2026 | Time: 11:22 AM | Name: Ghost |
+
+    1. `TorchCheckpointIO` now owns local atomic serialization, remote transactional upload, explicit device mapping, weights-only selection, payload validation, and missing-path diagnostics directly.
+    2. Model-parallel full checkpoints and sharded metadata compose `TorchCheckpointIO` instead of importing duplicate free save and load operations. Distributed shard persistence remains owned by the sharded store and PyTorch distributed checkpoint API.
+    3. The former checkpoint utility module was deleted without a façade. Canonical model hydration, asynchronous snapshot isolation, full and sharded model-parallel persistence, and injected metadata or publication failure recovery pass through the checkpoint owners.

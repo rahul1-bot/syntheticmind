@@ -1,13 +1,25 @@
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
-from typing import Protocol, override, runtime_checkable
+import shutil
+import tempfile
+from typing import Protocol, cast, override, runtime_checkable
 
 import numpy as np
 import torch
+from fsspec.spec import AbstractFileSystem
 
-from syntheticmind.utilities.checkpoint import load_checkpoint, save_checkpoint
-from syntheticmind.utilities.filesystem import remove_path
+from syntheticmind.utilities.filesystem import (
+    dirname,
+    exists,
+    get_filesystem,
+    is_local_path,
+    make_directory,
+    normalize_path,
+    open_binary,
+    remove_path
+)
 from syntheticmind.utilities.types import CheckpointDict, CheckpointValue, MapLocation
 
 __all__: list[str] = [
@@ -56,7 +68,10 @@ class TorchCheckpointIO(CheckpointIO):
                 "storage_options are unsupported by TorchCheckpointIO. "
                 "Use a custom CheckpointIO implementation for storage-specific options."
             )
-        save_checkpoint(checkpoint, path)
+        if is_local_path(path):
+            self._save_local(checkpoint, path)
+            return
+        self._save_remote(checkpoint, path)
 
     @override
     def load_checkpoint(
@@ -65,11 +80,32 @@ class TorchCheckpointIO(CheckpointIO):
         map_location: MapLocation = None,
         weights_only: bool | None = None
     ) -> CheckpointDict:
-        return load_checkpoint(
-            path,
-            map_location="cpu" if map_location is None else map_location,
-            weights_only=weights_only
+        if not exists(path):
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+        resolved_map_location: MapLocation = (
+            "cpu" if map_location is None else map_location
         )
+        checkpoint: CheckpointValue
+        if is_local_path(path):
+            checkpoint = cast(
+                CheckpointValue,
+                torch.load(
+                    Path(normalize_path(path)),
+                    map_location=resolved_map_location,
+                    weights_only=False if weights_only is None else weights_only
+                )
+            )
+        else:
+            checkpoint = self._load_remote(
+                path,
+                resolved_map_location,
+                weights_only
+            )
+        if not isinstance(checkpoint, dict):
+            raise TypeError(
+                f"Checkpoint payload must be a dictionary, got {type(checkpoint).__name__}."
+            )
+        return cast(CheckpointDict, checkpoint)
 
     @override
     def remove_checkpoint(self, path: CheckpointPath) -> None:
@@ -78,6 +114,56 @@ class TorchCheckpointIO(CheckpointIO):
     @override
     def teardown(self) -> None:
         pass
+
+    def _save_local(self, checkpoint: CheckpointDict, path: CheckpointPath) -> None:
+        local_path: Path = Path(normalize_path(path))
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        file_descriptor: int
+        temporary_path_string: str
+        file_descriptor, temporary_path_string = tempfile.mkstemp(
+            dir=str(local_path.parent),
+            suffix=".tmp"
+        )
+        os.close(file_descriptor)
+        temporary_path: Path = Path(temporary_path_string)
+        try:
+            torch.save(checkpoint, temporary_path)
+            temporary_path.replace(local_path)
+        except BaseException:
+            if temporary_path.exists():
+                temporary_path.unlink()
+            raise
+
+    def _save_remote(self, checkpoint: CheckpointDict, path: CheckpointPath) -> None:
+        make_directory(dirname(path))
+        filesystem: AbstractFileSystem = get_filesystem(path)
+        with tempfile.TemporaryFile() as temporary_file:
+            torch.save(checkpoint, temporary_file)
+            temporary_file.seek(0)
+            with filesystem.transaction:
+                with open_binary(path, "wb", filesystem=filesystem) as destination:
+                    shutil.copyfileobj(temporary_file, destination)
+
+    def _load_remote(
+        self,
+        path: CheckpointPath,
+        map_location: MapLocation,
+        weights_only: bool | None
+    ) -> CheckpointValue:
+        with (
+            open_binary(path, "rb") as source,
+            tempfile.TemporaryFile() as temporary_file
+        ):
+            shutil.copyfileobj(source, temporary_file)
+            temporary_file.seek(0)
+            return cast(
+                CheckpointValue,
+                torch.load(
+                    temporary_file,
+                    map_location=map_location,
+                    weights_only=False if weights_only is None else weights_only
+                )
+            )
 
 
 class _WrappingCheckpointIO(CheckpointIO):

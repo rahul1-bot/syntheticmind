@@ -9,12 +9,12 @@ from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
 from torch.distributed.checkpoint import StorageReader, StorageWriter
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 
+from syntheticmind.plugins.checkpoint_io import TorchCheckpointIO
 from syntheticmind.strategies.model_parallel_checkpointing.generation import (
     CheckpointBroadcast,
     _CheckpointGenerationIndex,
     _CheckpointGenerationPointer
 )
-from syntheticmind.utilities.checkpoint import load_checkpoint, save_checkpoint
 from syntheticmind.utilities.exceptions import CheckpointError
 from syntheticmind.utilities.filesystem import (
     basename, is_directory, is_file, is_local_path, join_path,
@@ -26,6 +26,7 @@ __all__: list[str] = []
 
 class _ShardedCheckpointStore:
     def __init__(self) -> None:
+        self._checkpoint_io: TorchCheckpointIO = TorchCheckpointIO()
         self._distributed_metadata_filename: str = ".metadata"
         self._generation_index: _CheckpointGenerationIndex = (
             _CheckpointGenerationIndex()
@@ -44,7 +45,7 @@ class _ShardedCheckpointStore:
         weights_only: bool | None
     ) -> CheckpointDict:
         generation_path: str = self._active_generation_path(path)
-        return load_checkpoint(
+        return self._checkpoint_io.load_checkpoint(
             join_path(generation_path, self._metadata_filename),
             weights_only=weights_only
         )
@@ -83,7 +84,7 @@ class _ShardedCheckpointStore:
                 f"Failed to write distributed checkpoint generation: {generation_path}"
             ) from exception
         metadata_write: Callable[[], None] = partial(
-            save_checkpoint,
+            self._checkpoint_io.save_checkpoint,
             metadata,
             join_path(generation_path, self._metadata_filename)
         )

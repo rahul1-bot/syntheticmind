@@ -4,7 +4,6 @@
 
 | Module | Contents |
 |---|---|
-| `checkpoint.py` | Transitional low-level checkpoint file persistence consumed by checkpoint I/O implementations. |
 | `distributed.py` | Transitional rank and collective operations pending Strategy and callback ownership reconstruction. |
 | `exceptions.py` | `FrameworkError` and its family: `MisconfigurationError`, `TrainingInterruptedError`, `CheckpointError`, and `DistributedError`, the framework's explicit error vocabulary. |
 | `types.py` | `DeviceTransferable`, the structural type contract used by device transfer. |

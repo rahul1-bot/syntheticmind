@@ -13,11 +13,11 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.fsdp import FullyShardedDataParallel, OptimStateKeyType
 
+from syntheticmind.plugins.checkpoint_io import TorchCheckpointIO
 from syntheticmind.strategies.model_parallel_checkpointing.generation import CheckpointBroadcast
 from syntheticmind.strategies.model_parallel_checkpointing.sharded_store import (
     _ShardedCheckpointStore
 )
-from syntheticmind.utilities.checkpoint import load_checkpoint, save_checkpoint
 from syntheticmind.utilities.filesystem import is_directory, is_file, remove_path
 from syntheticmind.utilities.types import (
     CheckpointDict,
@@ -37,6 +37,7 @@ type ModelParallelCheckpointFormat = Literal["full", "sharded"]
 class _ModelParallelCheckpointIO:
     def __init__(self, checkpoint_format: ModelParallelCheckpointFormat) -> None:
         self._checkpoint_format: ModelParallelCheckpointFormat = checkpoint_format
+        self._checkpoint_io: TorchCheckpointIO = TorchCheckpointIO()
         self._sharded_store: _ShardedCheckpointStore = _ShardedCheckpointStore()
 
     def is_checkpoint(self, path: str | Path) -> bool:
@@ -50,7 +51,7 @@ class _ModelParallelCheckpointIO:
         if self._sharded_store.is_checkpoint(path):
             return self._sharded_store.load_metadata(path, weights_only)
         if is_file(path):
-            return load_checkpoint(path, weights_only=weights_only)
+            return self._checkpoint_io.load_checkpoint(path, weights_only=weights_only)
         raise ValueError(
             f"The path {str(path)!r} does not point to a full or sharded checkpoint."
         )
@@ -96,7 +97,7 @@ class _ModelParallelCheckpointIO:
                 f"The path {str(path)!r} does not point to a full or sharded checkpoint."
             )
         checkpoint: CheckpointDict = (
-            load_checkpoint(path, weights_only=weights_only)
+            self._checkpoint_io.load_checkpoint(path, weights_only=weights_only)
             if preloaded_checkpoint is None
             else preloaded_checkpoint
         )
@@ -162,7 +163,7 @@ class _ModelParallelCheckpointIO:
                 )
             raise IsADirectoryError(f"The checkpoint path exists as a directory: {path}")
         if global_rank == 0:
-            save_checkpoint(checkpoint, path)
+            self._checkpoint_io.save_checkpoint(checkpoint, path)
 
     def _load_sharded(
         self,

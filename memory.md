@@ -292,3 +292,9 @@
 
     1. Inference-mode selection is not a generic context-manager utility when its choice depends on evaluation lifecycle and distributed backend constraints. The shared Loop owner is the narrowest concept serving validation, testing, and prediction.
     2. Process-wide PyTorch determinism and benchmark flags are run configuration side effects. Trainer construction must validate and apply them before model execution so there is one visible owner and no alternate function entrypoint.
+
+| Memory | Checkpoint Transport Owns Serialization | Date: 04 September 2026 | Time: 11:22 AM | Name: Ghost |
+
+    1. Atomic file replacement, remote transaction boundaries, map location, weights-only loading, and payload validation are checkpoint transport behavior and belong on `TorchCheckpointIO` rather than free persistence functions.
+    2. Model-parallel metadata may reuse the ordinary checkpoint transport while distributed tensor shards retain their specialized store. Composition preserves the difference between metadata serialization and distributed state publication without duplicating either lifecycle.
+    3. Failure injection must prove that a metadata write or active-generation publication failure cannot replace the preceding durable sharded generation.
