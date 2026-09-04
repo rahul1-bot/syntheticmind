@@ -1,14 +1,9 @@
-from __future__ import annotations
-
 import os
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 from syntheticmind.plugins.environments import ClusterEnvironment
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.exceptions import MisconfigurationError
-
-if TYPE_CHECKING:
-    from syntheticmind.strategies.ddp import DDPStrategy
 
 __all__: list[str] = []
 

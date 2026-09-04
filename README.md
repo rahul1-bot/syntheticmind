@@ -14,6 +14,7 @@
 | `loggers/` | The metric-logger interface with CSV and TensorBoard implementations. |
 | `profilers/` | Runtime action measurement and trace export. |
 | `storage/` | Local and remote filesystem boundaries shared by checkpoints, loggers, profilers, and run artifacts. |
+| `randomness.py` | Process-wide seeding plus immutable Python, NumPy, torch CPU, CUDA, and MPS random-state snapshots shared by checkpoint and launcher boundaries. |
 
 ## Contracts
 
@@ -27,7 +28,7 @@ Framework-wide type contracts live in `syntheticmind.types`, and the framework e
 
 ## Checkpoints
 
-Checkpoints are native and resumable. A durable checkpoint carries model, optimizer, scheduler, callback, datamodule, epoch, step, and random-number-generator state, so an interrupted run continues from its last durable state rather than restarting. Local execution uses an interchangeable structural `CheckpointIO` contract. Model-parallel execution owns full or sharded distributed state directly, and sharded writes publish immutable generations through an atomic active-generation pointer.
+Checkpoint schema version 2 is native and resumable. A durable training checkpoint carries model, optimizer, scheduler, callback, datamodule, resolved Trainer configuration, batch progress, epoch, step, and random-number-generator state, so an interrupted run continues from its last durable transition rather than restarting. Random state covers Python, NumPy, torch CPU, and the active CUDA or MPS backend through the same immutable schema used for multiprocessing transfer. A weights-only artifact is explicitly non-resumable. Local execution uses an interchangeable structural `CheckpointIO` contract. Model-parallel execution owns full or sharded distributed state directly, and sharded writes publish immutable generations through an atomic active-generation pointer.
 
 ## Related Components
 

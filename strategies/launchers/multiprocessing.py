@@ -1,11 +1,10 @@
-from __future__ import annotations
-
 import os
 import pickle
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
+import syntheticmind
 import torch
 import torch.multiprocessing as mp
 from torch.multiprocessing.spawn import (
@@ -15,6 +14,8 @@ from torch.multiprocessing.spawn import (
 )
 
 from syntheticmind.accelerators.cpu import CPUAccelerator
+from syntheticmind.core.datamodule import DataModule
+from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
     ProcessStartMethod,
     StageArguments,
@@ -30,12 +31,6 @@ from syntheticmind.strategies.launchers.state_transfer import (
 )
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.types import TrainerStage
-
-if TYPE_CHECKING:
-    from syntheticmind.core.datamodule import DataModule
-    from syntheticmind.core.module import Module
-    from syntheticmind.trainer.trainer import Trainer
-    from syntheticmind.strategies.ddp import DDPStrategy
 
 __all__: list[str] = []
 
@@ -53,7 +48,7 @@ class _MultiprocessingWorker:
     def run(
         cls: type[_MultiprocessingWorker],
         local_rank: int,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         stage: TrainerStage,
         module: Module,
         datamodule: DataModule | None,
@@ -67,7 +62,7 @@ class _MultiprocessingWorker:
         worker_environment["RANK"]: str = str(local_rank)
         os.environ.update(worker_environment)
         torch.set_num_threads(int(worker_environment["OMP_NUM_THREADS"]))
-        initial_global_state.restore()
+        _WorkerStateTransfer.restore_global_state(trainer, initial_global_state)
         if isinstance(trainer.accelerator, CPUAccelerator):
             _WorkerStateTransfer.unshare_module_storage(module)
         result: StageResult = _StageInvoker.invoke(
@@ -103,14 +98,16 @@ class _MultiprocessingLauncher:
     def launch(
         self,
         stage: TrainerStage,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         datamodule: DataModule | None,
         stage_kwargs: StageArguments
     ) -> StageResult:
         self._validate_launch(trainer, module, datamodule, stage_kwargs)
         environment: dict[str, str] = self._environment.local_values()
-        initial_global_state: _GlobalState = _GlobalState.capture()
+        initial_global_state: _GlobalState = (
+            _WorkerStateTransfer.capture_global_state(trainer)
+        )
         temporary_directory: tempfile.TemporaryDirectory[str] = (
             tempfile.TemporaryDirectory(prefix="syntheticmind-launch-")
         )
@@ -159,7 +156,7 @@ class _MultiprocessingLauncher:
 
     def _validate_launch(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         datamodule: DataModule | None,
         stage_kwargs: StageArguments
@@ -187,7 +184,7 @@ class _MultiprocessingLauncher:
 
     def _start_and_join(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         stage: TrainerStage,
         module: Module,
         datamodule: DataModule | None,

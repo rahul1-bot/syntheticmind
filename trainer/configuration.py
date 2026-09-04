@@ -11,7 +11,7 @@ from pydantic import (
 )
 
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import ClipAlgorithm
+from syntheticmind.types import ClipAlgorithm, PrecisionType
 
 __all__: list[str] = []
 
@@ -32,6 +32,153 @@ type _ValidationIntervalInput = (
     | dict[str, int]
     | None
 )
+
+
+class _TrainerConfigurationSnapshot(BaseModel):
+    schema_version: Literal[1] = 1
+    fast_dev_run: int | bool
+    max_epochs: int
+    min_epochs: int
+    max_steps: int
+    min_steps: int | None
+    limit_train_batches: int | float
+    limit_val_batches: int | float
+    limit_test_batches: int | float
+    limit_predict_batches: int | float
+    overfit_batches: int | float
+    validation_interval_identity: str
+    check_val_every_n_epoch: int | None
+    num_sanity_val_steps: int | float
+    log_every_n_steps: int
+    enable_checkpointing: bool
+    enable_progress_bar: bool
+    enable_model_summary: bool
+    accumulate_grad_batches: int
+    gradient_clip_val: int | float | None
+    gradient_clip_algorithm: ClipAlgorithm | None
+    deterministic: bool | Literal["warn"] | None
+    inference_mode: bool
+    use_distributed_sampler: bool
+    detect_anomaly: bool
+    barebones: bool
+    sync_batchnorm: bool
+    reload_dataloaders_every_n_epochs: int
+    enable_autolog_hparams: bool
+    precision: PrecisionType
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        strict=True,
+        validate_default=True
+    )
+
+    def resume_mismatches(
+        self,
+        current: _TrainerConfigurationSnapshot
+    ) -> tuple[str, ...]:
+        mismatches: list[str] = []
+        if self.fast_dev_run != current.fast_dev_run:
+            mismatches.append("fast_dev_run")
+        if self.limit_train_batches != current.limit_train_batches:
+            mismatches.append("limit_train_batches")
+        if self.limit_val_batches != current.limit_val_batches:
+            mismatches.append("limit_val_batches")
+        if self.overfit_batches != current.overfit_batches:
+            mismatches.append("overfit_batches")
+        if self.validation_interval_identity != current.validation_interval_identity:
+            mismatches.append("val_check_interval")
+        if self.check_val_every_n_epoch != current.check_val_every_n_epoch:
+            mismatches.append("check_val_every_n_epoch")
+        if self.accumulate_grad_batches != current.accumulate_grad_batches:
+            mismatches.append("accumulate_grad_batches")
+        if self.gradient_clip_val != current.gradient_clip_val:
+            mismatches.append("gradient_clip_val")
+        if self.gradient_clip_algorithm != current.gradient_clip_algorithm:
+            mismatches.append("gradient_clip_algorithm")
+        if self.deterministic != current.deterministic:
+            mismatches.append("deterministic")
+        if self.use_distributed_sampler != current.use_distributed_sampler:
+            mismatches.append("use_distributed_sampler")
+        if self.barebones != current.barebones:
+            mismatches.append("barebones")
+        if self.sync_batchnorm != current.sync_batchnorm:
+            mismatches.append("sync_batchnorm")
+        if (
+            self.reload_dataloaders_every_n_epochs
+            != current.reload_dataloaders_every_n_epochs
+        ):
+            mismatches.append("reload_dataloaders_every_n_epochs")
+        if self.precision != current.precision:
+            mismatches.append("precision")
+        return tuple(mismatches)
+
+    @classmethod
+    def capture(
+        cls,
+        configuration: _TrainerConfiguration,
+        precision: PrecisionType
+    ) -> _TrainerConfigurationSnapshot:
+        return cls(
+            fast_dev_run=configuration.fast_dev_run,
+            max_epochs=configuration.resolved_max_epochs,
+            min_epochs=configuration.resolved_min_epochs,
+            max_steps=configuration.resolved_max_steps,
+            min_steps=configuration.min_steps,
+            limit_train_batches=configuration.resolved_limit_train_batches,
+            limit_val_batches=configuration.resolved_limit_val_batches,
+            limit_test_batches=configuration.resolved_limit_test_batches,
+            limit_predict_batches=configuration.resolved_limit_predict_batches,
+            overfit_batches=configuration.overfit_batches,
+            validation_interval_identity=cls._validation_interval_identity(
+                configuration.val_check_interval
+            ),
+            check_val_every_n_epoch=(
+                configuration.resolved_check_val_every_n_epoch
+            ),
+            num_sanity_val_steps=configuration.resolved_num_sanity_val_steps,
+            log_every_n_steps=configuration.resolved_log_every_n_steps,
+            enable_checkpointing=configuration.resolved_enable_checkpointing,
+            enable_progress_bar=configuration.resolved_enable_progress_bar,
+            enable_model_summary=configuration.resolved_enable_model_summary,
+            accumulate_grad_batches=configuration.accumulate_grad_batches,
+            gradient_clip_val=configuration.gradient_clip_val,
+            gradient_clip_algorithm=configuration.gradient_clip_algorithm,
+            deterministic=configuration.deterministic,
+            inference_mode=configuration.inference_mode,
+            use_distributed_sampler=configuration.use_distributed_sampler,
+            detect_anomaly=configuration.detect_anomaly,
+            barebones=configuration.barebones,
+            sync_batchnorm=configuration.sync_batchnorm,
+            reload_dataloaders_every_n_epochs=(
+                configuration.reload_dataloaders_every_n_epochs
+            ),
+            enable_autolog_hparams=configuration.enable_autolog_hparams,
+            precision=precision
+        )
+
+    @classmethod
+    def _validation_interval_identity(
+        cls,
+        interval: _ValidationInterval
+    ) -> str:
+        del cls
+        if interval is None:
+            return "default"
+        if isinstance(interval, bool):
+            raise TypeError("Validation interval cannot be a bool.")
+        if isinstance(interval, int):
+            return f"batches:{interval}"
+        if isinstance(interval, float):
+            return f"fraction:{interval.hex()}"
+        if isinstance(interval, str):
+            return f"duration:{interval}"
+        if isinstance(interval, timedelta):
+            return f"duration_seconds:{interval.total_seconds().hex()}"
+        parts: str = ",".join(
+            f"{name}={value}"
+            for name, value in interval
+        )
+        return f"duration_parts:{parts}"
 
 
 class _TrainerConfiguration(BaseModel):

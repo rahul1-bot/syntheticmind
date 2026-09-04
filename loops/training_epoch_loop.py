@@ -147,12 +147,12 @@ class TrainingEpochLoop(Loop):
     def _start_epoch(self) -> None:
         self.validation_ran_this_epoch: bool = False
         if self._resume_rng_state is not None:
-            self.trainer._checkpoint_connector.restore_rng_state(
+            self.trainer._checkpoint_connector.restore_random_state(
                 self._resume_rng_state
             )
             self._resume_rng_state: CheckpointDict | None = None
         self._epoch_start_rng_state: CheckpointDict | None = (
-            self.trainer._checkpoint_connector.collect_rng_state()
+            self.trainer._checkpoint_connector.capture_random_state()
         )
 
     def _prepare_batch_iteration(
@@ -335,7 +335,7 @@ class TrainingEpochLoop(Loop):
     def _restore_checkpoint_random_state(self) -> None:
         if self._resume_checkpoint_rng_state is None:
             return
-        self.trainer._checkpoint_connector.restore_rng_state(
+        self.trainer._checkpoint_connector.restore_random_state(
             self._resume_checkpoint_rng_state
         )
         self._resume_checkpoint_rng_state: CheckpointDict | None = None
@@ -385,7 +385,7 @@ class TrainingEpochLoop(Loop):
             if self._use_completed_loader_states
             else combined_loader._state_dicts()
         )
-        if not combined_loader_states or epoch_completed:
+        if epoch_completed:
             trainer._checkpoint_connector.reset_training_continuation()
             return
         trainer._checkpoint_connector.train_dataloader_states: list[
@@ -397,6 +397,9 @@ class TrainingEpochLoop(Loop):
         )
         trainer._checkpoint_connector.train_total_batch_idx: int = (
             self._total_batches_processed - 1
+        )
+        trainer._checkpoint_connector.train_epoch_rng_state: CheckpointDict | None = (
+            self._epoch_start_rng_state
         )
 
     def _batch_start_requests_stop(

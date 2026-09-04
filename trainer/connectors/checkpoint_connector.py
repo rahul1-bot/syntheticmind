@@ -1,10 +1,9 @@
-import random
 import warnings
 from pathlib import Path
 from typing import cast
 
-import numpy as np
 import torch
+from pydantic import ValidationError
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpointing import ModelCheckpoint
@@ -12,12 +11,14 @@ from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.core.optimizer import _SchedulerInstance
 from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.randomness import _Randomness, _RandomStateSnapshot
 from syntheticmind.plugins.checkpoint_io import (
     CheckpointPath,
     CheckpointStorageOptions
 )
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
+from syntheticmind.trainer.configuration import _TrainerConfigurationSnapshot
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.storage.filesystem import (
     basename,
@@ -42,17 +43,20 @@ class _CheckpointConnector:
         self,
         strategy: Strategy,
         callback_connector: _CallbackConnector,
-        fast_dev_run: bool
+        fast_dev_run: bool,
+        randomness: _Randomness
     ) -> None:
         self._strategy: Strategy = strategy
         self._callback_connector: _CallbackConnector = callback_connector
         self._fast_dev_run: bool = fast_dev_run
+        self._randomness: _Randomness = randomness
         self._path: str | Path | None = None
         self._user_managed: bool = False
         self.train_dataloader_states: list[DataLoaderState] = []
         self.train_dataloader_state_active: bool = False
         self.train_dataloader_batches_completed: int = 0
         self.train_total_batch_idx: int = -1
+        self.train_epoch_rng_state: CheckpointDict | None = None
 
     def select_path(
         self,
@@ -105,6 +109,7 @@ class _CheckpointConnector:
         self.train_dataloader_state_active: bool = False
         self.train_dataloader_batches_completed: int = 0
         self.train_total_batch_idx: int = -1
+        self.train_epoch_rng_state: CheckpointDict | None = None
 
     def build(
         self,
@@ -121,26 +126,28 @@ class _CheckpointConnector:
         precision_plugin: Precision,
         weights_only: bool,
         model_state_dict: CheckpointValue,
-        optimizer_states: list[CheckpointValue]
+        optimizer_states: list[CheckpointValue],
+        trainer_configuration: CheckpointValue
     ) -> CheckpointDict:
         checkpoint: CheckpointDict = {
-            "schema_version": 1,
+            "schema_version": 2,
             "epoch": epoch,
             "global_step": global_step,
-            "state_dict": model_state_dict
+            "state_dict": model_state_dict,
+            "trainer_configuration": trainer_configuration
         }
         if isinstance(model, HyperparametersMixin):
             self._store_hyperparameters(checkpoint, model)
         if not weights_only:
-            checkpoint["rng_state"]: CheckpointValue = self.collect_rng_state()
+            checkpoint["rng_state"]: CheckpointValue = self.capture_random_state()
             checkpoint["optimizer_states"]: CheckpointValue = optimizer_states
-        if completed_batches > 0:
+        if not weights_only and completed_batches > 0:
             checkpoint["completed_batches"]: CheckpointValue = completed_batches
-        if total_batch_idx >= 0:
+        if not weights_only and total_batch_idx >= 0:
             checkpoint["total_batch_idx"]: CheckpointValue = total_batch_idx
-        if epoch_rng_state is not None:
+        if not weights_only and epoch_rng_state is not None:
             checkpoint["epoch_rng_state"]: CheckpointValue = epoch_rng_state
-        if combined_loader_states:
+        if not weights_only and combined_loader_states:
             checkpoint["loops"]: CheckpointValue = {
                 "fit_loop": {
                     "state_dict": {
@@ -170,7 +177,7 @@ class _CheckpointConnector:
                 CheckpointValue,
                 callback_states
             )
-        if datamodule is not None:
+        if not weights_only and datamodule is not None:
             self._store_hyperparameters(checkpoint, datamodule)
             datamodule_state: StateDict = datamodule.state_dict()
             if datamodule_state:
@@ -186,6 +193,7 @@ class _CheckpointConnector:
                     precision_state
                 )
         checkpoint["metadata"]: CheckpointValue = {
+            "checkpoint_type": "weights" if weights_only else "training",
             "torch_version": str(torch.__version__),
             "strategy": type(self._strategy).__name__,
             "world_size": self._strategy.world_size
@@ -227,6 +235,48 @@ class _CheckpointConnector:
             strict,
             restore_optimizers
         )
+
+    def validate_fit_configuration(
+        self,
+        checkpoint: CheckpointDict,
+        current: _TrainerConfigurationSnapshot
+    ) -> None:
+        checkpoint_type: str = self._checkpoint_type(checkpoint)
+        if checkpoint_type == "weights":
+            raise MisconfigurationError(
+                "A weights-only model artifact cannot continue a fit trajectory. "
+                "Load it as model weights or provide a training checkpoint."
+            )
+        saved: _TrainerConfigurationSnapshot = self.configuration_snapshot(
+            checkpoint
+        )
+        mismatches: tuple[str, ...] = saved.resume_mismatches(current)
+        if mismatches:
+            raise MisconfigurationError(
+                "Checkpoint training configuration is incompatible with the "
+                f"current Trainer for fields {list(mismatches)}."
+            )
+
+    def configuration_snapshot(
+        self,
+        checkpoint: CheckpointDict
+    ) -> _TrainerConfigurationSnapshot:
+        configuration: CheckpointValue | None = checkpoint.get(
+            "trainer_configuration"
+        )
+        if not isinstance(configuration, dict):
+            raise TypeError(
+                "Checkpoint `trainer_configuration` must be a mapping."
+            )
+        try:
+            return _TrainerConfigurationSnapshot.model_validate(
+                configuration,
+                strict=True
+            )
+        except ValidationError as exception:
+            raise ValueError(
+                "Checkpoint Trainer configuration is invalid."
+            ) from exception
 
     def save(
         self,
@@ -271,25 +321,15 @@ class _CheckpointConnector:
     def teardown(self) -> None:
         self._strategy.checkpoint.teardown()
 
-    def collect_rng_state(self) -> CheckpointDict:
-        numpy_rng_state: tuple[str, np.ndarray, int, int, float] = cast(
-            tuple[str, np.ndarray, int, int, float],
-            np.random.get_state()
+    def capture_random_state(self) -> CheckpointDict:
+        return cast(
+            CheckpointDict,
+            self._randomness.capture().model_dump(mode="python")
         )
-        states: CheckpointDict = {
-            "python": random.getstate(),
-            "numpy": {
-                "bit_generator": numpy_rng_state[0],
-                "state": torch.from_numpy(numpy_rng_state[1].copy()),
-                "position": numpy_rng_state[2],
-                "has_gauss": numpy_rng_state[3],
-                "cached_gaussian": numpy_rng_state[4]
-            },
-            "torch": torch.random.get_rng_state()
-        }
-        if torch.cuda.is_available():
-            states["cuda"]: CheckpointValue = torch.cuda.get_rng_state_all()
-        return states
+
+    def restore_random_state(self, state: CheckpointDict) -> None:
+        snapshot: _RandomStateSnapshot = self._parse_random_state(state)
+        self._randomness.restore(snapshot)
 
     def restore_training_state(
         self,
@@ -298,9 +338,9 @@ class _CheckpointConnector:
         schedulers: list[_SchedulerInstance] | None,
         datamodule: DataModule | None,
         precision_plugin: Precision,
-        restore_datamodule_state: bool
+        restore_datamodule_state: bool,
+        restore_schedulers: bool
     ) -> tuple[int, int, int, int, CheckpointDict | None]:
-        scheduler_states: CheckpointValue | None = checkpoint.get("lr_schedulers")
         scheduler_list: list[_SchedulerInstance] = (
             list(schedulers)
             if schedulers is not None
@@ -308,54 +348,116 @@ class _CheckpointConnector:
             if scheduler is not None
             else []
         )
-        if isinstance(scheduler_states, list):
-            scheduler_pair: tuple[_SchedulerInstance, CheckpointValue]
-            for scheduler_pair in zip(
-                scheduler_list,
-                scheduler_states,
-                strict=False
-            ):
-                current_scheduler: _SchedulerInstance = scheduler_pair[0]
-                scheduler_state: CheckpointValue = scheduler_pair[1]
-                if not isinstance(scheduler_state, dict):
-                    raise TypeError("Scheduler checkpoint state must be a mapping.")
-                current_scheduler.load_state_dict(cast(StateDict, scheduler_state))
+        if restore_schedulers:
+            self._restore_scheduler_states(checkpoint, scheduler_list)
         rng_state: CheckpointValue | None = checkpoint.get("rng_state")
-        if isinstance(rng_state, dict):
-            self.restore_rng_state(cast(CheckpointDict, rng_state))
-        callback_states_value: CheckpointValue | None = checkpoint.get("callbacks")
-        callback_states: dict[str, StateDict] = (
-            cast(dict[str, StateDict], callback_states_value)
-            if isinstance(callback_states_value, dict)
-            else {}
-        )
-        callback: Callback
-        for callback in self._callback_connector.callbacks:
-            callback_state: StateDict | None = callback_states.get(
-                callback.state_key
-            )
-            if callback_state is not None:
-                callback.load_state_dict(callback_state)
+        if rng_state is not None:
+            if not isinstance(rng_state, dict):
+                raise TypeError("Checkpoint `rng_state` must be a mapping.")
+            self.restore_random_state(cast(CheckpointDict, rng_state))
+        self._restore_callback_states(checkpoint)
         if datamodule is not None and restore_datamodule_state:
             self.load_datamodule_state(checkpoint, datamodule)
+        self._restore_precision_state(checkpoint, precision_plugin)
+        return self._training_progress(checkpoint)
+
+    def _restore_scheduler_states(
+        self,
+        checkpoint: CheckpointDict,
+        schedulers: list[_SchedulerInstance]
+    ) -> None:
+        scheduler_states: CheckpointValue | None = checkpoint.get("lr_schedulers")
+        if scheduler_states is None:
+            if schedulers:
+                raise KeyError(
+                    "Checkpoint is missing learning-rate scheduler state required "
+                    "for exact fit continuation."
+                )
+            return
+        if not isinstance(scheduler_states, list):
+            raise TypeError("Checkpoint `lr_schedulers` must be a list.")
+        if len(scheduler_states) != len(schedulers):
+            raise MisconfigurationError(
+                "Checkpoint scheduler count does not match the configured "
+                f"scheduler count: checkpoint={len(scheduler_states)}, "
+                f"configured={len(schedulers)}."
+            )
+        scheduler_pair: tuple[_SchedulerInstance, CheckpointValue]
+        for scheduler_pair in zip(schedulers, scheduler_states, strict=True):
+            current_scheduler: _SchedulerInstance = scheduler_pair[0]
+            scheduler_state: CheckpointValue = scheduler_pair[1]
+            if not isinstance(scheduler_state, dict):
+                raise TypeError("Each scheduler checkpoint state must be a mapping.")
+            current_scheduler.load_state_dict(cast(StateDict, scheduler_state))
+
+    def _restore_callback_states(self, checkpoint: CheckpointDict) -> None:
+        callback_states_value: CheckpointValue | None = checkpoint.get("callbacks")
+        if callback_states_value is None:
+            return
+        if not isinstance(callback_states_value, dict):
+            raise TypeError("Checkpoint `callbacks` state must be a mapping.")
+        callback_states: dict[str, CheckpointValue] = callback_states_value
+        callback: Callback
+        for callback in self._callback_connector.callbacks:
+            callback_state: CheckpointValue | None = callback_states.get(
+                callback.state_key
+            )
+            if callback_state is None:
+                continue
+            if not isinstance(callback_state, dict):
+                raise TypeError(
+                    f"Checkpoint state for callback {callback.state_key!r} must "
+                    "be a mapping."
+                )
+            callback.load_state_dict(cast(StateDict, callback_state))
+
+    def _restore_precision_state(
+        self,
+        checkpoint: CheckpointDict,
+        precision_plugin: Precision
+    ) -> None:
         precision_state: CheckpointValue | None = checkpoint.get(
             type(precision_plugin).__qualname__
         )
-        if isinstance(precision_state, dict):
-            precision_plugin.load_state_dict(cast(StateDict, precision_state))
-        epoch: int = self.integer_value(checkpoint.get("epoch"), 0)
-        global_step: int = self.integer_value(checkpoint.get("global_step"), 0)
+        if precision_state is None:
+            return
+        if not isinstance(precision_state, dict):
+            raise TypeError(
+                f"Checkpoint state for precision plugin "
+                f"{type(precision_plugin).__qualname__!r} must be a mapping."
+            )
+        precision_plugin.load_state_dict(cast(StateDict, precision_state))
+
+    def _training_progress(
+        self,
+        checkpoint: CheckpointDict
+    ) -> tuple[int, int, int, int, CheckpointDict | None]:
+        epoch: int = self.integer_value(checkpoint.get("epoch"), "epoch", 0)
+        global_step: int = self.integer_value(
+            checkpoint.get("global_step"),
+            "global_step",
+            0
+        )
         completed_batches: int = self.integer_value(
             checkpoint.get("completed_batches"),
+            "completed_batches",
             0
         )
         total_batch_idx: int = self.integer_value(
             checkpoint.get("total_batch_idx"),
+            "total_batch_idx",
             -1
         )
         epoch_rng_state_value: CheckpointValue | None = checkpoint.get(
             "epoch_rng_state"
         )
+        if epoch_rng_state_value is not None and not isinstance(
+            epoch_rng_state_value,
+            dict
+        ):
+            raise TypeError("Checkpoint `epoch_rng_state` must be a mapping.")
+        if isinstance(epoch_rng_state_value, dict):
+            self._parse_random_state(cast(CheckpointDict, epoch_rng_state_value))
         epoch_rng_state: CheckpointDict | None = (
             cast(CheckpointDict, epoch_rng_state_value)
             if isinstance(epoch_rng_state_value, dict)
@@ -369,46 +471,14 @@ class _CheckpointConnector:
             epoch_rng_state
         )
 
-    def restore_rng_state(self, rng_state: CheckpointDict) -> None:
-        if "python" in rng_state:
-            random.setstate(cast(tuple, rng_state["python"]))
-        numpy_state: CheckpointValue | None = rng_state.get("numpy")
-        if isinstance(numpy_state, dict):
-            bit_generator: CheckpointValue | None = numpy_state.get("bit_generator")
-            state_tensor: CheckpointValue | None = numpy_state.get("state")
-            position: CheckpointValue | None = numpy_state.get("position")
-            has_gauss: CheckpointValue | None = numpy_state.get("has_gauss")
-            cached_gaussian: CheckpointValue | None = numpy_state.get(
-                "cached_gaussian"
-            )
-            if (
-                isinstance(bit_generator, str)
-                and isinstance(state_tensor, torch.Tensor)
-                and isinstance(position, int)
-                and isinstance(has_gauss, int)
-                and isinstance(cached_gaussian, float | int)
-            ):
-                np.random.set_state(
-                    (
-                        bit_generator,
-                        state_tensor.cpu().numpy().astype(np.uint32, copy=False),
-                        position,
-                        has_gauss,
-                        float(cached_gaussian)
-                    )
-                )
-        torch_state: CheckpointValue | None = rng_state.get("torch")
-        if isinstance(torch_state, torch.Tensor):
-            torch.random.set_rng_state(torch_state.cpu())
-        cuda_state: CheckpointValue | None = rng_state.get("cuda")
-        if torch.cuda.is_available() and isinstance(cuda_state, list):
-            cuda_states: list[torch.Tensor] = []
-            state: CheckpointValue
-            for state in cuda_state:
-                if not isinstance(state, torch.Tensor):
-                    raise TypeError("CUDA RNG checkpoint state must contain tensors.")
-                cuda_states.append(state.cpu())
-            torch.cuda.set_rng_state_all(cuda_states)
+    def _parse_random_state(
+        self,
+        state: CheckpointDict
+    ) -> _RandomStateSnapshot:
+        try:
+            return _RandomStateSnapshot.model_validate(state, strict=True)
+        except ValidationError as exception:
+            raise ValueError("Checkpoint random state is invalid.") from exception
 
     def combined_loader_states(
         self,
@@ -449,25 +519,30 @@ class _CheckpointConnector:
         checkpoint: CheckpointDict,
         datamodule: DataModule
     ) -> None:
-        datamodule_state: CheckpointValue | None = checkpoint.get(
-            type(datamodule).__qualname__
-        )
-        if isinstance(datamodule_state, dict):
-            datamodule.load_state_dict(cast(StateDict, datamodule_state))
+        state_key: str = type(datamodule).__qualname__
+        datamodule_state: CheckpointValue | None = checkpoint.get(state_key)
+        if datamodule_state is None:
+            return
+        if not isinstance(datamodule_state, dict):
+            raise TypeError(
+                f"Checkpoint state for data module {state_key!r} must be a mapping."
+            )
+        datamodule.load_state_dict(cast(StateDict, datamodule_state))
 
-    def integer_value(self, value: CheckpointValue | None, default: int) -> int:
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float | str):
-            try:
-                return int(value)
-            except (OverflowError, ValueError):
-                return default
-        if isinstance(value, torch.Tensor) and value.numel() == 1:
-            return int(value.item())
-        return default
+    def integer_value(
+        self,
+        value: CheckpointValue | None,
+        field_name: str,
+        default: int
+    ) -> int:
+        if value is None:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(
+                f"Checkpoint `{field_name}` must be an integer, got "
+                f"{type(value).__qualname__}."
+            )
+        return value
 
     @property
     def path(self) -> str | Path | None:
@@ -563,7 +638,95 @@ class _CheckpointConnector:
 
     def _validate_schema(self, checkpoint: CheckpointDict) -> None:
         schema_version: CheckpointValue | None = checkpoint.get("schema_version")
-        if schema_version != 1:
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+            raise TypeError("Checkpoint `schema_version` must be an integer.")
+        if schema_version != 2:
             raise ValueError(
                 f"Unsupported SyntheticMind checkpoint schema {schema_version!r}."
             )
+        state_dict: CheckpointValue | None = checkpoint.get("state_dict")
+        if state_dict is not None and not isinstance(state_dict, dict):
+            raise TypeError("Checkpoint `state_dict` must be a mapping when present.")
+        for required_field in (
+            "epoch",
+            "global_step",
+            "metadata",
+            "trainer_configuration"
+        ):
+            if required_field not in checkpoint:
+                raise KeyError(f"Checkpoint is missing required field {required_field!r}.")
+        self.configuration_snapshot(checkpoint)
+        self._checkpoint_type(checkpoint)
+        self._training_progress(checkpoint)
+        self.combined_loader_states(checkpoint)
+        self._validate_state_list(checkpoint, "optimizer_states")
+        self._validate_state_list(checkpoint, "lr_schedulers")
+        self._validate_callback_states(checkpoint)
+        rng_state: CheckpointValue | None = checkpoint.get("rng_state")
+        if rng_state is not None:
+            if not isinstance(rng_state, dict):
+                raise TypeError("Checkpoint `rng_state` must be a mapping.")
+            self._parse_random_state(cast(CheckpointDict, rng_state))
+        metadata: CheckpointValue | None = checkpoint.get("metadata")
+        if not isinstance(metadata, dict):
+            raise TypeError("Checkpoint `metadata` must be a mapping.")
+        torch_version: CheckpointValue | None = metadata.get("torch_version")
+        strategy_name: CheckpointValue | None = metadata.get("strategy")
+        world_size: CheckpointValue | None = metadata.get("world_size")
+        if not isinstance(torch_version, str) or not torch_version:
+            raise TypeError("Checkpoint metadata `torch_version` must be a string.")
+        if not isinstance(strategy_name, str) or not strategy_name:
+            raise TypeError("Checkpoint metadata `strategy` must be a string.")
+        if isinstance(world_size, bool) or not isinstance(world_size, int):
+            raise TypeError("Checkpoint metadata `world_size` must be an integer.")
+        if world_size < 1:
+            raise ValueError("Checkpoint metadata `world_size` must be positive.")
+
+    def _checkpoint_type(self, checkpoint: CheckpointDict) -> str:
+        metadata: CheckpointValue | None = checkpoint.get("metadata")
+        if not isinstance(metadata, dict):
+            raise TypeError("Checkpoint `metadata` must be a mapping.")
+        checkpoint_type: CheckpointValue | None = metadata.get("checkpoint_type")
+        if not isinstance(checkpoint_type, str) or checkpoint_type not in {
+            "training",
+            "weights"
+        }:
+            raise ValueError(
+                "Checkpoint metadata `checkpoint_type` must be 'training' or "
+                "'weights'."
+            )
+        return checkpoint_type
+
+    def _validate_state_list(
+        self,
+        checkpoint: CheckpointDict,
+        field_name: str
+    ) -> None:
+        states: CheckpointValue | None = checkpoint.get(field_name)
+        if states is None:
+            return
+        if not isinstance(states, list):
+            raise TypeError(f"Checkpoint `{field_name}` must be a list.")
+        index: int
+        state: CheckpointValue
+        for index, state in enumerate(states):
+            if not isinstance(state, dict):
+                raise TypeError(
+                    f"Checkpoint `{field_name}[{index}]` must be a mapping."
+                )
+
+    def _validate_callback_states(self, checkpoint: CheckpointDict) -> None:
+        states: CheckpointValue | None = checkpoint.get("callbacks")
+        if states is None:
+            return
+        if not isinstance(states, dict):
+            raise TypeError("Checkpoint `callbacks` must be a mapping.")
+        state_key: str
+        state: CheckpointValue
+        for state_key, state in states.items():
+            if not isinstance(state_key, str):
+                raise TypeError("Checkpoint callback state keys must be strings.")
+            if not isinstance(state, dict):
+                raise TypeError(
+                    f"Checkpoint callback state {state_key!r} must be a mapping."
+                )

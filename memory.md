@@ -161,15 +161,15 @@
     6. CSV schema widening is a commit operation: adopt the existing header, serialize all prior rows under the union, atomically replace the file, and roll back live field state if promotion fails.
     7. Broad in-memory hyperparameters become logger data only after deterministic portable normalization; live modules, non-scalar tensors, non-scalar arrays, and non-finite values must fail instead of degrading through arbitrary string conversion.
 
-| Memory | Checkpoint Trajectory and Policy Ownership | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
+| Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 
-    1. A resumable checkpoint is a trajectory aggregate, not a model-weight file: optimizer, scheduler, callbacks, DataModule, precision, loop progress, loader cursor, random streams, epoch, and global step must share one coordinator.
+    1. A resumable checkpoint is a trajectory aggregate, not a model-weight file: optimizer, scheduler, callbacks, DataModule, precision, resolved configuration, loop progress, loader cursor, random streams, epoch, and global step must share one coordinator.
     2. Strategy owns the representation of model and optimizer state because sharding depends on execution topology; the Trainer connector owns when that representation joins the remaining trajectory and in which order it restores.
     3. `CheckpointIO` owns transport and atomic persistence but must not interpret training lifecycle state. `ModelCheckpoint` owns cadence and retention but must not construct a competing payload.
-    4. Checkpoint callback state must mutate before payload assembly and roll back when transport fails; mutating after persistence makes every saved callback snapshot describe the preceding artifact.
-    5. A last artifact is current only when its saved optimizer-step coordinate equals the Trainer's final global step; path existence alone cannot prove final-state durability.
-    6. Deferred-validation triggers must clear before serialization, and a rejected top-k candidate must not make link mode point `last` at an older best artifact.
-    7. Full, sharded, remote, asynchronous, weights-only, mid-epoch, linked, distributed, and failure-atomic paths require separate evidence because success in one representation proves nothing about another.
+    4. Loader state and training progress are independent: an ordinary stateless loader still requires completed-batch coordinates, epoch-start randomness for deterministic replay, and checkpoint-time randomness before the next model step.
+    5. Random state must use one immutable validated schema across checkpoint and process boundaries and capture only active accelerators; probing MPS during a CPU fork can initialize unsafe native runtime state.
+    6. Resolved run configuration is provenance and a compatibility boundary; a higher step or epoch ceiling may continue the same run, while trajectory-defining accumulation, data, validation, precision, and synchronization settings must not drift silently.
+    7. A weights-only artifact must omit every resumable-state fragment and identify itself explicitly, while full, sharded, remote, asynchronous, mid-epoch, linked, distributed, and failure-atomic paths require separate evidence.
 
 | Memory | Optimizer, Epoch, and Topology Semantics | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 

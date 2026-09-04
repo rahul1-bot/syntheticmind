@@ -1,12 +1,12 @@
-import random
 from pathlib import Path
-from typing import ClassVar, Literal, cast
+from typing import ClassVar, Literal
 
-import numpy as np
 import torch
 from pydantic import BaseModel, ConfigDict
 
+from syntheticmind.randomness import _RandomStateSnapshot
 from syntheticmind.types import (
+    CheckpointDict,
     DataLoaderState,
     DataLoaderSource,
     ModelOutput,
@@ -24,8 +24,6 @@ type StageResult = (
     | list[ModelOutput]
     | list[list[ModelOutput]]
 )
-type NumPyRandomState = tuple[str, np.ndarray, int, int, float]
-type PythonRandomState = tuple[int, tuple[int, ...], None]
 type StageArgument = DataLoaderSource | str | Path | bool | None
 type StageArguments = dict[str, StageArgument]
 
@@ -40,42 +38,11 @@ class _GlobalState(BaseModel):
         validate_default=True
     )
 
-    python_random_state: PythonRandomState
-    numpy_random_state: NumPyRandomState
-    torch_random_state: torch.Tensor
-    torch_cuda_random_state: list[torch.Tensor]
+    random_state: _RandomStateSnapshot
     deterministic_algorithms: bool
     deterministic_warn_only: bool
     cudnn_benchmark: bool
     cudnn_deterministic: bool
-
-    @classmethod
-    def capture(cls) -> _GlobalState:
-        return cls(
-            python_random_state=cast(PythonRandomState, random.getstate()),
-            numpy_random_state=cast(NumPyRandomState, np.random.get_state()),
-            torch_random_state=torch.random.get_rng_state(),
-            torch_cuda_random_state=(
-                torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []
-            ),
-            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
-            deterministic_warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
-            cudnn_benchmark=torch.backends.cudnn.benchmark,
-            cudnn_deterministic=torch.backends.cudnn.deterministic
-        )
-
-    def restore(self) -> None:
-        random.setstate(self.python_random_state)
-        np.random.set_state(self.numpy_random_state)
-        torch.random.set_rng_state(self.torch_random_state)
-        torch.cuda.set_rng_state_all(self.torch_cuda_random_state)
-        torch.use_deterministic_algorithms(
-            self.deterministic_algorithms,
-            warn_only=self.deterministic_warn_only
-        )
-        torch.backends.cudnn.benchmark: bool = self.cudnn_benchmark
-        torch.backends.cudnn.deterministic: bool = self.cudnn_deterministic
-
 
 class _WorkerOutput(BaseModel):
     schema_version: Literal[1] = 1
@@ -109,6 +76,7 @@ class _WorkerOutput(BaseModel):
     train_dataloader_state_active: bool
     train_dataloader_batches_completed: int
     train_total_batch_idx: int
+    train_epoch_rng_state: CheckpointDict | None
     received_sigterm: bool
     is_last_batch: bool
     global_state: _GlobalState

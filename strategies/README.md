@@ -22,7 +22,7 @@ Strategy
 | `ddp.py` | PyTorch `DistributedDataParallel` wrapping and DDP-specific gradient behavior. |
 | `model_parallel.py` | Device-mesh construction, model parallelization, and model-parallel state semantics. |
 | `model_initialization.py` | Strategy-aware empty initialization, materialization, and parameter-reset interception. |
-| `launchers/` | Internal process launch policy, subprocess execution, multiprocessing execution, worker state transfer, environment reconstruction, and failure observation. |
+| `launchers/` | Internal process launch policy, subprocess execution, multiprocessing execution, validated worker state transfer, environment reconstruction, and failure observation. |
 
 Files are admitted by ML or distributed-systems concepts, not by line-count pressure. Shared behavior remains on `Strategy` or `ParallelStrategy`; concrete strategy modules contain only behavior that changes the selected execution algorithm. Internal implementation mechanisms do not become public strategy concepts merely because they are reusable.
 

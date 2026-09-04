@@ -1,11 +1,12 @@
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
+import syntheticmind
 import torch
 
 from syntheticmind.callbacks.callback import Callback
+from syntheticmind.core.datamodule import DataModule
+from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
     StageArguments,
     StageResult,
@@ -13,16 +14,12 @@ from syntheticmind.strategies.launchers.contracts import (
     _WorkerOutput
 )
 from syntheticmind.types import (
+    CheckpointDict,
     DataLoaderState,
     RunningStage,
     StateDict,
     TrainerStage
 )
-
-if TYPE_CHECKING:
-    from syntheticmind.core.datamodule import DataModule
-    from syntheticmind.core.module import Module
-    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = []
 
@@ -32,7 +29,7 @@ class _StageInvoker:
     def invoke(
         cls,
         stage: TrainerStage,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         datamodule: DataModule | None,
         stage_kwargs: StageArguments
@@ -51,9 +48,35 @@ class _StageInvoker:
 
 class _WorkerStateTransfer:
     @classmethod
+    def capture_global_state(cls, trainer: syntheticmind.Trainer) -> _GlobalState:
+        del cls
+        return _GlobalState(
+            random_state=trainer._randomness.capture(),
+            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
+            deterministic_warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            cudnn_benchmark=torch.backends.cudnn.benchmark,
+            cudnn_deterministic=torch.backends.cudnn.deterministic
+        )
+
+    @classmethod
+    def restore_global_state(
+        cls,
+        trainer: syntheticmind.Trainer,
+        global_state: _GlobalState
+    ) -> None:
+        del cls
+        trainer._randomness.restore(global_state.random_state)
+        torch.use_deterministic_algorithms(
+            global_state.deterministic_algorithms,
+            warn_only=global_state.deterministic_warn_only
+        )
+        torch.backends.cudnn.benchmark: bool = global_state.cudnn_benchmark
+        torch.backends.cudnn.deterministic: bool = global_state.cudnn_deterministic
+
+    @classmethod
     def collect(
         cls,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         datamodule: DataModule | None,
         result: StageResult
@@ -69,7 +92,9 @@ class _WorkerStateTransfer:
         progress_metrics: dict[RunningStage, dict[str, float]] = {}
         running_stage: RunningStage
         running_metrics: dict[str, float]
-        for running_stage, running_metrics in trainer._logger_connector.progress_bar_metrics_by_stage.items():
+        for running_stage, running_metrics in (
+            trainer._logger_connector.progress_bar_metrics_by_stage.items()
+        ):
             progress_metrics[running_stage]: dict[str, float] = dict(running_metrics)
         callback_states: list[StateDict] = []
         callback: Callback
@@ -99,21 +124,24 @@ class _WorkerStateTransfer:
             total_test_batches=trainer._data_connector.total_test_batches,
             total_predict_batches=trainer._data_connector.total_predict_batches,
             train_dataloader_states=trainer._checkpoint_connector.train_dataloader_states,
-            train_dataloader_state_active=trainer._checkpoint_connector.train_dataloader_state_active,
+            train_dataloader_state_active=(
+                trainer._checkpoint_connector.train_dataloader_state_active
+            ),
             train_dataloader_batches_completed=(
                 trainer._checkpoint_connector.train_dataloader_batches_completed
             ),
             train_total_batch_idx=trainer._checkpoint_connector.train_total_batch_idx,
+            train_epoch_rng_state=trainer._checkpoint_connector.train_epoch_rng_state,
             received_sigterm=trainer.received_sigterm,
             is_last_batch=trainer.is_last_batch,
-            global_state=_GlobalState.capture()
+            global_state=cls.capture_global_state(trainer)
         )
 
     @classmethod
     def restore(
         cls,
         worker_output: _WorkerOutput,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         datamodule: DataModule | None,
         stage: TrainerStage
@@ -122,9 +150,9 @@ class _WorkerStateTransfer:
         trainer.module: Module | None = module
         trainer.strategy.model: torch.nn.Module | None = module
         trainer.datamodule: DataModule | None = datamodule
-        module.trainer: Trainer = trainer
+        module.trainer: syntheticmind.Trainer = trainer
         if datamodule is not None:
-            datamodule.trainer: Trainer = trainer
+            datamodule.trainer: syntheticmind.Trainer = trainer
         trainer.state.load_state_dict(worker_output.trainer_state_dict)
         if worker_output.trainer_state_dict.get("status") == "interrupted":
             trainer.state.interrupt()
@@ -177,8 +205,12 @@ class _WorkerStateTransfer:
             worker_output.test_metrics
         )
         trainer._data_connector.total_train_batches: int | None = worker_output.total_train_batches
-        trainer._data_connector.total_val_batches: list[int | None] | None = worker_output.total_val_batches
-        trainer._data_connector.total_test_batches: list[int | None] | None = worker_output.total_test_batches
+        trainer._data_connector.total_val_batches: list[int | None] | None = (
+            worker_output.total_val_batches
+        )
+        trainer._data_connector.total_test_batches: list[int | None] | None = (
+            worker_output.total_test_batches
+        )
         trainer._data_connector.total_predict_batches: list[int | None] | None = (
             worker_output.total_predict_batches
         )
@@ -191,13 +223,18 @@ class _WorkerStateTransfer:
         trainer._checkpoint_connector.train_dataloader_batches_completed: int = (
             worker_output.train_dataloader_batches_completed
         )
-        trainer._checkpoint_connector.train_total_batch_idx: int = worker_output.train_total_batch_idx
+        trainer._checkpoint_connector.train_total_batch_idx: int = (
+            worker_output.train_total_batch_idx
+        )
+        trainer._checkpoint_connector.train_epoch_rng_state: CheckpointDict | None = (
+            worker_output.train_epoch_rng_state
+        )
         trainer._signal_connector.received_sigterm: bool = (
             trainer.received_sigterm or worker_output.received_sigterm
         )
         if trainer.fit_loop.epoch_loop is not None:
             trainer.fit_loop.epoch_loop.is_last_batch: bool = worker_output.is_last_batch
-        worker_output.global_state.restore()
+        cls.restore_global_state(trainer, worker_output.global_state)
 
     @classmethod
     @torch.no_grad()

@@ -126,12 +126,12 @@
     3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
     4. ✅ Local, MPS, remote fsspec, multi-logger, failure injection, external DDP, internal DDP spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
 
-| Progress Complete | Checkpoint Connector Reconstruction | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
+| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 
-    1. ✅ One Trainer connector now owns checkpoint selection, schema, payload assembly, component restoration, random streams, loop and loader continuation, storage dispatch, and synchronization.
-    2. ✅ The former checkpoint state namespace and Strategy checkpoint-connector identity were removed; Strategy checkpoint representation and storage I/O remain subordinate boundaries with distinct semantics.
-    3. ✅ Checkpoints use one strict schema version and canonical field set without duplicated legacy aliases, while weights-only artifacts omit optimizer, scheduler, callback, precision, and random state.
-    4. ✅ Best, last, user-managed, asynchronous, stateful-loader, DDP launcher, full model-parallel, sharded model-parallel, invalid-schema, and failure-atomic publication paths pass.
+    1. ✅ Schema version 2 now validates artifact identity, resolved Trainer configuration, progress coordinates, state collections, metadata, and immutable multi-backend randomness before restoration.
+    2. ✅ One Randomness owner replaces SeedManager and duplicate launcher or checkpoint RNG logic, captures only active accelerator generators, and preserves exact Python, NumPy, torch CPU, CUDA, and MPS state.
+    3. ✅ Ordinary stateless and stateful loaders retain mid-epoch progress and epoch-start randomness through post-fit saves and spawned worker transfer; scheduler and stochastic model trajectories resume exactly.
+    4. ✅ Weights-only artifacts are explicitly non-resumable, configuration drift fails before model mutation, and corruption, CPU, MPS, subprocess, spawn, DDP, full model-parallel, and sharded model-parallel probes pass.
 
 | Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 

@@ -1,10 +1,10 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
 from typing import cast
 
+import syntheticmind
 import torch.multiprocessing as mp
 
+from syntheticmind.core.datamodule import DataModule
+from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
     ProcessStartMethod,
     StageArguments,
@@ -17,12 +17,6 @@ from syntheticmind.strategies.launchers.subprocess import _SubprocessLauncher
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.types import TrainerStage
-
-if TYPE_CHECKING:
-    from syntheticmind.core.datamodule import DataModule
-    from syntheticmind.core.module import Module
-    from syntheticmind.trainer.trainer import Trainer
-    from syntheticmind.strategies.ddp import DDPStrategy
 
 __all__: list[str] = ["ProcessStartMethod"]
 
@@ -53,7 +47,7 @@ class _ProcessLauncher:
     def launch(
         self,
         stage: TrainerStage,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         datamodule: DataModule | None,
         stage_kwargs: StageArguments

@@ -124,15 +124,15 @@
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
     7. Local and remote CSV, atomic failure retry, TensorBoard event reading, multi-logger mutation isolation, MPS metric views, external DDP, and internal DDP spawn pass; device statistics now populate every rank's callback view while the connector alone gates durable output.
 
-| Architecture Decision | Checkpoint Connector Ownership | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
+| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 
-    1. The Trainer checkpoint connector is now the sole full-trajectory coordinator for checkpoint path selection, canonical payload construction, Strategy state loading, scheduler and callback restoration, DataModule and precision state, random streams, loop and loader continuation, storage dispatch, and synchronization.
-    2. The former behavior-rich `CheckpointState` namespace class was deleted. Its assembly, restoration, random-state, coordinate, DataModule, and loader-continuation behavior moved onto the live connector that owns checkpoint lifecycle state.
-    3. Strategy-side `checkpoint_connector.py` was renamed to `checkpoint.py`, and its ordinary implementation is `_SingleFileCheckpoint`; Connector terminology now refers only to Trainer composition rather than Strategy-local state representation.
-    4. SyntheticMind emits and accepts one private schema with `schema_version=1`, `state_dict`, plural optimizer and scheduler state, callbacks, component state, loop continuation, random state, and metadata. Historical duplicate singular, alias, and unversioned forms are rejected.
-    5. `ModelCheckpoint` retains save cadence and retention policy, Strategy retains topology-specific state representation, and `CheckpointIO` retains storage transport. Neither callback nor Strategy independently coordinates the full training trajectory.
-    6. The cohesive connector exceeds the generic source-size budget under the explicit concept-integrity rule; splitting path, payload, restoration, random streams, and continuation would recreate competing checkpoint owners.
-    7. Best and last selection, user-managed paths, weights-only artifacts, strict schema rejection, asynchronous storage, callback and hyperparameter state, exact stateful-loader continuation, DDP spawn and fork, full and sharded model-parallel resume, and injected distributed publication failure pass.
+    1. The Trainer checkpoint connector remains the sole full-trajectory coordinator for canonical payload construction, strict validation, Strategy state loading, scheduler and callback restoration, DataModule and precision state, loop continuation, storage dispatch, and synchronization.
+    2. Schema version 2 records explicit `training` or `weights` artifact identity, resolved Trainer configuration, strict integer progress, typed state collections, metadata, and one canonical random-state snapshot; malformed structure fails before model or optimizer mutation where runtime construction permits.
+    3. The foundational Randomness owner and immutable Pydantic snapshot now serve seeding, checkpoints, and worker transfer identically across Python, NumPy, torch CPU, and only the active CUDA or MPS backend; the duplicate launcher state and obsolete SeedManager were removed.
+    4. Mid-epoch continuation now persists completed-batch coordinates and epoch-start randomness independently of dataloader-provided state, so ordinary sized dataloaders and stateful iterables both resume the exact stochastic trajectory after post-fit saves and spawned state transfer.
+    5. A persisted resolved configuration snapshot permits larger run ceilings while rejecting drift in accumulation, training and validation limits, cadence, clipping, determinism, sampler policy, barebones state, synchronization, reload cadence, and precision before restoration.
+    6. Weights-only output omits optimizer, scheduler, callback, precision, DataModule, loop, and random state, skips callback save hooks, retains the model hook, and is rejected explicitly as a fit-continuation source.
+    7. Strict corruption probes, scheduler mismatch, pre-mutation configuration mismatch, CPU and MPS stochastic replay, ordinary and stateful loader continuation, subprocess and spawn launch, checkpoint selection, and full and sharded model-parallel resume pass.
 
 | Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 

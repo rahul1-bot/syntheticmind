@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import __main__
 import atexit
 import os
@@ -8,11 +6,13 @@ import sys
 import threading
 from importlib.machinery import ModuleSpec
 from pathlib import Path
-from typing import TYPE_CHECKING
 from typing import cast
 
+import syntheticmind
 import torch
 
+from syntheticmind.core.datamodule import DataModule
+from syntheticmind.core.module import Module
 from syntheticmind.strategies.launchers.contracts import (
     StageArguments,
     StageResult
@@ -23,12 +23,6 @@ from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.launchers.state_transfer import _StageInvoker
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.types import TrainerStage
-
-if TYPE_CHECKING:
-    from syntheticmind.core.datamodule import DataModule
-    from syntheticmind.core.module import Module
-    from syntheticmind.trainer.trainer import Trainer
-    from syntheticmind.strategies.ddp import DDPStrategy
 
 __all__: list[str] = []
 
@@ -61,7 +55,7 @@ class _SubprocessLauncher:
     def launch(
         self,
         stage: TrainerStage,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         datamodule: DataModule | None,
         stage_kwargs: StageArguments

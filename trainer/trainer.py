@@ -45,6 +45,7 @@ from syntheticmind.profilers import (
     PyTorchProfiler,
     SimpleProfiler
 )
+from syntheticmind.randomness import _Randomness
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
@@ -60,7 +61,10 @@ from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
     _LoggerConnector
 )
 from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
-from syntheticmind.trainer.configuration import _TrainerConfiguration
+from syntheticmind.trainer.configuration import (
+    _TrainerConfiguration,
+    _TrainerConfigurationSnapshot
+)
 from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.trainer.hook_dispatcher import _HookDispatcher
 from syntheticmind.combined_loader import CombinedLoader
@@ -71,7 +75,6 @@ from syntheticmind.storage.filesystem import (
     modified_time,
     normalize_path
 )
-from syntheticmind.trainer.seed import SeedManager
 from syntheticmind.types import (
     Batch,
     CheckpointDict,
@@ -90,6 +93,13 @@ from syntheticmind.types import (
 __all__: list[str] = ["Trainer"]
 
 type _TeardownFailure = tuple[str, BaseException]
+type _CheckpointLoopState = tuple[
+    int,
+    int,
+    CheckpointDict | None,
+    list[DataLoaderState],
+    bool
+]
 type _PrintValue = (
     Batch
     | ModelOutput
@@ -207,6 +217,9 @@ class Trainer:
         self._precision_plugin: Precision = (
             self._accelerator_connector.precision_plugin
         )
+        self._randomness: _Randomness = _Randomness(
+            [device.type for device in self.parallel_devices]
+        )
         if default_root_dir is None:
             self._default_root_dir: str = os.getcwd()
         else:
@@ -260,7 +273,7 @@ class Trainer:
         )
 
         if seed is not None:
-            SeedManager.seed(seed)
+            self._randomness.seed(seed)
 
         self._callback_connector: _CallbackConnector = _CallbackConnector(
             callbacks,
@@ -272,7 +285,8 @@ class Trainer:
         self._checkpoint_connector: _CheckpointConnector = _CheckpointConnector(
             self.strategy,
             self._callback_connector,
-            configuration.fast_dev_run_enabled
+            configuration.fast_dev_run_enabled,
+            self._randomness
         )
 
         configured_logger: bool | Logger | Iterable[Logger] | None = (
@@ -570,10 +584,12 @@ class Trainer:
         )
         resume_epoch: int = self._checkpoint_connector.integer_value(
             checkpoint.get("epoch"),
+            "epoch",
             0
         )
         resume_global_step: int = self._checkpoint_connector.integer_value(
             checkpoint.get("global_step"),
+            "global_step",
             0
         )
         self.state.load_state_dict(
@@ -1531,7 +1547,8 @@ class Trainer:
         converted_model: torch.nn.Module = self.precision_plugin.convert_module(module)
         if not isinstance(converted_model, Module):
             raise TypeError(
-                f"Precision.convert_module must return Module, got {type(converted_model).__name__}."
+                "Precision.convert_module must return Module, got "
+                f"{type(converted_model).__name__}."
             )
         resolved_module: Module = converted_model
         if self._layer_sync_model is not None:
@@ -1574,7 +1591,8 @@ class Trainer:
         connected_lr_schedulers: list[SchedulerT] = precision_connection[2]
         if not isinstance(connected_model, torch.nn.Module):
             raise TypeError(
-                f"Precision.connect must return torch.nn.Module, got {type(connected_model).__name__}."
+                "Precision.connect must return torch.nn.Module, got "
+                f"{type(connected_model).__name__}."
         )
         if not isinstance(connected_optimizers, list):
             raise TypeError(
@@ -1637,6 +1655,17 @@ class Trainer:
             if checkpoint is None
             else checkpoint
         )
+        if self.state.stage == "fit":
+            current_configuration: _TrainerConfigurationSnapshot = (
+                _TrainerConfigurationSnapshot.capture(
+                    self._configuration,
+                    self.precision
+                )
+            )
+            self._checkpoint_connector.validate_fit_configuration(
+                loaded_checkpoint,
+                current_configuration
+            )
         self._hook_dispatcher.call_module(
             module,
             "on_load_checkpoint",
@@ -1663,7 +1692,8 @@ class Trainer:
                 schedulers=(self.schedulers if self.state.stage == "fit" else []),
                 datamodule=self.datamodule,
                 precision_plugin=self.precision_plugin,
-                restore_datamodule_state=restore_datamodule_state
+                restore_datamodule_state=restore_datamodule_state,
+                restore_schedulers=self.state.stage == "fit"
             )
         )
         epoch: int = restored_training_state[0]
@@ -1676,14 +1706,25 @@ class Trainer:
             if self.state.stage == "fit"
             else []
         )
-        if combined_loader_states:
+        has_training_continuation: bool = self.state.stage == "fit" and (
+            completed_batches > 0
+            or total_batch_idx >= 0
+            or bool(combined_loader_states)
+        )
+        if has_training_continuation:
             self._checkpoint_connector.train_dataloader_states: list[DataLoaderState] = (
                 combined_loader_states
             )
             self._checkpoint_connector.train_dataloader_state_active: bool = True
             self._checkpoint_connector.train_dataloader_batches_completed: int = completed_batches
             self._checkpoint_connector.train_total_batch_idx: int = total_batch_idx
-            if self._data_connector.train_combined_loader is not None:
+            self._checkpoint_connector.train_epoch_rng_state: CheckpointDict | None = (
+                epoch_rng_state
+            )
+            if (
+                combined_loader_states
+                and self._data_connector.train_combined_loader is not None
+            ):
                 self._data_connector.train_combined_loader._load_state_dicts(
                     combined_loader_states
                 )
@@ -1712,7 +1753,7 @@ class Trainer:
                 "rng_state"
             )
             if (
-                (completed_batches > 0 or loader_state_restored)
+                has_training_continuation
                 and isinstance(checkpoint_rng_state, dict)
             ):
                 self.fit_loop.epoch_loop._resume_checkpoint_rng_state: CheckpointDict | None = (
@@ -1756,6 +1797,61 @@ class Trainer:
             raise AttributeError(
                 "Saving a checkpoint requires a model attached through a Trainer stage."
             )
+        loop_state: _CheckpointLoopState = self._checkpoint_loop_state()
+        checkpoint_completed_batches: int = loop_state[0]
+        checkpoint_total_batch_idx: int = loop_state[1]
+        epoch_rng_state: CheckpointDict | None = loop_state[2]
+        combined_loader_states: list[DataLoaderState] = loop_state[3]
+        is_mid_epoch: bool = loop_state[4]
+        epoch: int = self._checkpoint_epoch(module, is_mid_epoch)
+        optimizer_states: list[CheckpointValue] = self._checkpoint_optimizer_states(
+            weights_only
+        )
+        configuration_snapshot: _TrainerConfigurationSnapshot = (
+            _TrainerConfigurationSnapshot.capture(
+                self._configuration,
+                self.precision
+            )
+        )
+        checkpoint: CheckpointDict = self._checkpoint_connector.build(
+            model=module,
+            scheduler=self.scheduler,
+            schedulers=self.schedulers,
+            epoch=epoch,
+            global_step=self.state.global_step,
+            datamodule=self.datamodule,
+            completed_batches=checkpoint_completed_batches,
+            total_batch_idx=checkpoint_total_batch_idx,
+            epoch_rng_state=epoch_rng_state,
+            combined_loader_states=combined_loader_states,
+            precision_plugin=self.precision_plugin,
+            weights_only=weights_only,
+            model_state_dict=cast(
+                CheckpointValue,
+                self._checkpoint_connector.model_state_dict()
+            ),
+            optimizer_states=optimizer_states,
+            trainer_configuration=cast(
+                CheckpointValue,
+                configuration_snapshot.model_dump(mode="python")
+            )
+        )
+        if not weights_only:
+            self.precision_plugin.on_save_checkpoint(checkpoint)
+            self._hook_dispatcher.call_callbacks(
+                module,
+                "on_save_checkpoint",
+                checkpoint
+            )
+        self._hook_dispatcher.call_module(
+            module,
+            "on_save_checkpoint",
+            module.on_save_checkpoint,
+            checkpoint
+        )
+        return checkpoint
+
+    def _checkpoint_loop_state(self) -> _CheckpointLoopState:
         epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
         completed_batches: int = 0
         total_batch_idx: int = -1
@@ -1769,7 +1865,13 @@ class Trainer:
                 epoch_rng_state: CheckpointDict | None = (
                     epoch_loop._epoch_start_rng_state
                 )
-        has_batch_progress: bool = completed_batches > 0 or has_entered_batch_loop
+        has_live_batch_progress: bool = completed_batches > 0 or has_entered_batch_loop
+        has_persisted_progress: bool = (
+            self._checkpoint_connector.train_dataloader_state_active
+        )
+        has_batch_progress: bool = (
+            has_live_batch_progress or has_persisted_progress
+        )
         is_validation_checkpoint: bool = self.state.running_stage == "validating"
         is_mid_epoch: bool = has_batch_progress and (
             self._is_mid_epoch_validation or not is_validation_checkpoint
@@ -1777,6 +1879,7 @@ class Trainer:
         combined_loader_states: list[DataLoaderState] = []
         if (
             is_mid_epoch
+            and has_live_batch_progress
             and self._data_connector.train_combined_loader is not None
         ):
             combined_loader_states: list[DataLoaderState] = cast(
@@ -1791,20 +1894,32 @@ class Trainer:
                 list[DataLoaderState],
                 self._checkpoint_connector.train_dataloader_states
             )
+            epoch_rng_state: CheckpointDict | None = (
+                self._checkpoint_connector.train_epoch_rng_state
+            )
         checkpoint_completed_batches: int = (
             completed_batches
-            if is_mid_epoch
+            if is_mid_epoch and has_live_batch_progress
             else self._checkpoint_connector.train_dataloader_batches_completed
             if self._checkpoint_connector.train_dataloader_state_active
             else 0
         )
         checkpoint_total_batch_idx: int = (
             total_batch_idx
-            if total_batch_idx >= 0
+            if is_mid_epoch and total_batch_idx >= 0
             else self._checkpoint_connector.train_total_batch_idx
             if self._checkpoint_connector.train_dataloader_state_active
             else -1
         )
+        return (
+            checkpoint_completed_batches,
+            checkpoint_total_batch_idx,
+            epoch_rng_state if is_mid_epoch else None,
+            combined_loader_states,
+            is_mid_epoch
+        )
+
+    def _checkpoint_epoch(self, module: Module, is_mid_epoch: bool) -> int:
         epoch: int = self.state.current_epoch
         if (
             self.state.stage == "fit"
@@ -1816,45 +1931,24 @@ class Trainer:
             }
         ):
             epoch: int = epoch + 1
+        return epoch
+
+    def _checkpoint_optimizer_states(
+        self,
+        weights_only: bool
+    ) -> list[CheckpointValue]:
         optimizer_states: list[CheckpointValue] = []
-        if not weights_only:
-            optimizer: torch.optim.Optimizer
-            for optimizer in self.optimizers:
-                optimizer_states.append(
-                    cast(
-                        CheckpointValue,
-                        self._checkpoint_connector.optimizer_state(optimizer)
-                    )
+        if weights_only:
+            return optimizer_states
+        optimizer: torch.optim.Optimizer
+        for optimizer in self.optimizers:
+            optimizer_states.append(
+                cast(
+                    CheckpointValue,
+                    self._checkpoint_connector.optimizer_state(optimizer)
                 )
-        checkpoint: CheckpointDict = self._checkpoint_connector.build(
-            model=module,
-            scheduler=self.scheduler,
-            schedulers=self.schedulers,
-            epoch=epoch,
-            global_step=self.state.global_step,
-            datamodule=self.datamodule,
-            completed_batches=checkpoint_completed_batches,
-            total_batch_idx=checkpoint_total_batch_idx,
-            epoch_rng_state=epoch_rng_state if is_mid_epoch else None,
-            combined_loader_states=combined_loader_states,
-            precision_plugin=self.precision_plugin,
-            weights_only=weights_only,
-            model_state_dict=cast(
-                CheckpointValue,
-                self._checkpoint_connector.model_state_dict()
-            ),
-            optimizer_states=optimizer_states
-        )
-        if not weights_only:
-            self.precision_plugin.on_save_checkpoint(checkpoint)
-        self._hook_dispatcher.call_callbacks(module, "on_save_checkpoint", checkpoint)
-        self._hook_dispatcher.call_module(
-            module,
-            "on_save_checkpoint",
-            module.on_save_checkpoint,
-            checkpoint
-        )
-        return checkpoint
+            )
+        return optimizer_states
 
     def save_checkpoint(
         self,
@@ -2426,7 +2520,9 @@ class Trainer:
         if running_stage == "sanity_checking":
             return {}
         resolved_stage: RunningStage | None = (
-            running_stage if running_stage is not None else self._logger_connector.last_progress_bar_stage
+            running_stage
+            if running_stage is not None
+            else self._logger_connector.last_progress_bar_stage
         )
         if resolved_stage is None:
             return {}

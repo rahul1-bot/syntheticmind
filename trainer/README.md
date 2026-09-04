@@ -8,7 +8,6 @@
 | `configuration.py` | Private validated run policy, scalar invariants, default resolution, and fast-development, overfit, and barebones interactions. |
 | `hook_dispatcher.py` | Private callback, module, data-module, and Strategy hook invocation, profiling, context, and override discovery. |
 | `states.py` | Trainer function, stage, status, progress, interruption, and stop state. |
-| `seed.py` | Python, NumPy, PyTorch, accelerator, and dataloader-worker random-state initialization. |
 | `console.py` | Rank-safe lifecycle and metric rendering for the Trainer and progress callbacks. |
 | `connectors/accelerator_connector.py` | Accelerator, devices, nodes, Strategy, precision, cluster environment, checkpoint I/O, and layer-synchronization compatibility. |
 | `connectors/callback_connector.py` | Callback validation, defaults, model callback attachment, ordering, and checkpoint identities. |

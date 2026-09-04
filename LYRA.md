@@ -251,3 +251,11 @@
     2. Fast-development, overfit, barebones, limit, validation, gradient, logging, deterministic, sampling, and reload interactions now have one owner before connectors and loops are composed.
     3. Live accelerators, Strategies, precision plugins, callbacks, loggers, profilers, dataloaders, optimizers, modules, and devices remain outside Pydantic and retain their behavioral lifecycle owners.
     4. DataConnector still applies resolved batch limits because loader cardinality is known only at the data boundary, while Trainer retains side-effectful torch flags, seeding, and runtime construction.
+
+| Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
+
+    1. A training checkpoint and a weights-only model artifact are distinct contracts; only the former carries optimizer, scheduler, callback, DataModule, precision, loop, progress, configuration, and randomness state.
+    2. One immutable random-state snapshot covers Python, NumPy, torch CPU, and only the active CUDA or MPS backend across checkpoint and multiprocessing boundaries.
+    3. Mid-epoch continuation retains completed-batch coordinates and epoch-start randomness even when an ordinary dataloader exposes no state dictionary.
+    4. Resolved configuration provenance permits a larger run ceiling while rejecting trajectory-changing accumulation, data, validation, clipping, determinism, sampler, synchronization, reload, or precision drift.
+    5. Strict corruption, stochastic CPU and MPS resume, subprocess, spawn, DDP, and full or sharded model-parallel evidence controls schema acceptance.
