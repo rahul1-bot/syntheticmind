@@ -1,3 +1,32 @@
+# This module:
+# 1. Defines PyTorchProfiler, the operator-, device-, shape-, memory-, FLOP-,
+#    stack-, and module-aware measurement policy backed by torch.profiler
+# 2. Owns scheduled trace publication, optional NVTX emission, textual operator
+#    tables, Chrome traces, flame stacks, and deterministic instrumentation
+#    cleanup
+#
+# Design decisions:
+# - Public configuration is validated before a torch profiler session exists;
+#   unknown backend keyword arguments and table options fail instead of being
+#   ignored by version-dependent third-party behavior
+# - One backend session spans the active Trainer stage. Named framework actions
+#   become nested record_function ranges, while only training, validation, test,
+#   and prediction step completions advance the profiler schedule
+# - SyntheticMind's schedule adapter counts ML step families independently and
+#   excludes fit sanity validation; a client torch schedule therefore retains
+#   training meaning across interleaved validation
+# - Module-name recording uses a reversible eager-hook transaction. Reattaching a
+#   different model closes the old hooks before installing the new hierarchy
+# - Trace products use StoragePath.local_artifact, so local-only torch exporters
+#   can publish completed artifacts to supported remote filesystems
+# - Cleanup attempts recording ranges, module hooks, profiler session, and NVTX
+#   context independently; later failures become notes on the first cleanup
+#   failure rather than preventing remaining resources from releasing
+# - NVTX mode is an alternate measurement backend and accepts only record_shapes;
+#   textual summaries and trace exports are intentionally empty in that mode
+#
+# Author: Rahul Sawhney
+
 import inspect
 import math
 import warnings
@@ -26,6 +55,9 @@ type _ProfilerOption = (
 type _TableValue = int | str | bool | None
 
 class PyTorchProfiler(Profiler):
+    # High-detail profiler selected through Trainer(profiler="pytorch") for
+    # defaults or supplied as a configured instance when clients need schedules,
+    # activity filters, traces, stacks, or module ranges.
     _step_functions: ClassVar[frozenset[str]] = frozenset({
         "training_step", "validation_step", "test_step", "predict_step"
     })
@@ -56,6 +88,33 @@ class PyTorchProfiler(Profiler):
         metric: str = "self_cpu_time_total",
         **profiler_kwargs: _ProfilerOption
     ) -> None:
+        # Validates presentation, export, and torch.profiler configuration before
+        # establishing detached runtime state.
+        #
+        # Args:
+        #     dirpath: Optional local or remote report and trace directory.
+        #     filename: Optional artifact identity.
+        #     group_by_input_shapes: Whether the summary groups operator events by
+        #         recorded input shapes. Also enables record_shapes.
+        #     emit_nvtx: Whether to emit NVTX ranges instead of collecting a torch
+        #         profiler report. Default: ``False``.
+        #     export_to_chrome: Whether completed captures emit Chrome trace JSON.
+        #         Default: ``True``.
+        #     row_limit: Operator table row limit; ``-1`` means unlimited.
+        #         Default: ``20``.
+        #     sort_by_key: Supported EventList metric used to order the table, or
+        #         None for an activity-aware default.
+        #     record_module_names: Whether eager module forwards receive qualified
+        #         trace ranges. Default: ``True``.
+        #     table_kwargs: Additional validated EventList.table presentation
+        #         options excluding sort_by and row_limit.
+        #     export_to_flame_graph: Whether completed captures export stack data.
+        #         This also enables with_stack. Default: ``False``.
+        #     metric: CPU or CUDA self-time metric used for stack export.
+        #         Default: ``"self_cpu_time_total"``.
+        #     **profiler_kwargs: Valid torch.profiler.profile options, including
+        #         activities, schedule, on_trace_ready, memory, stack, FLOP, and
+        #         experimental configuration.
         super().__init__(dirpath=dirpath, filename=filename)
         self._validate_public_configuration(
             group_by_input_shapes,
@@ -112,6 +171,8 @@ class PyTorchProfiler(Profiler):
 
     @override
     def start(self, action_name: str) -> None:
+        # Lazily creates the backend session and opens one named trace range;
+        # partial start failures trigger complete profiler cleanup.
         try:
             self._create_profiler()
             recording: record_function = record_function(
@@ -131,6 +192,8 @@ class PyTorchProfiler(Profiler):
 
     @override
     def stop(self, action_name: str) -> None:
+        # Closes the matching nested range and advances torch profiler exactly
+        # once when the completed action is an ML step function.
         recordings: list[record_function] | None = self._recording_map.get(
             action_name
         )
@@ -159,6 +222,8 @@ class PyTorchProfiler(Profiler):
         local_rank: int | None = None,
         log_dir: str | Path | None = None
     ) -> None:
+        # Claims the Trainer stage, rejects an already active backend, clears all
+        # prior report and trace state, and resets the ML-aware schedule.
         if self.profiler is not None or self._nvtx_context is not None:
             raise RuntimeError("The PyTorch profiler is already active.")
         super().setup(stage, local_rank, log_dir)
@@ -171,6 +236,8 @@ class PyTorchProfiler(Profiler):
 
     @override
     def teardown(self, stage: TrainerStage | None) -> None:
+        # Closes measurement-specific resources before shared Profiler teardown,
+        # while guaranteeing shared state release through finally.
         try:
             self._close_profiler()
         finally:
@@ -178,6 +245,8 @@ class PyTorchProfiler(Profiler):
 
     @override
     def summary(self) -> str:
+        # Finalizes the backend, returns no text for NVTX or empty captures, and
+        # otherwise formats shape-aware averaged operator events.
         if self._emit_nvtx:
             self._close_profiler()
             return ""
@@ -200,6 +269,8 @@ class PyTorchProfiler(Profiler):
 
     @override
     def _attach_module(self, module: nn.Module) -> None:
+        # Replaces live eager-module instrumentation when Trainer attaches a new
+        # client model to this profiler instance.
         if module is self._module:
             return
         if self._module_recordings is not None:
@@ -213,6 +284,8 @@ class PyTorchProfiler(Profiler):
             self._module_recordings.__enter__()
 
     def _create_profiler(self) -> None:
+        # Lazily enters either NVTX emission or torch.profiler, substituting the
+        # ML-aware schedule and default trace handler when configured.
         if self.profiler is not None or self._nvtx_context is not None:
             return
         if self._emit_nvtx:
@@ -245,6 +318,8 @@ class PyTorchProfiler(Profiler):
             self._module_recordings.__enter__()
 
     def _close_profiler(self) -> None:
+        # Exhaustively closes ranges, module hooks, backend session, and NVTX;
+        # retains captured events and aggregates cleanup failures causally.
         failures: list[BaseException] = []
         self._close_recording_ranges(failures)
         if self._module_recordings is not None:
@@ -293,6 +368,8 @@ class PyTorchProfiler(Profiler):
             raise primary_failure
 
     def _close_recording_ranges(self, failures: list[BaseException]) -> None:
+        # Closes every leaked action range so a failed client operation cannot
+        # leave torch profiler state active beyond stage teardown.
         action_name: str
         recordings: list[record_function]
         for action_name, recordings in self._recording_map.items():
@@ -309,6 +386,8 @@ class PyTorchProfiler(Profiler):
         self._recording_map: dict[str, list[record_function]] = {}
 
     def _trace_ready(self, profiler: torch.profiler.profile) -> None:
+        # Publishes one indexed Chrome trace and optional flame stack through the
+        # configured storage boundary when a capture becomes ready.
         if not self._export_to_chrome and not self._export_to_flame_graph:
             return
         if self.dirpath is None:
@@ -353,6 +432,8 @@ class PyTorchProfiler(Profiler):
         export_to_flame_graph: bool,
         metric: str
     ) -> None:
+        # Validates backend-independent booleans, table bounds, sort-key input,
+        # and stack metric before runtime state is created.
         boolean_values: dict[str, bool] = {
             "group_by_input_shapes": group_by_input_shapes,
             "emit_nvtx": emit_nvtx,
@@ -378,6 +459,8 @@ class PyTorchProfiler(Profiler):
         self,
         options: dict[str, _ProfilerOption]
     ) -> dict[str, _ProfilerOption]:
+        # Restricts forwarded options to the installed torch.profiler signature
+        # and validates options whose silent coercion would change capture policy.
         valid_option_names: set[str] = set(
             inspect.signature(torch.profiler.profile).parameters
         )
@@ -422,6 +505,8 @@ class PyTorchProfiler(Profiler):
         self,
         options: dict[str, _ProfilerOption]
     ) -> None:
+        # Materializes the activity iterable once and validates optional per-
+        # activity name filters against the current ProfilerActivity vocabulary.
         activity_value: _ProfilerOption = options.get("activities")
         if activity_value is None:
             return
@@ -455,6 +540,8 @@ class PyTorchProfiler(Profiler):
         options["activities"] = activities
 
     def _validate_table_configuration(self) -> None:
+        # Prevents table kwargs from overriding owned sort and row policy and
+        # rejects keys absent from the installed EventList implementation.
         if self._sort_by_key not in self._available_sort_keys:
             raise MisconfigurationError(
                 f"Invalid profiler sort key {self._sort_by_key!r}; expected one of "
@@ -479,6 +566,8 @@ class PyTorchProfiler(Profiler):
         self,
         options: dict[str, _ProfilerOption]
     ) -> str:
+        # Chooses CUDA ordering only when configuration or installed default
+        # activities actually include CUDA; otherwise uses total CPU time.
         use_cuda: _ProfilerOption = options.get("use_cuda")
         if use_cuda is True:
             return "cuda_time_total"
@@ -501,5 +590,7 @@ class PyTorchProfiler(Profiler):
         operation: str,
         exception: BaseException
     ) -> None:
+        # Annotates one cleanup exception with its failed boundary and preserves
+        # it for aggregate teardown reporting.
         exception.add_note(f"PyTorch profiler failed during {operation}.")
         failures.append(exception)

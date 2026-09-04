@@ -1,3 +1,22 @@
+# This module:
+# 1. Defines SimpleProfiler, the low-overhead wall-clock profiler that aggregates
+#    named action durations within one Trainer stage
+# 2. Produces compact or extended reports ordered by measured cost
+#
+# Design decisions:
+# - Each action name may have one active interval at a time, while distinct names
+#   may overlap because wall-clock measurement does not claim exclusive CPU
+#   attribution
+# - Setup resets all timing state per Trainer stage, preventing sequential fit,
+#   validation, test, or prediction calls from contaminating one another
+# - Extended percentage uses end-to-end stage wall time as its denominator, so
+#   overlapping action totals need not sum to one hundred percent
+# - math.fsum aggregates repeated durations with stable floating-point behavior
+# - Report ordering uses measured cost rather than action name, surfacing the
+#   highest-impact lifecycle regions first
+#
+# Author: Rahul Sawhney
+
 import math
 import time
 from collections import defaultdict
@@ -15,6 +34,8 @@ type _ExtendedReportRow = tuple[str, float, int, float, float]
 
 
 class SimpleProfiler(Profiler):
+    # Wall-clock measurement policy for client runs that need low overhead and a
+    # human-readable action summary rather than operator-level traces.
     @override
     def __init__(
         self,
@@ -22,6 +43,11 @@ class SimpleProfiler(Profiler):
         filename: str | None = None,
         extended: bool = True
     ) -> None:
+        # Args:
+        #     dirpath: Optional local or remote report directory.
+        #     filename: Optional report identity; absent output uses logging.
+        #     extended: Whether reports include call counts and percentage of
+        #         total stage wall time. Default: ``True``.
         super().__init__(dirpath=dirpath, filename=filename)
         if type(extended) is not bool:
             raise TypeError(f"`extended` must be a bool, got {extended!r}.")
@@ -32,12 +58,14 @@ class SimpleProfiler(Profiler):
 
     @override
     def start(self, action_name: str) -> None:
+        # Opens one wall-clock interval and rejects duplicate active names.
         if action_name in self.current_actions:
             raise ValueError(f"Attempted to start {action_name!r} more than once.")
         self.current_actions[action_name] = time.perf_counter()
 
     @override
     def stop(self, action_name: str) -> None:
+        # Closes one known interval and appends its elapsed seconds.
         end_time: float = time.perf_counter()
         if action_name not in self.current_actions:
             raise ValueError(
@@ -53,6 +81,7 @@ class SimpleProfiler(Profiler):
         local_rank: int | None = None,
         log_dir: str | Path | None = None
     ) -> None:
+        # Claims the stage through Profiler and resets all duration evidence.
         super().setup(stage, local_rank, log_dir)
         self.current_actions: dict[str, float] = {}
         self.recorded_durations: defaultdict[str, list[float]] = defaultdict(list)
@@ -60,6 +89,7 @@ class SimpleProfiler(Profiler):
 
     @override
     def summary(self) -> str:
+        # Formats the completed stage observations in extended or compact form.
         prefix: str = f"{self._stage.upper()} " if self._stage is not None else ""
         lines: list[str] = [f"{prefix}Profiler Report"]
         if not self.recorded_durations:
@@ -98,6 +128,8 @@ class SimpleProfiler(Profiler):
     def _make_extended_report(
         self
     ) -> tuple[list[_ExtendedReportRow], int, float]:
+        # Computes mean, call count, total, and stage-relative percentage ordered
+        # by descending percentage.
         total_duration: float = max(
             time.perf_counter() - self.start_time,
             1.0e-12
@@ -122,6 +154,7 @@ class SimpleProfiler(Profiler):
         return report, total_calls, total_duration
 
     def _make_report(self) -> list[_SimpleReportRow]:
+        # Computes compact mean and total rows ordered by descending mean latency.
         report: list[_SimpleReportRow] = []
         action_name: str
         durations: list[float]

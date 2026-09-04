@@ -226,7 +226,7 @@
     4. PyTorch operator profiling forms one semantic subpackage whose private schedule tracks training, validation, test, and prediction independently and excludes fit sanity validation, while its private module recorder owns reversible forward-hook instrumentation.
     5. PyTorch profiler configuration rejects misspelled backend options, invalid tables, invalid schedules, ignored NVTX options, and empty flame-graph results instead of silently degrading requested behavior.
     6. XLA profiling was removed because SyntheticMind has no executable XLA accelerator or strategy; backend-specific surface without a backend lifecycle is compatibility theater rather than a training capability.
-    7. CPU, local stage reuse, MPS-adjacent timing, remote fsspec output, failure cleanup, custom and stage-aware schedules, external DDP, and spawned DDP reports and traces pass; macOS fork remains bounded by the independently reproduced MPSGraph fork-safety failure.
+    7. Every profiler module now carries authorized action, stage, rank, nesting, schedule, instrumentation, export, and cleanup comments; the profiler and PyTorch READMEs document client selection, custom policies, ML-aware schedule semantics, trace products, and NVTX boundaries, while fresh Trainer runs emit Simple, cProfile, raw `.prof`, operator-table, and Chrome-trace artifacts alongside the existing remote, DDP, and spawn evidence; macOS fork remains bounded by the independently reproduced MPSGraph fork-safety failure.
 
 | Architecture Decision | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 04:54 PM | Name: Ghost |
 
