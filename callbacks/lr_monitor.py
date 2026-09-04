@@ -26,7 +26,6 @@ class LearningRateMonitor(Callback):
         log_weight_decay: bool = False,
         log_key_prefix: str | None = None
     ) -> None:
-        super().__init__()
         if logging_interval not in (None, "step", "epoch"):
             raise ValueError("`logging_interval` must be 'step', 'epoch', or None.")
         if type(log_momentum) is not bool:

@@ -39,7 +39,6 @@ class ModelCheckpoint(Checkpoint):
         save_on_train_epoch_end: bool | None = None,
         enable_version_counter: bool = True
     ) -> None:
-        super().__init__()
         configuration: _ModelCheckpointConfiguration = _ModelCheckpointConfiguration(
             dirpath=dirpath,
             filename=filename,

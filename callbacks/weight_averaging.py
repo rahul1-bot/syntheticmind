@@ -30,7 +30,6 @@ class EMAWeightAveraging(Callback):
         update_starting_at_step: int | None = None,
         use_buffers: bool = True
     ) -> None:
-        super().__init__()
         if type(decay) is not float or not 0.0 <= decay < 1.0:
             raise ValueError("`decay` must be a float in the interval [0.0, 1.0).")
         if type(update_every_n_steps) is not int or update_every_n_steps < 1:

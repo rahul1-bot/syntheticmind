@@ -33,7 +33,6 @@ class EarlyStopping(Callback):
         stopping_threshold: float | None = None,
         divergence_threshold: float | None = None
     ) -> None:
-        super().__init__()
         if not isinstance(monitor, str) or not monitor.strip():
             raise ValueError("`monitor` must be a non-empty string.")
         if (

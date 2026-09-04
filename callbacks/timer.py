@@ -24,7 +24,6 @@ class Timer(Callback):
         interval: Literal["step", "epoch"] = "step",
         verbose: bool = True
     ) -> None:
-        super().__init__()
         if interval not in ("step", "epoch"):
             raise ValueError("`interval` must be 'step' or 'epoch'.")
         if type(verbose) is not bool:

@@ -27,7 +27,6 @@ type _PrintValue = ModelOutput | Path | BaseException | torch.nn.Module
 
 class ProgressBarCallback(Callback):
     def __init__(self) -> None:
-        super().__init__()
         self._train_bar: bool = False
         self._val_bar: bool = False
         self._test_bar: bool = False

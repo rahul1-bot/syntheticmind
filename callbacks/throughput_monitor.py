@@ -19,7 +19,6 @@ class ThroughputMonitor(Callback):
         batch_size_fn: Callable[[Batch], int] | None = None,
         log_every_n_steps: int = 10
     ) -> None:
-        super().__init__()
         if batch_size_fn is not None and not callable(batch_size_fn):
             raise TypeError("`batch_size_fn` must be callable or None.")
         if type(log_every_n_steps) is not int or log_every_n_steps < 1:

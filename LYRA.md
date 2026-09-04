@@ -156,12 +156,12 @@
     3. The generic utility package has been eliminated completely; every surviving behavior now belongs to an ML lifecycle, execution policy, core contract, callback, or infrastructure boundary.
     4. Callback, report, and optional Rich rendering operations are owner-bound without future imports, static pseudo-utilities, broad annotations, or nested hook functions; local and two-rank evidence passes.
 
-| Strategic Note | Callback Contract, Monitoring, and Capability Subtraction | Date: 04 September 2026 | Time: 04:47 PM | Name: Ghost |
+| Strategic Note | Callback Contract, Monitoring, and Capability Subtraction | Date: 04 September 2026 | Time: 06:32 PM | Name: Ghost |
 
     1. Three callback surfaces were removed because their names overstated their executable semantics or duplicated the canonical profiler subsystem.
     2. Deleting the runtime callback also removed its private timing state from Trainer and loops, leaving profiler action contexts as the sole timing authority.
     3. Callback preserves the complete established hook surface and every call signature through lazy package annotations; concrete callbacks explicitly declare their overrides and no conditional import or stale source commentary remains in the base contract.
-    4. Early stopping, finite checks, learning-rate telemetry, throughput, and device statistics remain independent monitoring concepts and now use owner-bound operations without obsolete annotation imports or static utility methods; timer, weight averaging, and model inspection remain separate audit targets.
+    4. Early stopping, finite checks, learning-rate telemetry, throughput, device statistics, timer, weight averaging, and model inspection remain independent concepts with owner-bound operations; concrete callback constructors no longer invoke a nonexistent parent initialization contract.
 
 | Strategic Note | EMA Weight Averaging Contract | Date: 04 September 2026 | Time: 04:54 PM | Name: Ghost |
 

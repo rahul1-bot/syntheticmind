@@ -11,7 +11,6 @@ __all__: list[str] = ["FiniteValueGuard"]
 
 class FiniteValueGuard(Callback):
     def __init__(self, check_gradients: bool = False) -> None:
-        super().__init__()
         if type(check_gradients) is not bool:
             raise TypeError("`check_gradients` must be a bool.")
         self.check_gradients: bool = check_gradients

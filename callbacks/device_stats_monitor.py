@@ -19,7 +19,6 @@ class DeviceStatsMonitor(Callback):
         log_every_n_steps: int = 50,
         filter_keys: set[str] | None = None
     ) -> None:
-        super().__init__()
         if type(log_every_n_steps) is not int or log_every_n_steps < 1:
             raise ValueError("`log_every_n_steps` must be a positive integer.")
         if filter_keys is not None and (
