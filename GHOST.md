@@ -171,13 +171,13 @@
     4. Public class identities and Trainer configuration meanings remain unchanged, but obsolete import paths were removed without compatibility façades. Precision now explicitly inherits the checkpoint-hook contract and marks its checkpoint hook implementations as overrides.
     5. Full, half, mixed, and Transformer Engine precision execution, asynchronous checkpoint I/O, local optimizer execution, spawned DDP runtime state, subprocess DDP forward and consensus behavior, and sharded two-rank model parallelism pass through the new canonical paths.
 
-| Architecture Decision | Cross-Cutting Ownership Reconstruction | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
+| Architecture Decision | Cross-Cutting Contract Ownership | Date: 04 September 2026 | Time: 05:07 PM | Name: Ghost |
 
     1. Trainer owns run seeding, worker randomness, terminal rendering, deterministic algorithms, benchmark flags, and complete-run configuration; Loop owns evaluation gradient context.
     2. Core data transfer owns recursive batch placement, Module owns its one-consumer gather traversal, Strategy owns topology-sensitive initialization, and the logger connector owns metric accumulation.
     3. `TorchCheckpointIO` owns atomic local and remote serialization, model-parallel checkpointing owns distributed shards, and the explicit storage package owns protocol-aware paths shared by artifact producers.
-    4. Framework exception and recursive domain type contracts live at the package root so semantic subsystems depend inward without a utility layer or circular ownership.
-    5. Dead compilation, channels-last, context, torch-flag, checkpoint, tensor-traversal, and helper façades were deleted without compatibility aliases.
+    4. Framework exception and recursive domain type contracts live at the package root; only used FrameworkError, MisconfigurationError, CheckpointError, and SIGTERMException categories remain, with explicit constructor overrides and unchanged message prefixes.
+    5. Unused TrainingInterruptedError and DistributedError exports plus dead compilation, channels-last, context, torch-flag, checkpoint, tensor-traversal, and helper façades were deleted without compatibility aliases.
     6. Local, MPS, spawned DDP, nested collective, TorchMetrics, checkpoint, remote storage, asynchronous I/O, failure-atomic model-parallel, and model-hydration paths pass through the assigned owners.
 
 | Architecture Decision | Training Data Composition Ownership | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |

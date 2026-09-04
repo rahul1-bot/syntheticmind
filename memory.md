@@ -195,12 +195,12 @@
     3. Checkpoint serialization and atomic transport belong to `CheckpointIO`, distributed shards belong to model-parallel checkpointing, and protocol-aware paths shared by several artifact owners justify the explicit storage infrastructure package.
     4. Compilation and local behavior cannot prove relocation across a process boundary; spawned workers, distributed strategies, persistence reload, and failure recovery are selected according to the moved concept.
 
-| Memory | Dependency-Neutral Framework Contracts | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
+| Memory | Dependency-Neutral Framework Contracts | Date: 04 September 2026 | Time: 05:07 PM | Name: Ghost |
 
-    1. Shared type aliases and framework exception classes are contracts, not utilities: they constrain values and failure categories crossing subsystem boundaries without executing a lifecycle of their own.
+    1. Shared aliases and used framework exceptions are contracts, not utilities; an exported failure category with no raise site or consumer is compatibility theatre rather than a useful semantic boundary.
     2. Placing these contracts at the package root prevents core, Trainer, loops, strategies, plugins, callbacks, loggers, and profilers from depending on a generic utility layer or on one another merely to name shared domains.
     3. A contract relocation requires multiprocessing and distributed execution evidence because imported module paths participate in worker reconstruction even when local imports compile.
-    4. Historical capability notes that describe code deliberately removed from the current scope should be pruned from active ledgers; Git history remains the chronology while ledgers retain current durable knowledge.
+    4. Constructor prefixes and inheritance are exception behavior and remain stable, while obsolete prose and unused exception names should be removed rather than preserved as speculative API surface.
 
 | Memory | Combined Loader Is a Data Composition Primitive | Date: 04 September 2026 | Time: 05:06 PM | Name: Ghost |
 

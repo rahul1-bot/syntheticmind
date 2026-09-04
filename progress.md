@@ -182,11 +182,11 @@
     3. ✅ Filesystem and artifact operations moved from utilities to the explicit storage boundary with every production and verification import updated.
     4. ✅ Local and remote checkpoint transport, model hydration, profiler artifacts, and metric lifecycle execution pass through the canonical storage path.
 
-| Progress Complete | Cross-Subsystem Contract Placement | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
+| Progress Complete | Cross-Subsystem Contract Placement | Date: 04 September 2026 | Time: 05:07 PM | Name: Ghost |
 
-    1. ✅ Framework type aliases and exception classes moved from the transitional utility package to canonical `syntheticmind.types` and `syntheticmind.exceptions` modules.
+    1. ✅ Framework type aliases and the four used exception categories live in canonical package-root modules; two unreferenced exported exception classes and all stale source prose were deleted.
     2. ✅ Every production and ignored verification import was migrated directly, with no compatibility façade or stale utility path retained.
-    3. ✅ Production-package compilation and direct assignment and punctuation scans pass with zero project-owned all-caps assignments and zero terminal trailing commas.
+    3. ✅ Used exception inheritance, prefixes, SIGTERM exit code, constructor overrides, package compilation, assignments, naming, and punctuation pass without static-analysis tools.
     4. ✅ Model checkpoint hydration, optimizer execution, local metric views, two-rank DDP strategy execution, and two-rank TorchMetrics reduction pass after relocation.
     5. ✅ Stale deployment-export and interrupted-hold records were removed during ledger consolidation, keeping the active progress index below its child-scope soft limit.
 
