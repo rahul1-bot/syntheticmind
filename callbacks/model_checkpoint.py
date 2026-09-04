@@ -16,7 +16,6 @@ from loguru import logger as log
 
 from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.storage.filesystem import (
     exists,
     file_size,
@@ -180,7 +179,7 @@ class ModelCheckpoint(Checkpoint):
                 "`ModelCheckpoint(save_last='link')` is only supported for "
                 f"local file paths, got `dirpath={self.dirpath}`."
             )
-        if stage == "fit" and not trainer.fast_dev_run and is_rank_zero():
+        if stage == "fit" and not trainer.fast_dev_run and trainer.is_global_zero:
             make_directory(self.dirpath)
 
     def _resolve_dirpath(self, trainer: Trainer) -> str:
@@ -447,7 +446,10 @@ class ModelCheckpoint(Checkpoint):
         for metric in module.logged_metrics:
             if not metric.on_step:
                 continue
-            value: torch.Tensor | None = metric.compute_step(module.device)
+            value: torch.Tensor | None = metric.compute_step(
+                module.device,
+                trainer.strategy.reduce
+            )
             if value is None:
                 continue
             metric_name: str = metric.output_name(on_step=metric.on_step)
@@ -830,7 +832,7 @@ class ModelCheckpoint(Checkpoint):
     def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
         if trainer.fast_dev_run or not self.save_on_exception:
             return
-        if not is_rank_zero():
+        if not trainer.is_global_zero:
             return
         if trainer.state.stage != "fit":
             return

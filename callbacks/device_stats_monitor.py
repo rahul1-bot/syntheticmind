@@ -20,7 +20,6 @@ import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.types import Batch, StepOutput
 
 if TYPE_CHECKING:
@@ -45,7 +44,7 @@ class DeviceStatsMonitor(Callback):
         # Reads the current device's allocated and reserved memory and emits
         # both in megabytes, gated on rank zero, the step cadence, CUDA
         # availability, and logger presence.
-        if not is_rank_zero():
+        if not trainer.is_global_zero:
             return
         if module.global_step % self.log_every_n_steps != 0:
             return

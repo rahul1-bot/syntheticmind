@@ -32,7 +32,6 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
 from syntheticmind.trainer.console import ConsoleRenderer
-from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.types import (
     Batch,
     ModelOutput,
@@ -120,7 +119,7 @@ class ProgressBarCallback(Callback):
 
     @override
     def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
-        self._rank_zero = is_rank_zero()
+        self._rank_zero = trainer.is_global_zero
         self._rendering = self._rank_zero and self._enabled
         if not self._rendering:
             return
@@ -171,7 +170,7 @@ class ProgressBarCallback(Callback):
         if not self._train_bar:
             return
         self._batch_counts["training"] = batch_idx + 1
-        self._live_metrics["training"] = self._capture_metrics(module)
+        self._live_metrics["training"] = self._capture_metrics(trainer, module)
         total: int | None = self._effective_total(trainer, "training")
         force: bool = total is not None and batch_idx + 1 >= total
         self._render_training(trainer, module, force=force)
@@ -214,7 +213,7 @@ class ProgressBarCallback(Callback):
         # Advances the validation bar by one batch.
         if self._val_bar:
             self._batch_counts["validating"] += 1
-            self._live_metrics["validating"] = self._capture_metrics(module)
+            self._live_metrics["validating"] = self._capture_metrics(trainer, module)
             total: int | None = self._effective_total(trainer, "validating")
             force: bool = total is not None and self._batch_counts["validating"] >= total
             self._render_evaluation(trainer, module, "validating", force=force)
@@ -257,7 +256,7 @@ class ProgressBarCallback(Callback):
         # Advances the test bar by one batch.
         if self._test_bar:
             self._batch_counts["testing"] += 1
-            self._live_metrics["testing"] = self._capture_metrics(module)
+            self._live_metrics["testing"] = self._capture_metrics(trainer, module)
             total: int | None = self._effective_total(trainer, "testing")
             force: bool = total is not None and self._batch_counts["testing"] >= total
             self._render_evaluation(trainer, module, "testing", force=force)
@@ -313,7 +312,7 @@ class ProgressBarCallback(Callback):
 
     @override
     def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
-        if not is_rank_zero() or not self._enabled:
+        if not trainer.is_global_zero or not self._enabled:
             return
         if not self._rendering:
             self._renderer.reset()
@@ -402,12 +401,19 @@ class ProgressBarCallback(Callback):
             parts.append(f"{self._renderer.format_duration(remaining)} left")
         return parts
 
-    def _capture_metrics(self, module: Module) -> dict[str, float]:
+    def _capture_metrics(
+        self,
+        trainer: Trainer,
+        module: Module
+    ) -> dict[str, float]:
         captured: dict[str, float] = {}
         for metric in module.logged_metrics:
             if not metric.progress_bar or not metric.on_step:
                 continue
-            value: torch.Tensor | None = metric.compute_step(module.device)
+            value: torch.Tensor | None = metric.compute_step(
+                module.device,
+                trainer.strategy.reduce
+            )
             if value is None:
                 continue
             captured[metric.output_name(on_step=True)] = module.trainer._metric_to_float(value)

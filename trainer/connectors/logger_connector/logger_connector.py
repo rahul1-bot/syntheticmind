@@ -94,7 +94,8 @@ class _LoggerConnector:
             if not metric.on_step:
                 continue
             value: torch.Tensor | None = metric.compute_step(
-                self._strategy.root_device
+                self._strategy.root_device,
+                self._strategy.reduce
             )
             if value is None:
                 continue

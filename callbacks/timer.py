@@ -25,7 +25,6 @@ from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.types import Batch, StateDict, StepOutput, TrainerStage
 
@@ -382,7 +381,7 @@ class Timer(Callback):
         trainer.should_stop = trainer_should_stop
         if should_stop and not self._time_limit_reached:
             self._time_limit_reached: bool = True
-            if self._verbose and is_rank_zero():
+            if self._verbose and trainer.is_global_zero:
                 elapsed: timedelta = timedelta(seconds=int(self.time_elapsed("train")))
                 log.info(f"Time limit reached after {elapsed}; requesting training stop.")
 

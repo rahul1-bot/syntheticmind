@@ -23,18 +23,15 @@
 
 from collections.abc import Iterable, Mapping
 from dataclasses import fields, is_dataclass
-from typing import Literal, Protocol, cast
+from typing import Protocol, cast
 
 import torch
 import torch.distributed as dist
 
-from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import Reduction, TensorReducer
 
 __all__: list[str] = ["MetricAccumulator"]
-
-type ReductionMode = Literal["mean", "sum", "min", "max"]
-
 
 class _Metric(Protocol):
     def compute(self) -> object: ...
@@ -65,7 +62,7 @@ class MetricAccumulator:
 
     def __init__(
         self,
-        reduction: ReductionMode = "mean",
+        reduction: Reduction = "mean",
         sync_dist: bool = False,
         sync_dist_group: dist.ProcessGroup | None = None,
         rank_zero_only: bool = False,
@@ -74,7 +71,7 @@ class MetricAccumulator:
         # Fixes the reduction mode and zeroes every accumulator: plain sum and
         # count for unweighted means, running extremes for min and max, and the
         # weighted pair used when callers report batch sizes.
-        self._reduction: ReductionMode = reduction
+        self._reduction: Reduction = reduction
         self._sum: torch.Tensor | None = None
         self._count: int = 0
         self._min: torch.Tensor | None = None
@@ -123,18 +120,26 @@ class MetricAccumulator:
             )
         self._metric = resolved_metric
 
-    def compute(self, device: torch.device | None = None) -> torch.Tensor:
+    def compute(
+        self,
+        device: torch.device | None = None,
+        reduce_tensor: TensorReducer | None = None
+    ) -> torch.Tensor:
         # Reduces the window: sum, min, and max read their accumulators
         # directly; the mean divides the weighted sum by total weight when any
         # weights were recorded and otherwise falls back to the unweighted mean
         # over update calls. An empty window reduces to 0.0.
         if self._enable_graph:
             with torch.enable_grad():
-                return self._compute(device)
+                return self._compute(device, reduce_tensor)
         with torch.no_grad():
-            return self._compute(device).detach()
+            return self._compute(device, reduce_tensor).detach()
 
-    def _compute(self, device: torch.device | None) -> torch.Tensor:
+    def _compute(
+        self,
+        device: torch.device | None,
+        reduce_tensor: TensorReducer | None
+    ) -> torch.Tensor:
         if self._metric is not None:
             value: object = self._metric.compute()
             if not isinstance(value, torch.Tensor) or value.numel() != 1:
@@ -147,12 +152,15 @@ class MetricAccumulator:
         should_sync: bool = (
             self._sync_dist
             and not self._rank_zero_only
-            and DistributedUtils.is_distributed()
         )
         assert self._sum is not None
         assert self._min is not None
         assert self._max is not None
         if should_sync:
+            if reduce_tensor is None:
+                raise RuntimeError(
+                    "Distributed metric reduction requires the active Strategy reducer."
+                )
             if self._reduction == "mean":
                 weighted: bool = self._total_weight > 0
                 numerator: torch.Tensor | None = (
@@ -166,28 +174,22 @@ class MetricAccumulator:
                         numerator.new_tensor(denominator)
                     )
                 )
-                DistributedUtils.all_reduce(
+                state = reduce_tensor(
                     state,
-                    op=dist.ReduceOp.SUM,
-                    group=self._sync_dist_group
+                    self._sync_dist_group,
+                    "sum"
                 )
                 return state[0] / state[1]
-            operation: dist.ReduceOp.RedOpType = {
-                "sum": dist.ReduceOp.SUM,
-                "min": dist.ReduceOp.MIN,
-                "max": dist.ReduceOp.MAX
-            }[self._reduction]
             state = {
                 "sum": self._sum,
                 "min": self._min,
                 "max": self._max
             }[self._reduction].clone()
-            DistributedUtils.all_reduce(
+            return reduce_tensor(
                 state,
-                op=operation,
-                group=self._sync_dist_group
+                self._sync_dist_group,
+                self._reduction
             )
-            return state
         match self._reduction:
             case "sum":
                 return self._sum
@@ -214,7 +216,7 @@ class MetricAccumulator:
             self._metric = None
 
     @property
-    def reduction(self) -> ReductionMode:
+    def reduction(self) -> Reduction:
         # Reduction mode fixed at construction.
         return self._reduction
 

@@ -29,7 +29,6 @@ from syntheticmind.core.optimizer import (
 )
 from syntheticmind.core.saving import _CheckpointLoader
 from syntheticmind.loggers.logger import Logger
-from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
 from syntheticmind.types import (
@@ -45,6 +44,7 @@ from syntheticmind.types import (
     Reduction,
     RunningStage,
     StepOutput,
+    TensorReducer,
     TrainingStepOutput
 )
 
@@ -1176,14 +1176,22 @@ class LoggedMetric:
             raise RuntimeError("A torchmetrics.Metric has no per-call scalar epoch value.")
         return cast(torch.Tensor, self.value)
 
-    def compute_step(self, device: torch.device) -> torch.Tensor | None:
+    def compute_step(
+        self,
+        device: torch.device,
+        reduce_tensor: TensorReducer
+    ) -> torch.Tensor | None:
         if self.enable_graph:
             with torch.enable_grad():
-                return self._compute_step(device)
+                return self._compute_step(device, reduce_tensor)
         with torch.no_grad():
-            return self._compute_step(device)
+            return self._compute_step(device, reduce_tensor)
 
-    def _compute_step(self, device: torch.device) -> torch.Tensor | None:
+    def _compute_step(
+        self,
+        device: torch.device,
+        reduce_tensor: TensorReducer
+    ) -> torch.Tensor | None:
         if self._computed_step_value is not None:
             return self._computed_step_value
         value: numbers.Number | torch.Tensor | None = cast(
@@ -1209,37 +1217,34 @@ class LoggedMetric:
             raise ValueError(
                 f"The logged value for {self.name!r} could not be converted to a scalar."
             )
-        if self.sync_dist and not self.rank_zero_only and DistributedUtils.is_distributed():
-            if self.reduction == "mean":
-                tensor = DistributedUtils.all_reduce_mean(
-                    tensor,
-                    group=self.sync_dist_group
-                )
-            else:
-                operation: dist.ReduceOp.RedOpType = {
-                    "sum": dist.ReduceOp.SUM,
-                    "min": dist.ReduceOp.MIN,
-                    "max": dist.ReduceOp.MAX
-                }[self.reduction]
-                tensor = DistributedUtils.all_reduce(
-                    tensor,
-                    op=operation,
-                    group=self.sync_dist_group
-                )
+        if self.sync_dist and not self.rank_zero_only:
+            tensor = reduce_tensor(
+                tensor,
+                self.sync_dist_group,
+                self.reduction
+            )
         if not self.enable_graph:
             tensor = tensor.detach()
         self._computed_step_value = tensor.squeeze()
         return self._computed_step_value
 
-    def compute(self, device: torch.device) -> torch.Tensor:
+    def compute(
+        self,
+        device: torch.device,
+        reduce_tensor: TensorReducer
+    ) -> torch.Tensor:
         if self.enable_graph:
             with torch.enable_grad():
-                return self._compute(device)
+                return self._compute(device, reduce_tensor)
         with torch.no_grad():
-            return self._compute(device)
+            return self._compute(device, reduce_tensor)
 
-    def _compute(self, device: torch.device) -> torch.Tensor:
-        value: torch.Tensor | None = self.compute_step(device)
+    def _compute(
+        self,
+        device: torch.device,
+        reduce_tensor: TensorReducer
+    ) -> torch.Tensor:
+        value: torch.Tensor | None = self.compute_step(device, reduce_tensor)
         if value is not None:
             return value
         metric: Metric = cast(Metric, self.value)
@@ -1252,16 +1257,24 @@ class LoggedMetric:
             computed = computed.detach()
         return computed.squeeze()
 
-    def compute_epoch(self, device: torch.device) -> torch.Tensor:
+    def compute_epoch(
+        self,
+        device: torch.device,
+        reduce_tensor: TensorReducer
+    ) -> torch.Tensor:
         if self.enable_graph:
             with torch.enable_grad():
-                return self._compute_epoch(device)
+                return self._compute_epoch(device, reduce_tensor)
         with torch.no_grad():
-            return self._compute_epoch(device)
+            return self._compute_epoch(device, reduce_tensor)
 
-    def _compute_epoch(self, device: torch.device) -> torch.Tensor:
+    def _compute_epoch(
+        self,
+        device: torch.device,
+        reduce_tensor: TensorReducer
+    ) -> torch.Tensor:
         if not self.is_metric:
-            value: torch.Tensor | None = self.compute_step(device)
+            value: torch.Tensor | None = self.compute_step(device, reduce_tensor)
             assert value is not None
             return value
         metric: Metric = cast(Metric, self.value)

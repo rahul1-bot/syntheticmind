@@ -2,7 +2,7 @@
 
 `Strategy` is the complete policy governing how a model participates in training, validation, testing, and prediction. It owns the model connection, wrapped-model identity, accelerator and precision collaboration, optimizer stepping, step dispatch, collective defaults, initialization context, and ordinary checkpoint behavior.
 
-`ParallelStrategy` is the shared distributed execution policy. It owns parallel devices, cluster ranks, process-group initialization, distributed collectives, gradient synchronization, process launch, and process-scoped cleanup. DDP and model-parallel execution inherit these semantics instead of reproducing them.
+`ParallelStrategy` is the shared distributed execution policy. It owns parallel devices, cluster ranks, process-group initialization, tensor reduction, distributed collectives, gradient synchronization, process launch, and process-scoped cleanup. DDP and model-parallel execution inherit these semantics instead of reproducing them. Mean, sum, minimum, and maximum metric reductions therefore execute through the selected Strategy rather than ambient process-global helpers.
 
 ```text
 Strategy

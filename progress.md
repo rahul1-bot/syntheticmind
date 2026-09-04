@@ -279,8 +279,17 @@
     5. ✅ Spawned two-rank fit, validation, test, prediction, exact stateful resume, metric identity, sampler partitioning, and direct distributed prediction ordering pass after relocation.
     6. ✅ The explicit concept-integrity size exception is recorded because splitting the loader tree lifecycle would manufacture one-consumer implementation fragments rather than improve machine-learning architecture.
 
-| Progress Active | Distributed Ownership Evacuation | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
+| Progress Complete | Distributed Ownership Evacuation | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
 
-    1. `utilities/distributed.py` remains a mixed collection of rank inspection, collective tensor reduction, object broadcast, process-group teardown, and compatibility aliases despite Strategy already owning distributed execution.
-    2. The next bounded phase must map each current caller to Strategy, Trainer, callback, or logger ownership and remove free aliases without duplicating collectives or forcing model-facing code to reach into Trainer internals.
-    3. Existing external-process-group behavior, rank-zero output, boolean consensus, metric reduction, object broadcast, process cleanup, and every launcher require direct verification before the utility module can be deleted.
+    1. ✅ Strategy now exposes the recognized tensor reduction operation, with local identity semantics and parallel mean, sum, minimum, maximum, and process-group-aware execution.
+    2. ✅ Trainer, loops, callbacks, logged metrics, and metric accumulators use the selected Strategy for rank and collective semantics without importing an ambient distributed namespace.
+    3. ✅ A dependency-neutral callable type captures the narrow metric-reduction seam without adding a Protocol, host abstraction, conditional import, or circular dependency.
+    4. ✅ `utilities/distributed.py`, its classmethod namespace, and all free aliases were deleted; no old production or ignored verification import remains.
+    5. ✅ Local validation, direct two-rank Strategy reduction, standard distributed scalar reductions, TorchMetrics, graph state, callback artifacts, progress rendering, checkpoint selection, spawned metric views, and sharded model parallelism pass.
+
+| Progress Active | Hook Inspection and Module Mode Ownership | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
+
+    1. `utilities/model_helpers.py` still combines inherited-hook detection, signature inspection, callable unwrapping, and recursive model-mode capture under one generic helper name.
+    2. The next bounded phase must determine whether hook inspection belongs with the hook lifecycle and whether exact nested module-mode restoration belongs with evaluation and prediction loops.
+    3. Relocation must remove module-level functions and generic naming without fabricating stateless wrapper classes, duplicating hook entrypoints, or altering override discovery for user subclasses.
+    4. Verification must cover inherited and direct overrides, wrapped callables, required hook parameters, exact mixed child-module mode restoration, failure cleanup, callbacks, and every stage transition.

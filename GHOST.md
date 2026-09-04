@@ -283,3 +283,11 @@
     4. Module-level functions, the mutable mode-dispatch dictionary, generic `object` annotations, and the legacy utility import surface were removed. Recursive batch, iterable, sampler, state, and pickle domains are now explicit, and byte batches are represented by the shared batch scalar contract.
     5. The cohesive 588-line module and 337-line primary class exceed generic structural limits under Rahul's explicit SyntheticMind concept-integrity authority. Splitting tree structure, limits, iteration, state continuation, and worker teardown would create implementation fragments and is therefore rejected.
     6. All four combination modes, finite and unsized limits, nested dataset construction, serialization, state capture and restoration, persistent workers, spawned DDP lifecycle execution, exact stateful resume, and direct two-rank prediction ordering pass through the canonical module.
+
+| Architecture Decision | Strategy-Owned Distributed Reduction | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
+
+    1. The selected Strategy now owns the standard tensor `reduce` operation alongside barrier, broadcast, boolean consensus, gather, ranks, and process-group lifetime; `ParallelStrategy` implements mean, sum, minimum, and maximum collectives with optional process-group selection.
+    2. Trainer, loops, and callbacks now gate output and side effects through `trainer.is_global_zero`, preserving selected cluster-environment rank semantics even before a process group is initialized instead of consulting ambient global state.
+    3. Logged metrics and metric accumulators receive the Strategy's bound reduction operation at their computation boundary. This supplies only the required capability and avoids a circular core-to-Strategy dependency or a synthetic host Protocol.
+    4. The former `DistributedUtils` namespace and its seven duplicate free-function entrypoints were deleted without a replacement utility module. Process-group teardown remains exclusively owned by `ParallelStrategy`.
+    5. Local reduction validation, two-rank sum and mean, standard distributed mean, sum, minimum and maximum metrics, TorchMetrics, tensor graph state, progress rendering, checkpoint selection, callback artifacts, spawned metric views, and sharded model parallelism pass through Strategy ownership.

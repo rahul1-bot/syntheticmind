@@ -134,3 +134,10 @@
     2. Its package-root placement keeps model-facing DataModule construction inward from Trainer orchestration while allowing every stage loop to consume one canonical loader tree.
     3. Distinct combination algorithms remain private collaborators of the public owner, preserving recognized machine-learning semantics without exporting a class family.
     4. The next ownership target is distributed behavior still concealed in utilities; Strategy must absorb execution semantics while consumers retain only their real presentation or metric responsibilities.
+
+| Strategic Note | Distributed Execution Authority | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
+
+    1. Strategy is now the sole authority for rank topology and tensor collectives across local, DDP, and model-parallel execution.
+    2. Metric owners declare the requested reduction but receive the selected Strategy's narrow reduction operation at computation time, preserving inward dependency direction.
+    3. Callback and persistence gates use Trainer rank state instead of ambient process globals, while collective participation remains symmetric before rank-specific output decisions.
+    4. The distributed utility namespace and aliases were removed; the remaining utility evacuation concerns hook inspection, module-mode restoration, and model-summary ownership.

@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, override
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.distributed import is_rank_zero
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer
@@ -45,7 +44,7 @@ class LearningRateMonitor(Callback):
         # Reads the learning rate of every parameter group from the primary
         # optimizer and emits the values from rank zero, using the plain lr
         # key for a single group and indexed keys for several.
-        if not is_rank_zero():
+        if not trainer.is_global_zero:
             return
         if trainer.optimizer is None or not trainer.loggers:
             return

@@ -15,7 +15,7 @@ from syntheticmind.strategies.launchers.launcher import ProcessStartMethod, _Pro
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.types import OptimizerStateValue
+from syntheticmind.types import OptimizerStateValue, Reduction
 
 __all__: list[str] = ["ParallelStrategy"]
 
@@ -162,6 +162,32 @@ class ParallelStrategy(Strategy, LaunchStrategy):
         dist.all_reduce(decision_tensor, op=dist.ReduceOp.SUM)
         decision_count: int = int(decision_tensor.item())
         return decision_count == self.world_size if all else decision_count > 0
+
+    @override
+    def reduce(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup | None = None,
+        reduce_op: Reduction = "mean"
+    ) -> torch.Tensor:
+        if not dist.is_initialized():
+            return tensor
+        operation: dist.ReduceOp.RedOpType
+        match reduce_op:
+            case "mean" | "sum":
+                operation = dist.ReduceOp.SUM
+            case "min":
+                operation = dist.ReduceOp.MIN
+            case "max":
+                operation = dist.ReduceOp.MAX
+            case _:
+                raise ValueError(
+                    f"Unsupported reduction {reduce_op!r}; expected mean, sum, min, or max."
+                )
+        dist.all_reduce(tensor, op=operation, group=group)
+        if reduce_op == "mean":
+            return tensor / dist.get_world_size(group)
+        return tensor
 
     @override
     def all_gather(

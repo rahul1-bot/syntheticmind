@@ -21,7 +21,6 @@ from syntheticmind.loops.optimization.manual import _ManualOptimization
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
 from syntheticmind.utilities.model_helpers import is_overridden
@@ -792,7 +791,8 @@ class TrainingEpochLoop(Loop):
         for metric in logged:
             if metric.on_step:
                 value: torch.Tensor | None = metric.compute_step(
-                    self.trainer.strategy.root_device
+                    self.trainer.strategy.root_device,
+                    self.trainer.strategy.reduce
                 )
                 if value is not None:
                     step_name: str = metric.output_name(on_step=True)
@@ -838,7 +838,7 @@ class TrainingEpochLoop(Loop):
             and not is_accumulating
             and state.global_step % self.log_every_n_steps == 0
         ):
-            if DistributedUtils.is_rank_zero():
+            if self.trainer.is_global_zero:
                 self.trainer._log_metrics(step_metrics, step=state.global_step)
 
         module._reset_logged_metrics()
@@ -855,7 +855,8 @@ class TrainingEpochLoop(Loop):
         progress_bar_reduced: dict[str, float] = {}
         for metric, accumulator in epoch_accum.values():
             value: torch.Tensor = accumulator.compute(
-                self.trainer.strategy.root_device
+                self.trainer.strategy.root_device,
+                self.trainer.strategy.reduce
             )
             if not metric.enable_graph:
                 value = value.detach()
@@ -873,7 +874,7 @@ class TrainingEpochLoop(Loop):
         self.trainer._update_progress_bar_metrics("training", progress_bar_reduced)
         if not self.trainer.loggers:
             return
-        if not DistributedUtils.is_rank_zero():
+        if not self.trainer.is_global_zero:
             return
         if logger_reduced:
             self.trainer._log_metrics(logger_reduced, step=state.global_step)

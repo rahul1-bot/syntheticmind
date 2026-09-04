@@ -43,7 +43,6 @@ from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.utilities.distributed import DistributedUtils
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer
@@ -232,7 +231,10 @@ class FitLoop(Loop):
         callback_metrics: dict[str, torch.Tensor] = {}
         progress_bar_metrics: dict[str, float] = {}
         for metric in logged:
-            val: torch.Tensor = metric.compute_epoch(trainer.strategy.root_device)
+            val: torch.Tensor = metric.compute_epoch(
+                trainer.strategy.root_device,
+                trainer.strategy.reduce
+            )
             metric_name: str = metric.output_name(on_step=False)
             if metric.on_step or metric.on_epoch:
                 callback_metrics[metric.base_name()] = val
@@ -248,6 +250,6 @@ class FitLoop(Loop):
         trainer._logger_connector.callback_metrics.update(callback_metrics)
         trainer._update_logged_metrics(log_metrics)
         trainer._update_progress_bar_metrics("training", progress_bar_metrics)
-        if log_metrics and trainer.loggers and DistributedUtils.is_rank_zero():
+        if log_metrics and trainer.loggers and trainer.is_global_zero:
             trainer._log_metrics(log_metrics, step=state.global_step)
         module._reset_logged_metrics()

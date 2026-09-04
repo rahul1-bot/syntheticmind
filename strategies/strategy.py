@@ -22,6 +22,7 @@ from syntheticmind.types import (
     OptimizerClosure,
     OptimizerStepOutput,
     OptimizerStepValue,
+    Reduction,
     StepArgument,
     StepOutput,
     TrainingStepOutput
@@ -212,6 +213,19 @@ class Strategy:
         if type(all) is not bool:
             raise TypeError("`all` must be a bool.")
         return decision
+
+    def reduce(
+        self,
+        tensor: torch.Tensor,
+        group: torch.distributed.ProcessGroup | None = None,
+        reduce_op: Reduction = "mean"
+    ) -> torch.Tensor:
+        if reduce_op not in ("mean", "sum", "min", "max"):
+            raise ValueError(
+                f"Unsupported reduction {reduce_op!r}; expected mean, sum, min, or max."
+            )
+        del group
+        return tensor
 
     def all_gather(
         self,

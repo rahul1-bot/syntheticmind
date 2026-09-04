@@ -16,6 +16,7 @@ __all__: list[str] = [
     "ClipAlgorithm",
     "SchedulerInterval",
     "Reduction",
+    "TensorReducer",
     "BatchScalar",
     "DeviceTransferable",
     "Batch",
@@ -92,6 +93,11 @@ type ClipAlgorithm = Literal["norm", "value"]
 type SchedulerInterval = Literal["step", "epoch"]
 
 type Reduction = Literal["mean", "sum", "min", "max"]
+
+type TensorReducer = Callable[
+    [torch.Tensor, torch.distributed.ProcessGroup | None, Reduction],
+    torch.Tensor
+]
 
 type BatchScalar = bool | int | float | str | bytes | None
 

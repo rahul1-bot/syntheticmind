@@ -284,3 +284,11 @@
     3. A core DataModule and outward Trainer loops both consume loader composition, so an inward package-root module preserves acyclic dependency direction better than a Trainer connector subpackage or a one-file data directory.
     4. Worker reconstruction, pickling, direct distributed execution, and exact stateful resume are mandatory relocation evidence because ordinary local iteration cannot expose module-path or cursor-ownership regressions.
     5. Explicit project authority may retain one oversized cohesive concept when every proposed split creates implementation fragments; the exception must name the inseparable responsibilities and remain subject to subtraction review.
+
+| Memory | Distributed State Must Follow the Selected Strategy | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
+
+    1. Ambient `torch.distributed` rank queries are weaker than Strategy state because a launcher or cluster environment can know the correct rank before process-group initialization and a detached object has no execution-policy authority.
+    2. Metric reduction is an execution-policy operation: backend, process group, topology, and local identity behavior belong to Strategy, while metric owners retain reduction intent and accumulated values.
+    3. Passing one bound reduction method into inward metric code avoids both a circular dependency on concrete Strategy and an oversized host contract containing unrelated Trainer behavior.
+    4. Rank-zero presentation and persistence gates should read the Trainer's selected Strategy, while collective participation must remain symmetric across ranks before any rank-specific return.
+    5. A utility namespace that duplicates Strategy ranks and collectives creates two authorities and free-function aliases; deletion is safer than relocation once every real consumer already carries Trainer or Strategy.

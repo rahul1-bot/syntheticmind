@@ -25,7 +25,6 @@ import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.types import Batch, StepOutput
 
 if TYPE_CHECKING:
@@ -67,7 +66,7 @@ class ThroughputMonitor(Callback):
         # Computes the batch duration and inferred sample count, accumulates
         # the epoch total, and on the configured step cadence emits samples
         # per second and batch time to the experiment logger from rank zero.
-        if not is_rank_zero():
+        if not trainer.is_global_zero:
             return
         batch_time: float = time.perf_counter() - self._batch_start_time
         batch_size: int = self._infer_batch_size(batch)
@@ -84,7 +83,7 @@ class ThroughputMonitor(Callback):
     def on_train_epoch_end(self, trainer: Trainer, module: Module) -> None:
         # Writes the whole-epoch samples-per-second summary to the log from
         # rank zero.
-        if not is_rank_zero():
+        if not trainer.is_global_zero:
             return
         epoch_time: float = time.perf_counter() - self._epoch_start_time
         if epoch_time > 0 and trainer.loggers:

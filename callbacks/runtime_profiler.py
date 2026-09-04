@@ -47,7 +47,6 @@ import torch
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.trainer.trainer import Trainer
-from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.storage.filesystem import (
     append_text,
     exists,
@@ -166,7 +165,7 @@ class RuntimeProfiler(Callback):
         if trainer.logger is None or trainer.fast_dev_run:
             return
         log_dir: str = trainer.log_dir
-        if not is_rank_zero():
+        if not trainer.is_global_zero:
             return
         self._metrics_directory: str | None = join_path(log_dir, "metrics")
         make_directory(self._metrics_directory)
@@ -571,7 +570,7 @@ class RuntimeProfiler(Callback):
             return
         for metric_name, value in finite_metrics.items():
             self._metric_summaries.setdefault(metric_name, RuntimeMetricAccumulator()).update(value)
-        if trainer.loggers and is_rank_zero():
+        if trainer.loggers and trainer.is_global_zero:
             trainer._log_metrics(finite_metrics, step=trainer.state.global_step)
         self._append_profile_event(trainer, module, event_name, batch_idx, finite_metrics)
         self._write_profile_summary()
@@ -585,7 +584,7 @@ class RuntimeProfiler(Callback):
         metrics: dict[str, float]
     ) -> None:
         # Writes one profiler JSONL event to the current run artifact directory.
-        if not is_rank_zero() or self._profile_events_path is None:
+        if not trainer.is_global_zero or self._profile_events_path is None:
             return
         payload: dict[str, RuntimeRecordValue | dict[str, float]] = {
             "event": event_name,
@@ -605,7 +604,7 @@ class RuntimeProfiler(Callback):
 
     def _write_profile_config(self, stage: TrainerStage) -> None:
         # Writes profiler configuration so telemetry cadence is auditable.
-        if not is_rank_zero() or self._profile_config_path is None:
+        if self._profile_config_path is None:
             return
         payload: dict[str, RuntimeRecordValue] = {
             "profile_every_n_steps": self._profile_every_n_steps,
@@ -640,7 +639,7 @@ class RuntimeProfiler(Callback):
 
     def _write_profile_summary(self) -> None:
         # Writes the latest profiler summary into a stable JSON artifact.
-        if not is_rank_zero() or self._profile_summary_path is None:
+        if self._profile_summary_path is None:
             return
         payload: dict[str, dict[str, float | int | None]] = {
             metric_name: metric_summary.as_record()

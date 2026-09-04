@@ -63,7 +63,6 @@ from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
 from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
 from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.storage.filesystem import (
     basename,
@@ -663,7 +662,7 @@ class Trainer:
                 self._data_connector.total_train_batches = 0
             self._configure_validation_schedule(reset_time=True)
 
-            if is_rank_zero():
+            if self.is_global_zero:
                 combined_loader: CombinedLoader | None = self._data_connector.train_combined_loader
                 if combined_loader is not None:
                     for train_dataloader in combined_loader.flattened:
@@ -1230,13 +1229,13 @@ class Trainer:
         datamodule: DataModule | None,
         stage: TrainerStage
     ) -> None:
-        if is_rank_zero() and datamodule is not None:
+        if self.is_global_zero and datamodule is not None:
             self._call_datamodule_hook(
                 datamodule,
                 "prepare_data",
                 datamodule.prepare_data
             )
-        if is_rank_zero() and is_overridden(
+        if self.is_global_zero and is_overridden(
             "prepare_data",
             module,
             DataHooks
