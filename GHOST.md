@@ -104,15 +104,15 @@
     3. Signal handler state now uses a closed union covering Strategy, handlers, booleans, integers, and absence rather than a generic object dictionary.
     4. DDP spawn serialization and live SIGTERM propagation pass, the originating process exits through the expected interruption path, and no owned child remains attached after completion.
 
-| Architecture Decision | Data Connector Ownership | Date: 04 September 2026 | Time: 09:26 AM | Name: Ghost |
+| Architecture Decision | Data Connector and Batch-Limit Ownership | Date: 04 September 2026 | Time: 03:28 PM | Name: Ghost |
 
     1. Dataloader source ownership, module or DataModule factory invocation, direct and nested loaders, combination modes, limits, reload cadence, overfit determinism, sampler injection, and prepared-loader state now belong to `trainer/connectors/data_connector.py`.
     2. Trainer retains stage sequencing, data preparation and setup hook order, while loops consume the connector-owned prepared loaders and batch totals rather than parallel Trainer fields.
     3. Distributed training uses padded `DistributedSampler` semantics where equal work is required, while prediction uses an unrepeated strided sampler so the union of rank partitions contains every sample exactly once without overlap.
     4. DataLoader subclass reconstruction preserves standard constructor values and current subclass-required attributes during sampler replacement, including stateful loader continuation and worker configuration.
-    5. The connector's cohesive class exceeds the generic 500-line module budget under Rahul's explicit SyntheticMind concept-integrity authority. Splitting source resolution, combination, limits, sampler policy, and reconstruction would fracture one data-composition lifecycle and is therefore rejected.
-    6. The connector contains no `Any`, generic `object`, module-level function, source comment, custom callable object, or unannotated assignment; Trainer source comments were removed from the rewritten module rather than retained as stale architecture.
-    7. Direct, module-owned, and DataModule-owned execution, nested loaders, spawn and fork transfer, two-rank DDP, model parallelism, stateful checkpoint continuation, overfit batches, reload cadence, batch limits, persistent workers, and unrepeated prediction all pass.
+    5. Trainer construction owns normalization of fast-development, sanity, epoch, step, overfit, and raw batch-limit inputs; the data connector applies its resolved stage limits because sized versus unsized loader semantics depend on the attached data source.
+    6. The former `loops/batch_limits.py` function module and Trainer's module-level training-limit resolver were deleted without a wrapper class, factory, public alias, or duplicate implementation; the loop package now contains only class-owned behavior.
+    7. Direct, module-owned, DataModule-owned, sized, unsized, nested, spawned, two-rank DDP, stateful continuation, overfit, reload, fast-development, persistent-worker, and unrepeated-prediction limits pass through the reconstructed owners.
 
 | Architecture Decision | Logger Routing and Persistence Ownership | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
 

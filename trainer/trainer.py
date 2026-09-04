@@ -30,12 +30,6 @@ from syntheticmind.core.optimizer import (
     _SchedulerInstance
 )
 from syntheticmind.loggers.logger import Logger
-from syntheticmind.loops.batch_limits import (
-    normalize_batch_limit,
-    normalize_fast_dev_run,
-    normalize_sanity_steps,
-    resolve_batch_limit
-)
 from syntheticmind.loops.evaluation_loop import EvaluationLoop
 from syntheticmind.loops.fit_loop import FitLoop
 from syntheticmind.loops.prediction_loop import PredictionLoop
@@ -98,53 +92,6 @@ type _HookOwner = Module | DataModule | DataHooks | ModelHooks
 type _HookCallable = Callable[..., ModelOutput | DataLoaderSource | None]
 
 
-def _resolve_training_limits(
-    max_epochs: int | None,
-    min_epochs: int | None,
-    max_steps: int,
-    min_steps: int | None
-) -> tuple[int, int]:
-    if max_epochs is not None and (
-        isinstance(max_epochs, bool) or not isinstance(max_epochs, int)
-    ):
-        raise TypeError(f"`max_epochs` must be an int or None, got {max_epochs!r}.")
-    if min_epochs is not None and (
-        isinstance(min_epochs, bool) or not isinstance(min_epochs, int)
-    ):
-        raise TypeError(f"`min_epochs` must be an int or None, got {min_epochs!r}.")
-    if isinstance(max_steps, bool) or not isinstance(max_steps, int):
-        raise TypeError(f"`max_steps` must be an int, got {max_steps!r}.")
-    if min_steps is not None and (
-        isinstance(min_steps, bool) or not isinstance(min_steps, int)
-    ):
-        raise TypeError(f"`min_steps` must be an int or None, got {min_steps!r}.")
-    if max_epochs is not None and max_epochs < -1:
-        raise MisconfigurationError(
-            f"`max_epochs` must be a non-negative integer or -1, got {max_epochs}."
-        )
-    if min_epochs is not None and min_epochs < 0:
-        raise MisconfigurationError(
-            f"`min_epochs` must be a non-negative integer or None, got {min_epochs}."
-        )
-    if max_steps < -1:
-        raise MisconfigurationError(
-            f"`max_steps` must be a non-negative integer or -1, got {max_steps}."
-        )
-    if min_steps is not None and min_steps < 0:
-        raise MisconfigurationError(
-            f"`min_steps` must be a non-negative integer or None, got {min_steps}."
-        )
-    if max_epochs is None:
-        resolved_max_epochs: int = 1000 if max_steps == -1 else -1
-    else:
-        resolved_max_epochs: int = max_epochs
-    if min_epochs is None:
-        resolved_min_epochs: int = 1 if min_steps is not None else 0
-    else:
-        resolved_min_epochs: int = min_epochs
-    return resolved_min_epochs, resolved_max_epochs
-
-
 class Trainer:
     def __init__(
         self,
@@ -192,8 +139,10 @@ class Trainer:
         resume_from_checkpoint: str | Path | None = None,
         seed: int | None = None
     ) -> None:
-        resolved_fast_dev_run: int | bool = normalize_fast_dev_run(fast_dev_run)
-        resolved_overfit_batches: int | float = normalize_batch_limit(
+        resolved_fast_dev_run: int | bool = self._normalize_fast_dev_run(
+            fast_dev_run
+        )
+        resolved_overfit_batches: int | float = self._normalize_batch_limit(
             overfit_batches,
             "overfit_batches"
         )
@@ -345,28 +294,30 @@ class Trainer:
                 raise TypeError("`default_root_dir` must resolve to a string path.")
             configured_root_dir: str = configured_root_value
             self._default_root_dir: str = configured_root_dir or os.getcwd()
-        resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
+        resolved_training_limits: tuple[int, int] = self._resolve_training_limits(
             effective_max_epochs,
             min_epochs,
             effective_max_steps,
             min_steps
         )
-        resolved_num_sanity_val_steps: int | float = normalize_sanity_steps(
+        resolved_min_epochs: int = resolved_training_limits[0]
+        resolved_max_epochs: int = resolved_training_limits[1]
+        resolved_num_sanity_val_steps: int | float = self._normalize_sanity_steps(
             num_sanity_val_steps
         )
-        self.limit_train_batches: int | float = normalize_batch_limit(
+        self.limit_train_batches: int | float = self._normalize_batch_limit(
             limit_train_batches,
             "limit_train_batches"
         )
-        self.limit_val_batches: int | float = normalize_batch_limit(
+        self.limit_val_batches: int | float = self._normalize_batch_limit(
             limit_val_batches,
             "limit_val_batches"
         )
-        self.limit_test_batches: int | float = normalize_batch_limit(
+        self.limit_test_batches: int | float = self._normalize_batch_limit(
             limit_test_batches,
             "limit_test_batches"
         )
-        self.limit_predict_batches: int | float = normalize_batch_limit(
+        self.limit_predict_batches: int | float = self._normalize_batch_limit(
             limit_predict_batches,
             "limit_predict_batches"
         )
@@ -385,12 +336,14 @@ class Trainer:
             resolved_num_sanity_val_steps = 0
             effective_val_check_interval = 1.0
             effective_check_val_every_n_epoch = 1
-            resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
+            resolved_training_limits: tuple[int, int] = self._resolve_training_limits(
                 effective_max_epochs,
                 min_epochs,
                 effective_max_steps,
                 min_steps
             )
+            resolved_min_epochs: int = resolved_training_limits[0]
+            resolved_max_epochs: int = resolved_training_limits[1]
         if gradient_clip_val is not None and not isinstance(gradient_clip_val, (int, float)):
             raise TypeError(
                 f"`gradient_clip_val` should be an int or a float. Got {gradient_clip_val}."
@@ -1313,7 +1266,7 @@ class Trainer:
         )
         if validation_enabled and self._data_connector.total_val_batches is not None:
             validation_enabled = any(
-                resolve_batch_limit(total, self.limit_val_batches, "val") != 0
+                self._data_connector.resolve_batch_limit(total, "val") != 0
                 for total in self._data_connector.total_val_batches
             )
         self._validation_schedule.configure(
@@ -1364,6 +1317,107 @@ class Trainer:
         ConsoleRenderer().write_permanent(
             f"syntheticmind · {stage} · barebones"
         )
+
+    def _normalize_fast_dev_run(self, value: int | bool) -> int | bool:
+        if not isinstance(value, bool | int):
+            raise TypeError(
+                f"`fast_dev_run` must be a bool or an int, got {value!r}."
+            )
+        if value < 0:
+            raise MisconfigurationError(
+                f"`fast_dev_run={value!r}` is invalid. Expected a non-negative "
+                "integer or bool."
+            )
+        return True if value == 1 else value
+
+    def _normalize_batch_limit(
+        self,
+        value: int | float | None,
+        name: str
+    ) -> int | float:
+        if value is None:
+            return 1.0
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise TypeError(
+                f"`{name}` must be an int, a float, or None, got {value!r}."
+            )
+        if 0 <= value <= 1:
+            return value
+        if value > 1:
+            if isinstance(value, int):
+                return value
+            if value.is_integer():
+                return int(value)
+        raise MisconfigurationError(
+            f"Invalid value {value!r} for `{name}`. Expected a float in [0.0, 1.0] "
+            "or a non-negative integer."
+        )
+
+    def _normalize_sanity_steps(self, value: int | None) -> int | float:
+        if value is None:
+            return 2
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(
+                f"`num_sanity_val_steps` must be an int or None, got {value!r}."
+            )
+        if value < -1:
+            raise MisconfigurationError(
+                "`num_sanity_val_steps` must be a non-negative integer, -1, or None."
+            )
+        return float("inf") if value == -1 else value
+
+    def _resolve_training_limits(
+        self,
+        max_epochs: int | None,
+        min_epochs: int | None,
+        max_steps: int,
+        min_steps: int | None
+    ) -> tuple[int, int]:
+        if max_epochs is not None and (
+            isinstance(max_epochs, bool) or not isinstance(max_epochs, int)
+        ):
+            raise TypeError(
+                f"`max_epochs` must be an int or None, got {max_epochs!r}."
+            )
+        if min_epochs is not None and (
+            isinstance(min_epochs, bool) or not isinstance(min_epochs, int)
+        ):
+            raise TypeError(
+                f"`min_epochs` must be an int or None, got {min_epochs!r}."
+            )
+        if isinstance(max_steps, bool) or not isinstance(max_steps, int):
+            raise TypeError(f"`max_steps` must be an int, got {max_steps!r}.")
+        if min_steps is not None and (
+            isinstance(min_steps, bool) or not isinstance(min_steps, int)
+        ):
+            raise TypeError(
+                f"`min_steps` must be an int or None, got {min_steps!r}."
+            )
+        if max_epochs is not None and max_epochs < -1:
+            raise MisconfigurationError(
+                f"`max_epochs` must be a non-negative integer or -1, got {max_epochs}."
+            )
+        if min_epochs is not None and min_epochs < 0:
+            raise MisconfigurationError(
+                f"`min_epochs` must be a non-negative integer or None, got {min_epochs}."
+            )
+        if max_steps < -1:
+            raise MisconfigurationError(
+                f"`max_steps` must be a non-negative integer or -1, got {max_steps}."
+            )
+        if min_steps is not None and min_steps < 0:
+            raise MisconfigurationError(
+                f"`min_steps` must be a non-negative integer or None, got {min_steps}."
+            )
+        if max_epochs is None:
+            resolved_max_epochs: int = 1000 if max_steps == -1 else -1
+        else:
+            resolved_max_epochs: int = max_epochs
+        if min_epochs is None:
+            resolved_min_epochs: int = 1 if min_steps is not None else 0
+        else:
+            resolved_min_epochs: int = min_epochs
+        return resolved_min_epochs, resolved_max_epochs
 
     def _resolve_profiler(self, profiler: Profiler | str | None) -> Profiler:
         if profiler is None:
@@ -2692,9 +2746,8 @@ class Trainer:
             return []
         resolved_batches: list[int | float] = []
         for total_batches in self._data_connector.total_val_batches:
-            effective_batches: int | None = resolve_batch_limit(
+            effective_batches: int | None = self._data_connector.resolve_batch_limit(
                 total_batches,
-                self.limit_val_batches,
                 "val"
             )
             resolved_batches.append(
@@ -2717,9 +2770,8 @@ class Trainer:
             return []
         resolved_batches: list[int | float] = []
         for total_batches in self._data_connector.total_test_batches:
-            effective_batches: int | None = resolve_batch_limit(
+            effective_batches: int | None = self._data_connector.resolve_batch_limit(
                 total_batches,
-                self.limit_test_batches,
                 "test"
             )
             resolved_batches.append(
@@ -2735,9 +2787,8 @@ class Trainer:
             return []
         resolved_batches: list[int | float] = []
         for total_batches in self._data_connector.total_predict_batches:
-            effective_batches: int | None = resolve_batch_limit(
+            effective_batches: int | None = self._data_connector.resolve_batch_limit(
                 total_batches,
-                self.limit_predict_batches,
                 "predict"
             )
             resolved_batches.append(

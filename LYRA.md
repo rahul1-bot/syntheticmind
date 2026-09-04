@@ -244,3 +244,10 @@
     3. Recursive device movement belongs to DataHooks and is reused for prediction output materialization; no free utility or fake transfer class remains.
     4. Trainer remains the sole shared hook dispatcher, Module owns signature and mode state, and loops own only the ordering of their stage concepts.
     5. Local, MPS, distributed, multi-loader, stateful, checkpoint-monitoring, and model-parallel paths verify the reconstructed execution semantics.
+
+| Strategic Note | Batch-Limit Configuration Ownership | Date: 04 September 2026 | Time: 03:28 PM | Name: Ghost |
+
+    1. Trainer owns validation and normalization of user-supplied run limits because they alter the complete stage plan before runtime composition.
+    2. DataConnector owns applying a resolved stage limit because sized, unsized, nested, and distributed loader cardinality is known only at the data boundary.
+    3. Fast-development and overfit modes rewrite the resolved Trainer plan explicitly rather than hiding limit behavior in loop utilities.
+    4. The former function module was deleted without replacing pure calculations with a fake service or namespace class.

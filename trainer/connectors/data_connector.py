@@ -18,7 +18,6 @@ from torch.utils.data import (
 
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import Module
-from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
@@ -198,12 +197,41 @@ class _DataConnector:
             totals.append(self._safe_len(dataloader))
         combined_loader.flattened: list[_DataloaderLeaf] = processed_dataloaders
         combined_loader.limits: list[int | None] = [
-            resolve_batch_limit(total, self._limits[stage], stage)
+            self.resolve_batch_limit(total, stage)
             for total in totals
         ]
         self._strategy.barrier()
         self._record_loader(stage, combined_loader, totals, current_epoch)
         return combined_loader
+
+    def resolve_batch_limit(
+        self,
+        total_batches: int | None,
+        stage: _DataStage
+    ) -> int | None:
+        limit_batches: int | float = self._limits[stage]
+        if total_batches == 0 or limit_batches == 0:
+            return 0
+        if total_batches is None:
+            if isinstance(limit_batches, int):
+                return limit_batches
+            if limit_batches == 1.0:
+                return None
+            raise MisconfigurationError(
+                f"An unsized `{stage}_dataloader` requires `limit_{stage}_batches` "
+                "to be 1.0 or an integer."
+            )
+        if isinstance(limit_batches, int):
+            return min(total_batches, limit_batches)
+        resolved_batches: int = int(total_batches * limit_batches)
+        if resolved_batches == 0 and limit_batches > 0.0:
+            minimum_fraction: float = 1.0 / total_batches
+            raise MisconfigurationError(
+                f"`limit_{stage}_batches={limit_batches}` selects fewer than one batch "
+                f"from a dataloader with {total_batches} batches. Use at least "
+                f"{minimum_fraction}."
+            )
+        return resolved_batches
 
     def reset_fit(self) -> None:
         self.total_train_batches: int | None = None

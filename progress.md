@@ -112,12 +112,12 @@
     2. ✅ Conditional type imports and generic object state were removed while nested handler registration, restoration, worker termination, and serialization behavior remained intact.
     3. ✅ Spawn execution and a live SIGTERM probe confirm propagation, expected interruption completion, and owned-process cleanup.
 
-| Progress Complete | Data Connector Reconstruction | Date: 04 September 2026 | Time: 09:26 AM | Name: Ghost |
+| Progress Complete | Data Connector and Batch-Limit Reconstruction | Date: 04 September 2026 | Time: 03:28 PM | Name: Ghost |
 
-    1. ✅ One data connector now owns source selection, factory invocation, nested combination, limits, reload state, overfit determinism, distributed sampler injection, unrepeated prediction partitioning, and DataLoader reconstruction.
-    2. ✅ Loops, progress reporting, launcher result transfer, checkpoint continuation, and Trainer public loader views consume connector-owned prepared loaders and totals without duplicate Trainer storage.
-    3. ✅ The rewritten connector contains no broad annotations, free functions, source prose, custom callable object, or unannotated assignment; its explicit concept-integrity size exception is documented.
-    4. ✅ Module, DataModule, direct, nested, stateful, persistent-worker, overfit, limited, reloaded, DDP, spawn, fork, prediction, and model-parallel execution paths pass.
+    1. ✅ DataConnector owns source selection, nested composition, stage-limit application, reload state, sampler policy, prediction partitioning, reconstruction, totals, and continuation-facing prepared loaders.
+    2. ✅ Trainer owns raw fast-development, sanity, epoch, step, overfit, and batch-limit normalization before composing the runtime plan.
+    3. ✅ The batch-limit function module and Trainer's final module function were deleted without a new class, wrapper, alias, broad annotation, or duplicated calculation.
+    4. ✅ Sized, unsized, direct, nested, stateful, persistent-worker, overfit, fast-development, DDP, spawn, prediction, and model-parallel limit paths pass.
 
 | Progress Complete | Logger Routing and Persistence Reconstruction | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
 
