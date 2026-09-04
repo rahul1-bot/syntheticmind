@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import math
 import re
 import time
@@ -285,14 +283,26 @@ class Timer(Callback):
     @override
     def state_dict(self) -> StateDict:
         return {
+            "duration": self._duration,
+            "interval": self._interval,
             "time_elapsed": {"train": self.time_elapsed("train")},
             "time_limit_reached": self._time_limit_reached
         }
 
     @override
     def load_state_dict(self, state_dict: StateDict) -> None:
+        duration_value: StateValue | None = state_dict.get("duration")
+        interval_value: StateValue | None = state_dict.get("interval")
         elapsed_value: StateValue | None = state_dict.get("time_elapsed")
         limit_value: StateValue | None = state_dict.get("time_limit_reached")
+        if duration_value != self._duration:
+            raise MisconfigurationError(
+                "Timer checkpoint duration does not match the configured duration."
+            )
+        if interval_value != self._interval:
+            raise MisconfigurationError(
+                "Timer checkpoint interval does not match the configured interval."
+            )
         if not isinstance(elapsed_value, dict):
             raise TypeError("Timer checkpoint state requires a `time_elapsed` mapping.")
         training_value: StateValue | None = elapsed_value.get("train")
@@ -365,7 +375,7 @@ class Timer(Callback):
             else False
         )
         should_stop: bool = trainer.strategy.broadcast(rank_zero_stop)
-        trainer.should_stop = trainer.should_stop or should_stop
+        trainer.should_stop: bool = trainer.should_stop or should_stop
         if not should_stop or self._time_limit_reached:
             return
         self._time_limit_reached: bool = True
@@ -374,10 +384,13 @@ class Timer(Callback):
             log.info(f"Time limit reached after {elapsed}; requesting training stop.")
 
     def _reset_all(self) -> None:
-        self._stage_started_at = self._empty_times()
-        self._stage_ended_at = self._empty_times()
-        self._active_stage_started_at = self._empty_times()
-        self._last_stage_durations = {
+        self._stage_started_at: dict[_TimerStage, float | None] = self._empty_times()
+        self._stage_ended_at: dict[_TimerStage, float | None] = self._empty_times()
+        self._active_stage_started_at: dict[
+            _TimerStage,
+            float | None
+        ] = self._empty_times()
+        self._last_stage_durations: dict[_TimerStage, float] = {
             stage: 0.0 for stage in self._stage_started_at
         }
         self._training_started_at: float | None = None
@@ -394,8 +407,7 @@ class Timer(Callback):
         self._active_stage_started_at[stage] = None
         self._last_stage_durations[stage] = 0.0
 
-    @staticmethod
-    def _empty_times() -> dict[_TimerStage, float | None]:
+    def _empty_times(self) -> dict[_TimerStage, float | None]:
         return {
             "fit": None,
             "train": None,
@@ -404,8 +416,8 @@ class Timer(Callback):
             "predict": None
         }
 
-    @staticmethod
     def _parse_duration(
+        self,
         duration: str | timedelta | dict[str, int] | None
     ) -> float | None:
         if duration is None:
@@ -428,7 +440,7 @@ class Timer(Callback):
                     f"Invalid Timer duration {duration!r}; hours must be below 24 "
                     "and minutes or seconds below 60."
                 )
-            parsed_duration = timedelta(
+            parsed_duration: timedelta = timedelta(
                 days=int(duration_match.group(1)),
                 hours=hours,
                 minutes=minutes,
@@ -453,13 +465,13 @@ class Timer(Callback):
             if any(value < 0 for value in duration.values()):
                 raise ValueError("Timer duration mapping values must be non-negative.")
             try:
-                parsed_duration = timedelta(**duration)
+                parsed_duration: timedelta = timedelta(**duration)
             except OverflowError as exception:
                 raise MisconfigurationError(
                     f"Invalid Timer duration mapping {duration!r}."
                 ) from exception
         elif isinstance(duration, timedelta):
-            parsed_duration = duration
+            parsed_duration: timedelta = duration
         else:
             raise TypeError(
                 "Timer duration must be DD:HH:MM:SS, timedelta, an integer mapping, or None."

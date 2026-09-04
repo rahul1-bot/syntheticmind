@@ -200,11 +200,11 @@
     2. Patience, target, divergence, and non-finite transitions retain explicit reasons and strict resumable state.
     3. Rank-zero-only monitor values, missing metrics, validation frequency, and checkpoint continuation no longer permit worker disagreement.
 
-| Strategic Note | Wall-Clock Budget Semantics | Date: 04 September 2026 | Time: 01:10 PM | Name: Ghost |
+| Strategic Note | Wall-Clock Budget Semantics | Date: 04 September 2026 | Time: 04:50 PM | Name: Ghost |
 
     1. Timer separates continuous resumable budget time from active training progress time and latest stage durations.
-    2. Rank-zero broadcast controls distributed stopping, and depleted restored state stops before new optimizer work.
-    3. Validation pauses progress timing without hiding its wall-clock cost from the run budget.
+    2. Rank-zero broadcast controls distributed stopping, depleted restored state stops before new optimizer work, and changed duration or interval policy fails checkpoint restoration.
+    3. Validation pauses progress timing without hiding its wall-clock cost from the run budget; parsing and clock-map construction remain owner-bound Timer operations.
 
 | Strategic Note | Model Checkpoint Policy Boundary | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
 

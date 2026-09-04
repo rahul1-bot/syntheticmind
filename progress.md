@@ -291,10 +291,10 @@
     4. ✅ Sanity and fast-development checks remain excluded, and missing monitor behavior is consistent under strict and non-strict modes.
     5. ✅ Local state-machine, exact checkpoint resume, invalid configuration and state, and spawned DDP rank-zero metric probes pass.
 
-| Progress Complete | Resumable Wall-Clock Timer | Date: 04 September 2026 | Time: 01:10 PM | Name: Ghost |
+| Progress Complete | Resumable Wall-Clock Timer | Date: 04 September 2026 | Time: 04:50 PM | Name: Ghost |
 
     1. ✅ Timer uses one resumable continuous training budget, an active epoch-training clock paused around validation, and isolated latest-stage clocks.
     2. ✅ Step and epoch cadence, post-validation checks, rank-zero broadcast consensus, and pre-batch depleted-state stopping execute through one state machine.
-    3. ✅ Elapsed and reached state restore strictly and reconcile from spawned workers to the parent.
-    4. ✅ String, mapping, timedelta, interval, verbosity, and checkpoint state boundaries reject invalid or non-positive values.
-    5. ✅ Deterministic stage-clock, live wall-time, validation-pause, restored-limit, progress, and spawned DDP probes pass.
+    3. ✅ Elapsed, reached, duration, and interval state restore compatibly, reject changed Timer policy, and reconcile from spawned workers to the parent.
+    4. ✅ String, mapping, timedelta, interval, verbosity, and checkpoint boundaries reject invalid values through owner-bound parsing without future imports or static utility methods.
+    5. ✅ Deterministic stage-clock, live wall-time, validation-pause, restored-limit, incompatible-state, progress, and spawned two-rank DDP probes pass.

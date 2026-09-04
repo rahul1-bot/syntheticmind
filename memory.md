@@ -291,10 +291,10 @@
     4. Configuration identity and persisted best score, wait count, epoch, and reason must align so several stopping policies can coexist and resume without stealing one another's state.
     5. Missing monitors must fail consistently on every rank under strict mode or produce one rank-zero warning without mutating patience under non-strict mode.
 
-| Memory | Timer Separates Budget and Presentation Clocks | Date: 04 September 2026 | Time: 01:10 PM | Name: Ghost |
+| Memory | Timer Separates Budget and Presentation Clocks | Date: 04 September 2026 | Time: 04:50 PM | Name: Ghost |
 
     1. The resumable training budget is continuous wall time from train start through validation and callback work, while active epoch-training time pauses around validation so progress rates remain honest.
     2. Latest validation, test, and prediction durations are stage observations, not additional offsets in the training budget; duplicate dictionaries for cumulative and latest state create contradictory authorities.
     3. A distributed time limit must be decided by one rank and broadcast because independent wall clocks cross the boundary at different instants.
-    4. Restored elapsed time must be checked before the next training batch, and the reached flag must cross launcher state so the dormant parent reports the worker outcome.
-    5. Duration strings and mappings are boundary input and require strict field ranges, unit names, integer values, and a positive finite resolved interval.
+    4. Restored elapsed time must be checked before the next training batch, the reached flag must cross launcher state, and persisted duration plus interval must match the new Timer before continuation.
+    5. Duration strings and mappings are boundary input and require strict field ranges, unit names, integer values, and a positive finite resolved interval owned by Timer rather than a static parser class.
