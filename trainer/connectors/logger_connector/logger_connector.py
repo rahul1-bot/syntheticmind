@@ -1,3 +1,28 @@
+# This module:
+# 1. Resolves one or several experiment loggers and owns callback, logged, and
+#    stage-specific progress metric views
+# 2. Routes scalar metric emission under global-rank ownership and merges Module
+#    and DataModule hyperparameters exactly once per run
+#
+# Design decisions:
+# - Metric production belongs to Module, reduction belongs to loops and
+#   MetricAccumulator, and persistence belongs to Logger; this connector owns only
+#   destination views, rank policy, and emission
+# - Callback metrics retain tensor dtype and device, logged metrics retain tensors
+#   for inspection, progress metrics convert to Python floats, and concrete
+#   loggers receive detached Python scalars
+# - Sanity validation may preview callback observations but cannot contaminate
+#   durable logged or progress views
+# - Logger True or None selects a versioned default backend, preferring
+#   TensorBoard when installed and otherwise CSV; fast_dev_run disables all
+#   durable logger instances
+# - Model and DataModule hyperparameters merge only when shared names have equal
+#   values and emit once across sequential or multiprocessing stages
+# - log_dir broadcasts the rank-zero destination so every process observes one
+#   experiment identity without duplicate writes
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Iterable, Mapping
 from importlib.util import find_spec
 from pathlib import Path
@@ -22,6 +47,8 @@ __all__: list[str] = []
 
 
 class _LoggerConnector:
+    # Private experiment-observation and logger-composition owner attached to one
+    # Strategy and Trainer root directory.
     def __init__(
         self,
         strategy: Strategy,
@@ -30,6 +57,8 @@ class _LoggerConnector:
         fast_dev_run: bool,
         enable_autolog_hparams: bool
     ) -> None:
+        # Resolves logger instances and initializes independent metric views plus
+        # one-time hyperparameter state.
         self._strategy: Strategy = strategy
         self._default_root_dir: str | Path = default_root_dir
         self._fast_dev_run: bool = fast_dev_run
@@ -45,6 +74,8 @@ class _LoggerConnector:
         self.last_progress_bar_stage: RunningStage | None = None
 
     def reset(self, running_stage: RunningStage | None = None) -> None:
+        # Clears every view for a new run or only one progress stage for a reused
+        # loop, retaining other stage results for inspection.
         if running_stage is None:
             self.callback_metrics.clear()
             self.logged_metrics.clear()
@@ -58,6 +89,7 @@ class _LoggerConnector:
         self.last_progress_bar_stage: RunningStage | None = running_stage
 
     def clear_metric_views(self) -> None:
+        # Clears callback and logged tensors without changing progress history.
         self.callback_metrics.clear()
         self.logged_metrics.clear()
 
@@ -83,6 +115,8 @@ class _LoggerConnector:
         running_stage: RunningStage,
         sanity_checking: bool
     ) -> None:
+        # Computes pending step observations before batch-end hooks so progress
+        # callbacks can inspect live values; sanity execution remains non-durable.
         callback_metrics: dict[str, torch.Tensor] = {}
         logged_metrics: dict[str, torch.Tensor] = {}
         progress_bar_metrics: dict[str, float] = {}
@@ -110,6 +144,7 @@ class _LoggerConnector:
             self.update_progress_bar_metrics(running_stage, progress_bar_metrics)
 
     def progress_bar_metrics(self, running_stage: RunningStage) -> dict[str, float]:
+        # Defensive stage-specific progress mapping.
         return dict(self.progress_bar_metrics_by_stage[running_stage])
 
     def log_metrics(
@@ -117,6 +152,8 @@ class _LoggerConnector:
         metrics: Mapping[str, torch.Tensor | float],
         step: int
     ) -> None:
+        # Converts scalar tensors and emits one copied mapping to every logger on
+        # global rank zero only.
         if not self._strategy.is_global_zero:
             return
         scalar_metrics: dict[str, float] = {
@@ -128,6 +165,8 @@ class _LoggerConnector:
             configured_logger.log_metrics(dict(scalar_metrics), step=step)
 
     def log_hyperparams(self, params: HyperparameterDict) -> None:
+        # Emits copied hyperparameters on global rank zero and marks completion on
+        # every rank so later stages do not repeat metadata.
         if not self._loggers:
             return
         if self._strategy.is_global_zero:
@@ -141,6 +180,8 @@ class _LoggerConnector:
         module: Module,
         datamodule: DataModule | None
     ) -> None:
+        # Merges enabled Module and DataModule initial mappings, rejects conflicting
+        # shared values, removes internal class-path metadata, and emits once.
         if (
             not self._enable_autolog_hparams
             or not self._loggers
@@ -194,6 +235,8 @@ class _LoggerConnector:
         self.log_hyperparams(filtered_hyperparameters)
 
     def metric_to_float(self, value: torch.Tensor | float) -> float:
+        # Converts one scalar tensor or numeric value at the logger or presentation
+        # boundary and rejects non-scalar tensors.
         if isinstance(value, torch.Tensor):
             if value.numel() != 1:
                 raise ValueError("Logged metric tensors must contain exactly one element.")
@@ -237,6 +280,7 @@ class _LoggerConnector:
 
     @property
     def log_dir(self) -> str:
+        # Primary logger directory or Trainer root, broadcast from rank zero.
         logger: Logger | None = self.logger
         directory: str = (
             logger.log_dir
@@ -249,6 +293,8 @@ class _LoggerConnector:
         self,
         logger: bool | Logger | Iterable[Logger] | None
     ) -> list[Logger]:
+        # Resolves default, disabled, single, or iterable logger configuration,
+        # rejects duplicate instances, and applies fast-development suppression.
         if logger is None or logger is True:
             if self._fast_dev_run:
                 return []
@@ -278,6 +324,8 @@ class _LoggerConnector:
         return loggers
 
     def _default_logger(self) -> Logger:
+        # Creates the next versioned TensorBoard logger when available or the CSV
+        # fallback under syntheticmind_logs.
         name: str = "syntheticmind_logs"
         version: int = self._next_version(
             StoragePath(self._default_root_dir).join(name)
@@ -295,6 +343,8 @@ class _LoggerConnector:
         )
 
     def _next_version(self, root_dir: str | Path) -> int:
+        # Scans direct version_N directories and selects one greater than the
+        # highest valid integer suffix.
         versions: list[int] = []
         path: str
         for path in StoragePath(root_dir).list_directory():
@@ -312,6 +362,8 @@ class _LoggerConnector:
         first: HyperparameterValue,
         second: HyperparameterValue
     ) -> bool:
+        # Compares exact types, preserves tensor identity semantics, and contains
+        # user-defined equality failures at the merge boundary.
         if type(first) is not type(second):
             return False
         if isinstance(first, torch.Tensor) and isinstance(second, torch.Tensor):
@@ -326,6 +378,7 @@ class _LoggerConnector:
     def _empty_progress_metrics(
         self
     ) -> dict[RunningStage, dict[str, float]]:
+        # Creates independent mutable mappings for every running stage.
         return {
             "training": {},
             "validating": {},

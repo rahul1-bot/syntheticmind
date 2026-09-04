@@ -1,3 +1,24 @@
+# This module:
+# 1. Defines the single invocation boundary for callback, Module, DataModule, and
+#    Strategy hooks
+# 2. Owns profiler action names, nested Module hook context, callback grouping,
+#    and robust override discovery through decorators, mocks, and partials
+#
+# Design decisions:
+# - Trainer and loops own when hooks run; this class owns only how each call is
+#   contextualized and measured
+# - Module and callback calls install the active hook name so Module.log validates
+#   lifecycle semantics even under nested framework operations
+# - Profiler contexts are omitted entirely while inactive, avoiding measurement
+#   overhead and false empty actions
+# - Callback state_key enters action identity so several configured instances
+#   remain distinguishable in profiler output
+# - Override discovery compares unwrapped code identity rather than catching
+#   TypeError during invocation, preserving exceptions raised inside client code
+# - A generic Trainer type avoids circular import and a fabricated host Protocol
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Callable, Iterable
 from functools import partial
 from types import CodeType
@@ -19,6 +40,8 @@ type _HookCallable = Callable[..., ModelOutput | DataLoaderSource | None]
 
 
 class _HookDispatcher[TrainerT]:
+    # Private invocation collaborator bound to one Trainer, callback connector,
+    # profiler, and Strategy.
     def __init__(
         self,
         trainer: TrainerT,
@@ -40,6 +63,8 @@ class _HookDispatcher[TrainerT]:
         *args: Parameters.args,
         **kwargs: Parameters.kwargs
     ) -> ReturnT:
+        # Invokes one callback with Trainer and Module, active hook context, and an
+        # optional profiler action qualified by callback state identity.
         action_name: str = f"[Callback]{callback.state_key}.{hook_name}"
         if not self._profiler.is_active:
             with module._hook_context(hook_name):
@@ -55,6 +80,8 @@ class _HookDispatcher[TrainerT]:
         callback_group: Iterable[Callback] | None = None,
         **kwargs: Parameters.kwargs
     ) -> None:
+        # Invokes one hook on the supplied callback group or current configured
+        # callback order.
         callbacks: Iterable[Callback] = (
             self._callback_connector.callbacks
             if callback_group is None
@@ -83,6 +110,8 @@ class _HookDispatcher[TrainerT]:
         *args: Parameters.args,
         **kwargs: Parameters.kwargs
     ) -> ReturnT:
+        # Invokes one Module hook with nested-safe logging context and optional
+        # profiler ownership.
         action_name: str = f"[Module]{type(module).__name__}.{hook_name}"
         if not self._profiler.is_active:
             with module._hook_context(hook_name):
@@ -98,6 +127,8 @@ class _HookDispatcher[TrainerT]:
         *args: Parameters.args,
         **kwargs: Parameters.kwargs
     ) -> ReturnT:
+        # Invokes one DataModule hook under profiler ownership without installing
+        # Module logging context.
         action_name: str = f"[DataModule]{type(datamodule).__name__}.{hook_name}"
         if not self._profiler.is_active:
             return hook(*args, **kwargs)
@@ -111,6 +142,7 @@ class _HookDispatcher[TrainerT]:
         *args: Parameters.args,
         **kwargs: Parameters.kwargs
     ) -> ReturnT:
+        # Invokes one Strategy operation under its concrete policy identity.
         action_name: str = f"[Strategy]{type(self._strategy).__name__}.{hook_name}"
         if not self._profiler.is_active:
             return hook(*args, **kwargs)
@@ -123,6 +155,8 @@ class _HookDispatcher[TrainerT]:
         instance: _HookOwner,
         parent: type[_HookOwner]
     ) -> bool:
+        # Resolves instance and declared parent callables, unwraps decoration, and
+        # compares code identity or callable identity when code is unavailable.
         instance_attribute: _HookCallable | None = cast(
             _HookCallable | None,
             getattr(instance, method_name, None)
@@ -150,6 +184,8 @@ class _HookDispatcher[TrainerT]:
         return instance_code is not parent_code
 
     def _unwrap(self, hook: _HookCallable) -> _HookCallable:
+        # Peels __wrapped__, unittest mock delegation, and functools.partial layers
+        # until override comparison reaches the implementation callable.
         unwrapped_hook: _HookCallable = hook
         while True:
             wrapped_hook: _HookCallable | None = cast(

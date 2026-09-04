@@ -115,10 +115,10 @@
     6. The former `loops/batch_limits.py` function module and Trainer's module-level training-limit resolver were deleted without a wrapper class, factory, public alias, or duplicate implementation; the loop package now contains only class-owned behavior.
     7. Direct, module-owned, DataModule-owned, sized, unsized, nested, spawned, two-rank DDP, stateful continuation, overfit, reload, fast-development, persistent-worker, and unrepeated-prediction limits pass through the reconstructed owners.
 
-| Architecture Decision | Metric Accumulation, Routing, and Persistence | Date: 04 September 2026 | Time: 04:33 PM | Name: Ghost |
+| Architecture Decision | Metric Accumulation, Routing, and Persistence | Date: 04 September 2026 | Time: 10:55 PM | Name: Ghost |
 
     1. Module hooks produce metric observations, loops own reduction cadence, MetricAccumulator owns scalar validation, batch weighting, TorchMetrics windows, and distributed reduction, the logger connector owns view routing and rank policy, and concrete loggers own persistence.
-    2. MetricAccumulator now consumes the batch only when loop-driven mean inference is required, retains its established direct `update(value, batch_size=...)` API, rejects inconsistent nested leading dimensions, and contains no free function, fake Protocol, generic `object`, or source prose.
+    2. MetricAccumulator consumes the batch only when loop-driven mean inference is required, retains its established direct `update(value, batch_size=...)` API, rejects inconsistent nested leading dimensions, and contains no free function, fake Protocol, or generic `object`; authorized comments and the logger connector README now document weighting, distributed numerator-denominator reduction, consumer views, and strict partial-epoch state.
     3. Logger names and versions are validated single path segments, integer versions retain standard `version_N` layout, custom loggers contribute their own `log_dir`, duplicate instances are rejected, and public logger collections are defensive copies.
     4. Shared hyperparameter normalization accepts portable deterministic values, rejects live modules and non-scalar tensors or arrays, and emits once per run across sequential and spawned stages through explicit launcher-state transfer.
     5. CSV persistence validates existing headers, reconciles worker-written schema before later stages, widens columns transactionally, restores in-memory schema on failed promotion, resumes existing rows, and supports transactional fsspec replacement.
@@ -145,14 +145,14 @@
     6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; authorized VOCODE comments and `loops/README.md` now document every epoch, evaluation, prediction, optimization, fetch, validation-cadence, checkpoint-durability, and client return boundary without splitting the concept or adding docstrings.
     7. CPU, MPS, automatic and manual optimization, accumulated DDP, scalar and TorchMetrics routing, multiple loaders, stateful data, spawned parent persistence, plateau cadence, tensor parallelism, and sharded FSDP2 exact continuation pass after the prose-only phase.
 
-| Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
+| Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 10:55 PM | Name: Ghost |
 
     1. The private `_TrainerConfiguration` Pydantic model represents resolved scalar run policy at Trainer construction and is the sole owner of training-limit validation, batch-limit normalization, debugging-mode rewrites, barebones conflicts, validation cadence inputs, and execution flags.
     2. The model contains no live model, optimizer, scheduler, dataloader, logger, profiler, accelerator, Strategy, callback, plugin, device, path handle, or external resource; those remain with their runtime connectors and owners.
     3. Mutable validation-duration dictionaries become owned immutable tuples inside the frozen configuration and are reconstructed as fresh dictionaries only when handed to ValidationSchedule.
     4. Trainer remains responsible for composition and side effects, while its constructor now delegates in order to accelerator materialization, resolved policy application, connector construction, loop construction, and live-state initialization; these are private lifecycle phases rather than public builders or fabricated service classes.
     5. Checkpoint restoration now separates artifact and participant restoration from application of resumed epoch, step, loader cursor, and random-state coordinates, preserving one trajectory authority while keeping each transition within the method limit.
-    6. A bounded Timer with no explicit epoch or step ceiling now makes time the governing stop condition, the presentation-only Timer retains the ordinary fallback, explicit ceilings remain authoritative, and accumulation is inspectable from Trainer; default, invalid, optimizer, loader, DDP, spawn, continuation, checkpoint, and model-parallel probes pass.
+    6. A bounded Timer with no explicit epoch or step ceiling makes time the governing stop condition, the presentation-only Timer retains the ordinary fallback, explicit ceilings remain authoritative, and accumulation is inspectable from Trainer; project-authorized configuration comments and `trainer/README.md` now document every public setting, resolved rewrite, and continuation constraint against passing default, invalid, optimizer, loader, DDP, spawn, checkpoint, and model-parallel probes.
 
 | Architecture Decision | Core Contracts and Documentation Surface | Date: 04 September 2026 | Time: 10:18 PM | Name: Ghost |
 
@@ -199,7 +199,7 @@
     4. The former `DistributedUtils` namespace and its seven duplicate free-function entrypoints were deleted without a replacement utility module. Process-group teardown remains exclusively owned by `ParallelStrategy`.
     5. Local reduction validation, two-rank sum and mean, standard distributed mean, sum, minimum and maximum metrics, TorchMetrics, tensor graph state, progress rendering, checkpoint selection, callback artifacts, spawned metric views, and sharded model parallelism pass through Strategy ownership.
 
-| Architecture Decision | Trainer Stage, Loop, and Hook Ownership | Date: 04 September 2026 | Time: 06:40 PM | Name: Ghost |
+| Architecture Decision | Trainer Stage, Loop, and Hook Ownership | Date: 04 September 2026 | Time: 10:55 PM | Name: Ghost |
 
     1. Trainer remains the canonical owner of fit, validation, test, and prediction orchestration because it alone composes strategy, connectors, loops, hooks, checkpoint restoration, and teardown; the public entrypoints now delegate to bounded private transitions instead of containing monolithic workflows.
     2. Validation and test continue through one EvaluationLoop because their no-gradient execution, step-output, and metric-reduction contracts align, while prediction retains its separate output-retention and CPU-materialization lifecycle.
@@ -207,7 +207,7 @@
     4. Fit optimization, managed-optimizer connection, manual validation, checkpoint continuation, sanity validation, and dynamic worker-stage invocation are explicit private Trainer transitions; the stateless one-method StageInvoker class was deleted instead of retaining a second stage authority.
     5. The private HookDispatcher now owns callback, Module, DataModule, and Strategy invocation mechanics, module hook context, profiler regions, callback-group lookup, wrapper unwrapping, and override discovery; its generic Trainer host avoids a circular import, conditional type import, quoted annotation, or synthetic host Protocol.
     6. Profiler owns active-stage truth directly, replacing Trainer's shadow profiler boolean, while stage teardown still treats model-mode restoration and every framework, loader, user-hook, logger, progress, and profiler cleanup as one failure-collecting transaction.
-    7. CPU, MPS, true two-rank DDP, spawned continuation, callback configuration, multi-loader evaluation, checkpoint selection, early stopping, logger rank ownership, profiler reports and rollback, failure composition, and sharded model-parallel resume pass; the macOS multi-Trainer spawn shutdown defect remains an environment boundary.
+    7. Every Trainer and connector module now carries VOCODE-style ownership, client API, ordering, persistence, and failure comments, with package READMEs for lifecycle, connectors, and logger routing; CPU, MPS, true two-rank DDP, spawned exact continuation, callback configuration, checkpoint selection, metric views, and sharded model-parallel resume pass, while the macOS multi-Trainer spawn shutdown defect remains an environment boundary.
 
 | Architecture Decision | Model Summary Capability Ownership | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 

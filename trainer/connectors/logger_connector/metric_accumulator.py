@@ -1,3 +1,26 @@
+# This module:
+# 1. Defines MetricAccumulator, the scalar and TorchMetrics epoch window used by
+#    training, validation, and test loops
+# 2. Owns batch-size inference, weighted mean, sum, minimum, maximum, distributed
+#    reduction, graph policy, reset, and strict partial-epoch checkpoint state
+#
+# Design decisions:
+# - Scalar observations and stateful Metrics cannot mix in one accumulator;
+#   changing a Metric instance under one logged identity fails
+# - Mean reduction infers one batch size only when every reachable tensor in the
+#   nested batch agrees; ambiguous structures require explicit Module.log
+#   batch_size rather than silently selecting the first tensor
+# - Distributed mean synchronizes numerator and denominator, not rank-local
+#   averages, preserving correctness under uneven batch counts or weights
+# - Sum, minimum, and maximum synchronize their own accumulated state through the
+#   selected Strategy reducer; rank-zero-only observations never enter collectives
+# - enable_graph preserves scalar arithmetic only when explicitly requested;
+#   ordinary compute returns detached values and resumable state rejects graphs
+# - Checkpoint state validates reduction, count, scalar completeness, weight
+#   consistency, and scalar-versus-Metric kind before live state mutates
+#
+# Author: Rahul Sawhney
+
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import Field, fields, is_dataclass
 from typing import Annotated, ClassVar, Literal, cast
@@ -16,6 +39,8 @@ type _MetricCandidate = torch.nn.Module | ModelOutput
 
 
 class _MetricAccumulatorCheckpoint(BaseModel):
+    # Strict scalar-window checkpoint schema. TorchMetrics state is stored by
+    # LoggedMetric and this model records only that the accumulator uses it.
     schema_version: Literal[1] = 1
     reduction: Reduction
     count: Annotated[int, ModelField(ge=0)]
@@ -36,6 +61,8 @@ class _MetricAccumulatorCheckpoint(BaseModel):
 
 
 class MetricAccumulator:
+    # One epoch reduction window. Loops create it from LoggedMetric metadata and
+    # clients influence it only through Module.log options.
     __slots__: tuple[str, ...] = (
         "_reduction",
         "_sum",
@@ -59,6 +86,8 @@ class MetricAccumulator:
         rank_zero_only: bool = False,
         enable_graph: bool = False
     ) -> None:
+        # Validates reduction and boolean policy and initializes empty scalar and
+        # Metric state.
         if reduction not in ("mean", "sum", "min", "max"):
             raise ValueError(f"Unsupported metric reduction {reduction!r}.")
         for name, value in (
@@ -87,6 +116,8 @@ class MetricAccumulator:
         batch_size: int | None = None,
         batch: Batch | None = None
     ) -> None:
+        # Validates a scalar tensor, resolves explicit or inferred batch weight,
+        # and updates under the configured graph policy.
         if not isinstance(value, torch.Tensor) or value.numel() != 1:
             raise ValueError("A metric observation must be a single-element tensor.")
         if batch_size is not None and (
@@ -111,6 +142,8 @@ class MetricAccumulator:
             self._update(scalar.detach(), resolved_batch_size)
 
     def _update(self, value: torch.Tensor, batch_size: int | None) -> None:
+        # Advances sum, count, extrema, and optional weighted numerator in one
+        # local observation transition.
         self._sum: torch.Tensor | None = (
             value if self._sum is None else self._sum + value
         )
@@ -130,6 +163,7 @@ class MetricAccumulator:
             self._total_weight: float = self._total_weight + batch_size
 
     def update_metric(self, metric: _MetricCandidate) -> None:
+        # Binds one stable torchmetrics.Metric instance to the window.
         if not isinstance(metric, Metric):
             raise TypeError("A logged metric must be a torchmetrics.Metric.")
         resolved_metric: Metric = metric
@@ -145,6 +179,8 @@ class MetricAccumulator:
         device: torch.device | None = None,
         reduce_tensor: TensorReducer | None = None
     ) -> torch.Tensor:
+        # Computes a scalar or Metric result under graph policy and optional
+        # Strategy reduction.
         if self._enable_graph:
             with torch.enable_grad():
                 return self._compute(device, reduce_tensor)
@@ -156,6 +192,8 @@ class MetricAccumulator:
         device: torch.device | None,
         reduce_tensor: TensorReducer | None
     ) -> torch.Tensor:
+        # Executes Metric compute, empty identity, synchronized reduction, or
+        # local reduction while preserving weighted-mean semantics.
         if self._metric is not None:
             computed: ModelOutput = cast(ModelOutput, self._metric.compute())
             if not isinstance(computed, torch.Tensor) or computed.numel() != 1:
@@ -216,6 +254,7 @@ class MetricAccumulator:
                 return self._sum / self._count
 
     def reset(self) -> None:
+        # Clears every scalar field and resets then releases a bound Metric.
         self._sum: torch.Tensor | None = None
         self._count: int = 0
         self._min: torch.Tensor | None = None
@@ -227,6 +266,7 @@ class MetricAccumulator:
             self._metric: Metric | None = None
 
     def _checkpoint_state(self) -> StateDict:
+        # Serializes detached CPU scalar state and the Metric-kind marker.
         state: _MetricAccumulatorCheckpoint = _MetricAccumulatorCheckpoint(
             reduction=self._reduction,
             count=self._count,
@@ -245,6 +285,8 @@ class MetricAccumulator:
         device: torch.device,
         metric: Metric | None
     ) -> None:
+        # Validates schema, reduction, kind, scalar consistency, and device before
+        # replacing live accumulator state.
         checkpoint: _MetricAccumulatorCheckpoint = self._parse_checkpoint_state(
             state
         )
@@ -291,6 +333,8 @@ class MetricAccumulator:
         cls,
         checkpoint: _MetricAccumulatorCheckpoint
     ) -> None:
+        # Enforces scalar shape, complete populated state, consistent weighting,
+        # and mutual exclusion between scalar and Metric windows.
         del cls
         scalar_values: tuple[torch.Tensor | None, ...] = (
             checkpoint.sum_value,
@@ -345,6 +389,8 @@ class MetricAccumulator:
         return self._count
 
     def _infer_batch_size(self, batch: Batch) -> int:
+        # Traverses all reachable tensor leaves and requires one consistent
+        # leading dimension, translating recursion or absence into guidance.
         inferred_batch_size: int | None = None
         try:
             for candidate in self._extract_batch_sizes(batch):
@@ -369,6 +415,8 @@ class MetricAccumulator:
         return inferred_batch_size
 
     def _extract_batch_sizes(self, batch: Batch) -> Iterator[int | None]:
+        # Recurses through mappings, dataclass instances, and non-string iterables;
+        # scalar tensors contribute batch size one.
         if isinstance(batch, torch.Tensor):
             yield 1 if batch.ndim == 0 else batch.size(0)
             return

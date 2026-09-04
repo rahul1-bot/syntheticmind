@@ -1,3 +1,23 @@
+# This module:
+# 1. Defines ConsoleRenderer, the terminal mechanics used by Trainer and the
+#    progress callback for live lines, permanent records, metric formatting,
+#    duration formatting, wrapping, and output failure tolerance
+#
+# Design decisions:
+# - Console rendering is presentation only; runtime state, metrics, timing, and
+#   progress ownership remain with Trainer, loops, callbacks, and profilers
+# - Interactive terminals receive one carriage-return live line, while redirected
+#   output receives stable permanent text without control sequences
+# - Live refresh is throttled by monotonic performance time and force may bypass
+#   cadence at lifecycle boundaries
+# - Metric rendering exposes at most two selected live values and uses compact
+#   decimal or scientific notation without changing stored metric precision
+# - Output failures disable future rendering instead of aborting training
+# - Pickle state retains only configuration and reconstructs stream-dependent
+#   state in the worker process
+#
+# Author: Rahul Sawhney
+
 import math
 import shutil
 import sys
@@ -9,7 +29,10 @@ __all__: list[str] = ["ConsoleRenderer"]
 
 
 class ConsoleRenderer:
+    # Stateful terminal writer shared by progress presentation and rank-safe
+    # client printing.
     def __init__(self, refresh_interval: float = 0.08) -> None:
+        # Validates refresh cadence, binds stderr, and initializes terminal state.
         if refresh_interval < 0.0:
             raise ValueError(f"refresh_interval must be non-negative, got {refresh_interval}")
         self.refresh_interval: float = refresh_interval
@@ -30,6 +53,8 @@ class ConsoleRenderer:
         return self._enabled
 
     def reset(self) -> None:
+        # Rebinds stderr and TTY capability in the current process and clears all
+        # live rendering state.
         self._stream: TextIO = sys.stderr
         self._interactive: bool = self._stream.isatty()
         self._enabled: bool = True
@@ -39,12 +64,14 @@ class ConsoleRenderer:
 
     @override
     def __getstate__(self) -> dict[str, float]:
+        # Serializes only stable configuration across launcher boundaries.
         return {"refresh_interval": self.refresh_interval}
 
     def __setstate__(self, state: dict[str, float]) -> None:
         self.__init__(state["refresh_interval"])
 
     def next_spinner(self) -> str:
+        # Advances through one deterministic spinner cycle for unknown horizons.
         frames: tuple[str, ...] = (
             "⠋",
             "⠙",
@@ -62,6 +89,7 @@ class ConsoleRenderer:
         return frame
 
     def metric_parts(self, metrics: dict[str, float]) -> list[str]:
+        # Sanitizes names and formats at most two owner-ordered live metrics.
         parts: list[str] = []
         for name, value in metrics.items():
             clean_name: str = " ".join(name.split())
@@ -71,6 +99,8 @@ class ConsoleRenderer:
         return parts
 
     def format_metric(self, value: float) -> str:
+        # Formats non-finite values explicitly and selects scientific notation for
+        # very small or large magnitudes.
         if math.isnan(value):
             return "nan"
         if math.isinf(value):
@@ -81,6 +111,7 @@ class ConsoleRenderer:
         return f"{value:.3f}".rstrip("0").rstrip(".")
 
     def format_duration(self, seconds: float) -> str:
+        # Compacts elapsed or estimated duration from subsecond through day scale.
         if seconds < 1.0:
             return "<1s"
         whole_seconds: int = int(seconds)
@@ -102,6 +133,8 @@ class ConsoleRenderer:
         return f"{days}d{remaining_hours:02d}h"
 
     def write_live(self, line: str, force: bool) -> None:
+        # Throttles and rewrites one interactive line, disabling output after a
+        # stream failure without affecting the training lifecycle.
         if not self._enabled or not self._interactive:
             return
         current_time: float = time.perf_counter()
@@ -117,6 +150,8 @@ class ConsoleRenderer:
             self._enabled: bool = False
 
     def write_permanent(self, line: str) -> None:
+        # Clears any live line and emits one durable interactive or redirected
+        # record.
         if not self._enabled:
             return
         rendered: str = self._fit_terminal(line) if self._interactive else line
@@ -129,6 +164,8 @@ class ConsoleRenderer:
             self._enabled: bool = False
 
     def write_record(self, label: str, fields: list[str]) -> None:
+        # Wraps a labeled field record to terminal width with readable continuation
+        # indentation.
         record: str = " · ".join((label, *fields))
         lines: list[str] = textwrap.wrap(
             record,
@@ -145,6 +182,8 @@ class ConsoleRenderer:
         stage: str,
         results: list[dict[str, float]]
     ) -> None:
+        # Emits one result record per non-empty dataloader result with stable
+        # metric ordering and hidden internal loader suffixes.
         result_count: int = len(results)
         for result_index, result in enumerate(results):
             if not result:
@@ -166,6 +205,7 @@ class ConsoleRenderer:
             self.write_record(label, fields)
 
     def clear_live(self) -> None:
+        # Erases an active interactive line during disable, print, or teardown.
         if not self._enabled or not self._interactive or not self._active_line:
             return
         try:

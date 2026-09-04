@@ -1,3 +1,29 @@
+# This module:
+# 1. Defines the strict immutable Trainer construction policy and all scalar
+#    normalization for limits, validation, debugging modes, clipping,
+#    observability, determinism, sampling, and reload cadence
+# 2. Defines the effective configuration snapshot stored in resumable checkpoints
+#    and validates trajectory-critical compatibility on continuation
+#
+# Design decisions:
+# - Configuration contains no live model, optimizer, scheduler, dataloader,
+#   logger, callback, profiler, accelerator, Strategy, plugin, device, path
+#   handle, or resource; Trainer and connectors retain behavioral ownership
+# - Pydantic validates intrinsic deterministic invariants only and performs no
+#   filesystem, hardware, environment, time, randomness, logging, or orchestration
+# - Batch limits accept non-negative integer counts or fractions in [0, 1];
+#   integral floats above one normalize to counts before data-specific resolution
+# - Mutable duration mappings freeze into ordered tuples inside the model and are
+#   reconstructed only when handed to ValidationSchedule
+# - fast_dev_run and barebones are explicit policy rewrites with conflict
+#   validation rather than hidden call-site branches
+# - Checkpoint snapshots omit run ceilings from mismatch rejection so a client
+#   may continue toward larger limits, while accumulation, data, validation,
+#   clipping, deterministic, sampling, reload, and precision semantics may not
+#   drift silently
+#
+# Author: Rahul Sawhney
+
 from datetime import timedelta
 from typing import Annotated, ClassVar, Literal
 
@@ -35,6 +61,8 @@ type _ValidationIntervalInput = (
 
 
 class _TrainerConfigurationSnapshot(BaseModel):
+    # Effective trajectory policy persisted with a full checkpoint. It records
+    # resolved rather than raw defaults so continuation compares actual behavior.
     schema_version: Literal[1] = 1
     fast_dev_run: int | bool
     max_epochs: int
@@ -76,6 +104,9 @@ class _TrainerConfigurationSnapshot(BaseModel):
         self,
         current: _TrainerConfigurationSnapshot
     ) -> tuple[str, ...]:
+        # Returns trajectory-changing fields that differ from the current run.
+        # Maximum and minimum ceilings are intentionally absent so continuation
+        # can extend a previously bounded experiment.
         mismatches: list[str] = []
         if self.fast_dev_run != current.fast_dev_run:
             mismatches.append("fast_dev_run")
@@ -119,6 +150,8 @@ class _TrainerConfigurationSnapshot(BaseModel):
         precision: PrecisionType,
         max_epochs: int
     ) -> _TrainerConfigurationSnapshot:
+        # Materializes one immutable snapshot from resolved construction policy,
+        # selected precision, and the effective maximum epoch horizon.
         return cls(
             fast_dev_run=configuration.fast_dev_run,
             max_epochs=max_epochs,
@@ -162,6 +195,8 @@ class _TrainerConfigurationSnapshot(BaseModel):
         cls,
         interval: _ValidationInterval
     ) -> str:
+        # Creates a stable, type-qualified cadence identity; float hex encoding
+        # avoids equality drift from decimal rendering.
         del cls
         if interval is None:
             return "default"
@@ -183,6 +218,9 @@ class _TrainerConfigurationSnapshot(BaseModel):
 
 
 class _TrainerConfiguration(BaseModel):
+    # Private scalar input model for Trainer construction. Properties expose the
+    # effective policy after fast-development, overfit, barebones, and default
+    # interactions have been resolved.
     fast_dev_run: int | bool = False
     max_epochs: Annotated[int, Field(ge=-1)] | None = None
     min_epochs: Annotated[int, Field(ge=0)] | None = None
@@ -222,6 +260,8 @@ class _TrainerConfiguration(BaseModel):
     @field_validator("fast_dev_run")
     @classmethod
     def _normalize_fast_dev_run(cls, value: int | bool) -> int | bool:
+        # Accepts a bool or non-negative batch count and normalizes integer one to
+        # the canonical enabled bool.
         del cls
         if value < 0:
             raise MisconfigurationError(
@@ -243,6 +283,8 @@ class _TrainerConfiguration(BaseModel):
         value: int | float | None,
         info: ValidationInfo
     ) -> int | float | None:
+        # Accepts fractions, counts, or None and converts integral floats above one
+        # into explicit counts.
         del cls
         if value is None:
             return None
@@ -264,6 +306,7 @@ class _TrainerConfiguration(BaseModel):
         cls,
         value: str | None
     ) -> ClipAlgorithm | None:
+        # Normalizes case and closes clipping policy to norm or value.
         del cls
         if value is None:
             return None
@@ -283,6 +326,7 @@ class _TrainerConfiguration(BaseModel):
         cls,
         value: _ValidationIntervalInput
     ) -> _ValidationInterval:
+        # Replaces mutable duration mappings with an owned immutable tuple.
         del cls
         if not isinstance(value, dict):
             return value
@@ -291,6 +335,8 @@ class _TrainerConfiguration(BaseModel):
 
     @model_validator(mode="after")
     def _validate_barebones_policy(self) -> _TrainerConfiguration:
+        # Rejects explicit observability, development, and diagnostic features
+        # that barebones promises to disable rather than silently ignoring them.
         if not self.barebones:
             return self
         if self.enable_checkpointing:
@@ -340,6 +386,8 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_max_epochs(self) -> int:
+        # Selects one development epoch, an explicit ceiling, an ordinary default,
+        # or an unbounded epoch horizon when another stop policy governs the run.
         if self.fast_dev_run_enabled:
             return 1
         if self.max_epochs is not None:
@@ -358,6 +406,7 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_limit_train_batches(self) -> int | float:
+        # Applies overfit and fast-development precedence before ordinary limit.
         if self.overfit_batches_enabled:
             return self.overfit_batches
         if self.fast_dev_run_enabled:
@@ -400,6 +449,8 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_num_sanity_val_steps(self) -> int | float:
+        # Disables sanity work in barebones and development modes, resolves the
+        # standard two-step default, and maps -1 to an unbounded pass.
         if self.barebones or self.fast_dev_run_enabled:
             return 0
         if self.num_sanity_val_steps is None:

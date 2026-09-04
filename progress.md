@@ -140,11 +140,11 @@
     3. ✅ Standard and plateau scheduler operations are explicit, epoch plateau state advances before monitoring persistence, `estimated_stepping_batches` is the sole horizon calculation, manual clipping avoids configuration mutation, and dead duplicate scheduler state is gone.
     4. ✅ All loop modules now carry project-authorized ownership, lifecycle, client-return, continuation, and failure comments; `loops/README.md` and `optimization/README.md` document fit, automatic, manual, evaluation, prediction, validation cadence, and durability contracts, while CPU metric routing and two-rank accumulated DDP probes pass.
 
-| Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
+| Progress Complete | Trainer Configuration Documentation | Date: 04 September 2026 | Time: 10:55 PM | Name: Ghost |
 
     1. ✅ One private frozen Pydantic configuration now validates and resolves scalar Trainer run policy without accepting live runtime objects or creating a public configuration API.
     2. ✅ Training limits, bounded-time default epochs, batch limits, fast-development, overfit, barebones, gradient, validation, logging, deterministic, sampling, and reload policies have one configuration owner; accumulation is available through the Trainer inspection surface.
-    3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition through ordered private lifecycle phases; restoration separately applies persisted trajectory coordinates, every method is bounded, and optimizer, DDP, spawn, Timer, callback-state, exact continuation, checkpoint selection, and sharded model-parallel probes pass.
+    3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition through ordered private lifecycle phases; source comments and `trainer/README.md` now document the complete constructor surface, resolved policy, stage entrypoints, runtime views, and checkpoint controls, while optimizer, DDP, spawn, Timer, callback-state, exact continuation, checkpoint selection, and sharded model-parallel probes pass.
 
 | Progress Complete | Core Contract Documentation | Date: 04 September 2026 | Time: 10:18 PM | Name: Ghost |
 
@@ -207,14 +207,14 @@
     4. ✅ `utilities/distributed.py`, its classmethod namespace, and all free aliases were deleted; no old production or ignored verification import remains.
     5. ✅ Local validation, direct two-rank Strategy reduction, standard distributed scalar reductions, TorchMetrics, graph state, callback artifacts, progress rendering, checkpoint selection, spawned metric views, and sharded model parallelism pass.
 
-| Progress Complete | Trainer, Loop, and Hook Lifecycle Reconstruction | Date: 04 September 2026 | Time: 06:40 PM | Name: Ghost |
+| Progress Complete | Trainer and Connector Documentation | Date: 04 September 2026 | Time: 10:55 PM | Name: Ghost |
 
     1. ✅ Trainer fit, validation, test, and prediction entrypoints resolve inputs and launcher dispatch before bounded private stage transactions; worker re-entry is Trainer-owned and the stateless one-method StageInvoker class was deleted without a new Protocol, module, public method, export, or schema field.
     2. ✅ Fit preparation, optimization construction, managed-optimizer connection, checkpoint continuation, sanity validation, execution, and finalization are explicit transitions rather than one 288-line method.
     3. ✅ Validation and test reuse one typed local evaluation transaction, while prediction preserves separate retention and result-shape semantics; all three share exact environment, data, model, precision, checkpoint, and teardown preparation.
     4. ✅ One private HookDispatcher now owns typed callback, Module, DataModule, and Strategy invocation, profiling, hook context, current callback selection, unwrapping, and override discovery; six duplicate Trainer dispatch methods were deleted.
     5. ✅ Profiler owns active-stage state and setup-conflict detection, Trainer's shadow boolean is gone, and failed profiler setup rolls back cleanly before the same Trainer and profiler are reused.
-    6. ✅ CPU, MPS, subprocess DDP, spawned DDP, external DDP, exact continuation, callback composition, multi-loader evaluation, checkpoint selection, rank-zero logging, profiler rollback, causal cleanup, and sharded model-parallel execution pass.
+    6. ✅ All sixteen Trainer and connector modules now carry authorized VOCODE comments and current package documentation; CPU and MPS stages, subprocess and spawned DDP, exact stateful continuation `[12, 25, 19, 9]`, model callback composition, omitted-model best selection, mutable last selection, metric routing, and sharded model-parallel execution pass after the prose-only phase.
 
 | Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 

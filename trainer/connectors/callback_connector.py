@@ -1,3 +1,26 @@
+# This module:
+# 1. Resolves Trainer callbacks, default checkpointing, progress, timing, and
+#    model summary behavior
+# 2. Composes Module-provided callbacks per stage with inheritance-based
+#    replacement, stable ordering, and unique checkpoint state identities
+#
+# Design decisions:
+# - Callback construction and ordering resolve before stage setup and checkpoint
+#   restoration so every participating callback exists when state is loaded
+# - Model callbacks are configured once for one Module and stage, then replace
+#   compatible Trainer callbacks when their concrete type subclasses the Trainer
+#   callback type; unrelated callbacks remain in original order
+# - Every Checkpoint callback runs after regular callbacks so persistence observes
+#   final state produced at the same lifecycle boundary
+# - Stateful callbacks require unique state_key values before fitting or merging,
+#   preventing two instances from overwriting checkpoint state
+# - One progress callback is permitted. Its timing dependency is inserted before
+#   it, and an explicit Timer takes precedence over Trainer max_time with warning
+# - Disabled feature flags reject conflicting explicit callback instances rather
+#   than accepting configuration that cannot be honored
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Callable, Sequence
 from datetime import timedelta
@@ -17,6 +40,8 @@ type _CallbackConfiguration = Callback | Sequence[Callback] | None
 
 
 class _CallbackConnector:
+    # Private callback composition and default-policy owner used by Trainer and
+    # HookDispatcher.
     def __init__(
         self,
         callbacks: Callback | list[Callback] | None,
@@ -25,6 +50,8 @@ class _CallbackConnector:
         enable_model_summary: bool,
         max_time: str | timedelta | dict[str, int] | None
     ) -> None:
+        # Normalizes client callbacks, adds enabled defaults, orders checkpoint
+        # callbacks last, and validates state identity before any stage begins.
         self._callbacks: list[Callback] = self._resolve_callbacks(callbacks)
         self._model_callbacks: list[Callback] = []
         self._model_configuration: tuple[TrainerStage, Module] | None = None
@@ -40,6 +67,9 @@ class _CallbackConnector:
         stage: TrainerStage,
         configuration_operation: Callable[[], _CallbackConfiguration]
     ) -> None:
+        # Invokes Module.configure_callbacks once per Module and stage, merges its
+        # result transactionally, applies inheritance replacement, and rolls back
+        # the configuration marker when client code fails.
         active_configuration: tuple[TrainerStage, Module] | None = (
             self._model_configuration
         )
@@ -95,6 +125,8 @@ class _CallbackConnector:
             raise
 
     def clear_model_configuration(self, stage: TrainerStage) -> None:
+        # Clears the stage marker during finalization so later runs may configure
+        # the same Module again without duplicating callback instances.
         active_configuration: tuple[TrainerStage, Module] | None = (
             self._model_configuration
         )
@@ -105,6 +137,8 @@ class _CallbackConnector:
         self,
         callbacks: Sequence[Callback] | None = None
     ) -> None:
+        # Checks only callbacks participating in state persistence and reports
+        # both colliding instances before checkpoint construction.
         callback_group: Sequence[Callback] = (
             self._callbacks if callbacks is None else callbacks
         )
@@ -130,6 +164,8 @@ class _CallbackConnector:
 
     @callbacks.setter
     def callbacks(self, callbacks: list[Callback]) -> None:
+        # Replaces the current callback set after type, state identity, and final
+        # checkpoint ordering validation.
         if not isinstance(callbacks, list) or not all(
             isinstance(callback, Callback) for callback in callbacks
         ):
@@ -141,6 +177,7 @@ class _CallbackConnector:
         self,
         callbacks: Callback | list[Callback] | None
     ) -> list[Callback]:
+        # Copies None, one callback, or a concrete callback list into owned order.
         if callbacks is None:
             return []
         if isinstance(callbacks, Callback):
@@ -154,6 +191,8 @@ class _CallbackConnector:
         )
 
     def _configure_checkpointing(self, enabled: bool) -> None:
+        # Rejects disabled checkpoint callbacks or adds the default ModelCheckpoint
+        # when checkpointing is enabled and no policy was supplied.
         checkpoint_callbacks: list[Checkpoint] = [
             callback
             for callback in self._callbacks
@@ -172,6 +211,8 @@ class _CallbackConnector:
         enabled: bool,
         max_time: str | timedelta | dict[str, int] | None
     ) -> None:
+        # Validates the singleton progress policy, resolves max_time into Timer,
+        # and ensures timing appears before progress observation.
         progress_callbacks: list[ProgressBarCallback] = [
             callback
             for callback in self._callbacks
@@ -227,6 +268,7 @@ class _CallbackConnector:
             self._callbacks.append(ProgressBarCallback())
 
     def _configure_model_summary(self, enabled: bool) -> None:
+        # Adds the default summary callback only when enabled and absent.
         if enabled and not any(
             isinstance(callback, ModelSummary) for callback in self._callbacks
         ):
@@ -236,6 +278,8 @@ class _CallbackConnector:
         self,
         configured_callbacks: _CallbackConfiguration
     ) -> list[Callback]:
+        # Validates Module.configure_callbacks output without accepting arbitrary
+        # iterables whose one-shot behavior could change across stages.
         if configured_callbacks is None:
             return []
         if isinstance(configured_callbacks, Callback):
@@ -255,6 +299,8 @@ class _CallbackConnector:
         return model_callbacks
 
     def _reorder(self, callbacks: Sequence[Callback]) -> list[Callback]:
+        # Preserves relative order within regular and checkpoint groups and moves
+        # every checkpoint observer to the terminal callback boundary.
         regular_callbacks: list[Callback] = [
             callback
             for callback in callbacks

@@ -1,3 +1,28 @@
+# This module:
+# 1. Resolves and connects Accelerator, devices, nodes, Strategy, precision,
+#    ClusterEnvironment, CheckpointIO, and LayerSync from one Trainer
+#    configuration boundary
+# 2. Validates duplicate plugin families, conflicting ownership, unsupported
+#    topology, unavailable backends, and numerical compatibility before runtime
+#
+# Design decisions:
+# - These collaborators form one compatibility matrix and therefore resolve in a
+#   strict order: plugins, accelerator, devices, Strategy, topology, checkpoint,
+#   environment, layer sync, precision, then precision attachment
+# - A configured Strategy may own accelerator, devices, precision, checkpoint,
+#   environment, or layer policy; specifying the same concern through Trainer is
+#   rejected instead of silently choosing precedence
+# - Automatic accelerator selection prefers CUDA, then MPS, then CPU; ``"gpu"``
+#   preserves its established MPS-before-CUDA compatibility behavior
+# - Distributed topology requires a distributed Strategy and MPS remains
+#   single-device because no verified SyntheticMind distributed MPS path exists
+# - Precision aliases normalize once, discouraged shorthand warns, float16 CPU
+#   mixed precision becomes bfloat16, and explicit precision plugins cannot be
+#   combined with a separate precision value
+# - No temporary topology or plugin data model duplicates live collaborator state
+#
+# Author: Rahul Sawhney
+
 import warnings
 from typing import cast
 
@@ -35,6 +60,7 @@ type _ResolvedPlugins = tuple[
 
 
 class _AcceleratorConnector:
+    # Private Trainer composition owner for device and execution collaborators.
     def __init__(
         self,
         accelerator: str | Accelerator,
@@ -45,6 +71,8 @@ class _AcceleratorConnector:
         plugins: Plugin | list[Plugin] | None,
         sync_batchnorm: bool
     ) -> None:
+        # Resolves the complete compatibility matrix and leaves Strategy fully
+        # configured with topology, plugins, and numerical policy.
         resolved_plugins: _ResolvedPlugins = self._resolve_plugins(
             plugins,
             sync_batchnorm
@@ -118,6 +146,8 @@ class _AcceleratorConnector:
         plugins: Plugin | list[Plugin] | None,
         sync_batchnorm: bool
     ) -> _ResolvedPlugins:
+        # Classifies supplied structural plugin instances, rejects duplicate
+        # families, and materializes sync_batchnorm as TorchSyncBatchNorm.
         if type(sync_batchnorm) is not bool:
             raise TypeError("sync_batchnorm must be a bool.")
         if plugins is None:
@@ -176,6 +206,8 @@ class _AcceleratorConnector:
         self,
         accelerator: str | Accelerator
     ) -> Accelerator:
+        # Resolves built-in names or a custom structural implementation and
+        # verifies live availability before device parsing.
         if isinstance(accelerator, Accelerator):
             resolved_accelerator: Accelerator = accelerator
         elif not isinstance(accelerator, str):
@@ -231,6 +263,8 @@ class _AcceleratorConnector:
         num_nodes: int,
         configured_parallel_devices: list[torch.device] | None
     ) -> tuple[int | list[int], list[torch.device]]:
+        # Validates node count and resolves Trainer input or Strategy-configured
+        # devices through the selected Accelerator.
         if isinstance(num_nodes, bool) or not isinstance(num_nodes, int) or num_nodes < 1:
             raise ValueError(f"`num_nodes` must be positive, got {num_nodes!r}.")
         if configured_parallel_devices:
@@ -257,6 +291,8 @@ class _AcceleratorConnector:
         accelerator: Accelerator,
         configured_parallel_devices: list[torch.device]
     ) -> int | list[int]:
+        # Verifies preconfigured device types and converts concrete torch.device
+        # objects back through Accelerator parsing for one canonical validation.
         expected_device_type: str = accelerator.name()
         actual_device_types: set[str] = set()
         device: torch.device
@@ -285,6 +321,8 @@ class _AcceleratorConnector:
         parallel_devices: list[torch.device],
         num_nodes: int
     ) -> Strategy:
+        # Resolves standard names or a concrete Strategy and validates distributed
+        # requirements plus the unsupported MPS parallel boundary.
         if isinstance(strategy, Strategy):
             resolved_strategy: Strategy = strategy
         elif not isinstance(strategy, str):
@@ -329,6 +367,7 @@ class _AcceleratorConnector:
         return resolved_strategy
 
     def _attach_checkpoint_io(self, checkpoint_io: CheckpointIO | None) -> None:
+        # Attaches transport only when Strategy did not already configure it.
         if checkpoint_io is None:
             return
         if self.strategy.checkpoint.configured_checkpoint_io is not None:
@@ -342,6 +381,8 @@ class _AcceleratorConnector:
         self,
         cluster_environment: ClusterEnvironment | None
     ) -> None:
+        # Restricts cluster topology plugins to ParallelStrategy and single-source
+        # ownership.
         if cluster_environment is None:
             return
         if not isinstance(self.strategy, ParallelStrategy):
@@ -354,6 +395,8 @@ class _AcceleratorConnector:
         self.strategy.attach_cluster_environment(cluster_environment)
 
     def _attach_layer_sync(self, layer_sync: LayerSync | None) -> None:
+        # Restricts reversible layer synchronization to DDP and single-source
+        # ownership.
         if layer_sync is None:
             return
         if not isinstance(self.strategy, DDPStrategy):
@@ -372,6 +415,8 @@ class _AcceleratorConnector:
         configured_plugin: Precision | None,
         strategy_precision_plugin: Precision | None
     ) -> Precision:
+        # Applies plugin precedence rules, normalizes public precision, performs
+        # CPU fallback, and constructs the corresponding numerical policy.
         if configured_plugin is not None and strategy_precision_plugin is not None:
             raise MisconfigurationError(
                 "A precision plugin was configured through both Trainer plugins and the strategy. "
@@ -414,6 +459,8 @@ class _AcceleratorConnector:
         self,
         precision: PrecisionInput | None
     ) -> PrecisionType:
+        # Converts numeric and compatibility aliases to canonical explicit names
+        # and rejects bools or unsupported modes.
         if precision is None:
             return "32-true"
         if isinstance(precision, bool):

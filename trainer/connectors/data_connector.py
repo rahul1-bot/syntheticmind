@@ -1,3 +1,32 @@
+# This module:
+# 1. Resolves direct, DataModule-owned, and Module-owned dataloader sources into
+#    canonical CombinedLoader instances for train, validation, test, and predict
+# 2. Applies per-stage batch limits, overfit determinism, distributed sampling,
+#    loader reload cadence, subclass-preserving reconstruction, and cached totals
+# 3. Defines the unrepeated distributed prediction sampler that partitions every
+#    sample exactly once across the data-parallel axis
+#
+# Design decisions:
+# - Explicit Trainer dataloaders take precedence, then DataModule, then Module;
+#   source identity remains visible and no fabricated DataModule adapter is used
+# - Plain training collections use max_size_cycle and evaluation or prediction
+#   collections use sequential mode; an explicit CombinedLoader preserves its
+#   client-selected mode except prediction requires sequential output identity
+# - Batch limits resolve only after loader cardinality is known. Unsized streams
+#   accept an integer count or unbounded 1.0 and reject fractional inference
+# - Standard DistributedSampler provides equal work for training and evaluation,
+#   while prediction uses rank-strided unrepeated indices because padding would
+#   duplicate returned samples
+# - Sampler injection reconstructs the concrete DataLoader subclass from its
+#   complete visible constructor contract and required instance attributes;
+#   missing custom arguments fail instead of degrading to a base DataLoader
+# - overfit_batches replaces random map-style sampling with sequential sampling
+#   so train and fit-owned validation observe stable repeated data
+# - Loader cache and reload epoch remain connector state; loops request current
+#   data without owning factory invocation or reconstruction
+#
+# Author: Rahul Sawhney
+
 import inspect
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Sized
@@ -52,6 +81,8 @@ type _DataLoaderConstructorValue = (
 
 
 class _DataConnector:
+    # Private vertical data boundary connecting client sources to loop-ready
+    # loaders under Strategy, profiler, limit, sampler, and reload policy.
     def __init__(
         self,
         strategy: Strategy,
@@ -64,6 +95,8 @@ class _DataConnector:
         use_distributed_sampler: bool,
         reload_dataloaders_every_n_epochs: int
     ) -> None:
+        # Stores resolved run policy and initializes independent source, prepared
+        # loader, total, and reload state for every stage.
         self._strategy: Strategy = strategy
         self._profiler: Profiler = profiler
         self._limits: dict[_DataStage, int | float] = {
@@ -97,6 +130,8 @@ class _DataConnector:
         datamodule: DataModule | None,
         dataloaders: DataLoaderSource | CombinedLoader | None
     ) -> None:
+        # Selects explicit dataloaders, DataModule, or Module in precedence order
+        # and records the owner for one stage without constructing data yet.
         source: _DataSource = (
             dataloaders
             if dataloaders is not None
@@ -122,6 +157,9 @@ class _DataConnector:
         module_hook_caller: _ModuleHookCaller,
         datamodule_hook_caller: _DataModuleHookCaller
     ) -> CombinedLoader:
+        # Invokes the owning factory under hook and profiler context, validates
+        # iterable leaves, applies composition, sampling, limits, and barriers,
+        # then caches the prepared loader and cardinality.
         hook_name: str = f"{stage}_dataloader"
         source: _DataSource | None = self._source(stage)
         if source is None:
@@ -209,6 +247,8 @@ class _DataConnector:
         total_batches: int | None,
         stage: _DataStage
     ) -> int | None:
+        # Converts a resolved count or fraction against actual cardinality and
+        # rejects fractional unsized streams or positive fractions below one batch.
         limit_batches: int | float = self._limits[stage]
         if total_batches == 0 or limit_batches == 0:
             return 0
@@ -234,6 +274,8 @@ class _DataConnector:
         return resolved_batches
 
     def reset_fit(self) -> None:
+        # Clears train and fit-owned validation loaders, totals, and reload epochs
+        # before a genuinely new fit attachment.
         self.total_train_batches: int | None = None
         self.total_val_batches: list[int | None] | None = None
         self.train_combined_loader: CombinedLoader | None = None
@@ -242,6 +284,7 @@ class _DataConnector:
         self.last_val_reload_epoch: int | None = None
 
     def reset_stage(self, stage: Literal["val", "test", "predict"]) -> None:
+        # Clears prepared data and totals for one standalone inference stage.
         match stage:
             case "val":
                 self.total_val_batches: list[int | None] | None = None
@@ -254,6 +297,7 @@ class _DataConnector:
                 self.predict_combined_loader: CombinedLoader | None = None
 
     def train_loader_is_current(self, current_epoch: int) -> bool:
+        # Whether cached training data remains within its configured reload window.
         return self._loader_is_current(
             self.train_combined_loader,
             self.last_train_reload_epoch,
@@ -261,6 +305,7 @@ class _DataConnector:
         )
 
     def val_loader_is_current(self, current_epoch: int) -> bool:
+        # Whether cached fit-validation data remains within its reload window.
         return self._loader_is_current(
             self.val_combined_loader,
             self.last_val_reload_epoch,
@@ -272,6 +317,7 @@ class _DataConnector:
         return self._reload_interval
 
     def _source(self, stage: _DataStage) -> _DataSource | None:
+        # Resolves the recorded owner for one stage.
         match stage:
             case "train":
                 return self.train_source
@@ -288,6 +334,8 @@ class _DataConnector:
         stage: _DataStage,
         trainer_stage: TrainerStage
     ) -> DataLoader:
+        # Applies overfit sampling, distributed sampler policy, prediction
+        # partitioning, and reload-worker diagnostics to one concrete DataLoader.
         prepared_dataloader: DataLoader = dataloader
         if self._overfit_batches and (
             stage == "train" or (stage == "val" and trainer_stage == "fit")
@@ -330,6 +378,8 @@ class _DataConnector:
         dataloader: DataLoader,
         shuffle: bool
     ) -> DataLoader:
+        # Constructs the standard equal-work sampler from Strategy's data-parallel
+        # coordinates and rebuilds the original loader type around it.
         sampler_kwargs: dict[str, int] | None = (
             self._strategy.distributed_sampler_kwargs
         )
@@ -348,6 +398,8 @@ class _DataConnector:
         return self._replace_dataloader_sampler(dataloader, sampler)
 
     def _wrap_with_unrepeated_sampler(self, dataloader: DataLoader) -> DataLoader:
+        # Constructs the prediction sampler that emits each dataset index on one
+        # rank only and rebuilds the original loader type.
         sampler_kwargs: dict[str, int] | None = (
             self._strategy.distributed_sampler_kwargs
         )
@@ -370,6 +422,8 @@ class _DataConnector:
         dataloader: DataLoader,
         stage: _DataStage
     ) -> DataLoader:
+        # Replaces random map-style sampling with SequentialSampler while leaving
+        # IterableDataset ordering with the client source.
         if isinstance(dataloader.dataset, IterableDataset):
             return dataloader
         active_sampler: Sampler[int] | Iterable[int] = cast(
@@ -403,6 +457,9 @@ class _DataConnector:
         dataloader: DataLoader,
         sampler: Sampler[int]
     ) -> DataLoader:
+        # Rebuilds a standard or custom BatchSampler when present, otherwise
+        # reconstructs the DataLoader with explicit sampler, batch size, and drop
+        # policy.
         if dataloader.batch_size is None and dataloader.batch_sampler is not None:
             batch_sampler: BatchSampler = cast(
                 BatchSampler,
@@ -442,6 +499,8 @@ class _DataConnector:
         dataloader: DataLoader,
         sampler: Sampler[int] | BatchSampler
     ) -> dict[str, _DataLoaderConstructorValue]:
+        # Captures standard DataLoader construction values and installs either a
+        # sampler or batch sampler without mutating the original object.
         arguments: dict[str, _DataLoaderConstructorValue] = {
             "dataset": cast(_DataLoaderConstructorValue, dataloader.dataset),
             "num_workers": dataloader.num_workers,
@@ -479,6 +538,9 @@ class _DataConnector:
         dataloader: DataLoader,
         constructor_kwargs: dict[str, _DataLoaderConstructorValue]
     ) -> DataLoader:
+        # Walks the concrete DataLoader inheritance signatures, adopts required
+        # custom attributes, validates missing or unsupported parameters, and
+        # constructs the same concrete type.
         constructor: type[DataLoader] = type(dataloader)
         parameters: dict[str, inspect.Parameter] = (
             self._dataloader_constructor_parameters(constructor)
@@ -571,6 +633,8 @@ class _DataConnector:
         self,
         constructor: type[DataLoader]
     ) -> dict[str, inspect.Parameter]:
+        # Merges concrete and DataLoader-base signature parameters so subclasses
+        # that omit inherited arguments can still be reconstructed faithfully.
         parameters: dict[str, inspect.Parameter] = dict(
             inspect.signature(constructor).parameters
         )
@@ -587,6 +651,7 @@ class _DataConnector:
         return parameters
 
     def _safe_len(self, dataloader: _DataloaderLeaf) -> int | None:
+        # Reads usable length while treating an intentional TypeError as unsized.
         if not isinstance(dataloader, Sized):
             return None
         try:
@@ -601,6 +666,8 @@ class _DataConnector:
         totals: list[int | None],
         current_epoch: int
     ) -> None:
+        # Stores the prepared CombinedLoader, stage-specific total shape, and fit
+        # reload epoch under the correct owner slot.
         match stage:
             case "train":
                 self.train_combined_loader: CombinedLoader | None = combined_loader
@@ -623,6 +690,7 @@ class _DataConnector:
         last_reload_epoch: int | None,
         current_epoch: int
     ) -> bool:
+        # Applies disabled or positive reload cadence to cached fit data.
         return combined_loader is not None and (
             self._reload_interval == 0
             or (
@@ -633,8 +701,12 @@ class _DataConnector:
 
 
 class _UnrepeatedDistributedSampler(DistributedSampler):
+    # Rank-strided sampler for prediction output identity. Unlike standard
+    # DistributedSampler it never pads shorter shards with duplicate indices.
     @override
     def __iter__(self) -> Iterator[int]:
+        # Generates one shared optional permutation, then assigns every rank its
+        # strided non-overlapping index subsequence.
         dataset: Sized = cast(Sized, self.dataset)
         if self.shuffle:
             generator: torch.Generator = torch.Generator()
@@ -650,5 +722,6 @@ class _UnrepeatedDistributedSampler(DistributedSampler):
 
     @override
     def __len__(self) -> int:
+        # Returns this rank's exact potentially uneven shard cardinality.
         dataset: Sized = cast(Sized, self.dataset)
         return max(0, (len(dataset) - self.rank + self.num_replicas - 1) // self.num_replicas)

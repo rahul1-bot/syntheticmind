@@ -1,3 +1,37 @@
+# This module:
+# 1. Owns checkpoint path selection, schema-v2 trajectory assembly, pre-mutation
+#    validation, Strategy state representation, participant restoration, and
+#    exact fit continuation coordinates
+# 2. Distinguishes resumable training checkpoints from weights-only model
+#    artifacts and enforces effective Trainer configuration compatibility
+# 3. Validates and routes rank-local partial-epoch loader, scalar, TorchMetrics,
+#    optimizer, scheduler, callback, DataModule, precision, and RNG state
+#
+# Design decisions:
+# - Trainer is the sole full-trajectory coordinator; Strategy represents model
+#   and optimizer state, CheckpointIO transports bytes, and ModelCheckpoint owns
+#   cadence, ranking, retention, and filenames
+# - Stage ckpt_path overrides mutable trainer.ckpt_path with a warning, while
+#   ``"best"`` and ``"last"`` resolve through configured callback state and
+#   actual artifacts before loading
+# - A stage called without a model defaults to the previous fit's best checkpoint
+#   because Trainer must reconstruct the model state it will evaluate
+# - Schema validation runs before Strategy or participant restoration and checks
+#   artifact type, configuration, trajectory fields, state shapes, metadata,
+#   rank count, and world size
+# - A weights-only artifact contains model representation and metadata but cannot
+#   continue optimization because optimizer, scheduler, callback, data, progress,
+#   precision, metric, and RNG state are absent
+# - Restoration order is Strategy model and optimizer state, scheduler, current
+#   RNG, callbacks, DataModule, precision, then logical trajectory coordinates;
+#   every participant therefore exists before its state is applied
+# - Partial-epoch metrics retain one strict mapping per checkpoint world rank and
+#   cannot resume under a changed world size
+# - Callback mappings are deep-copied before client load_state_dict so one
+#   callback cannot mutate the payload another participant will inspect
+#
+# Author: Rahul Sawhney
+
 import warnings
 from collections.abc import Iterator
 from copy import deepcopy
@@ -42,6 +76,8 @@ __all__: list[str] = []
 
 
 class _CheckpointConnector:
+    # Private Trainer checkpoint trajectory owner bound to Strategy representation,
+    # callback identity, run mode, and stochastic streams.
     def __init__(
         self,
         strategy: Strategy,
@@ -49,6 +85,8 @@ class _CheckpointConnector:
         fast_dev_run: bool,
         randomness: _Randomness
     ) -> None:
+        # Initializes explicit path policy and empty fit continuation and post-fit
+        # parent state.
         self._strategy: Strategy = strategy
         self._callback_connector: _CallbackConnector = callback_connector
         self._fast_dev_run: bool = fast_dev_run
@@ -71,6 +109,9 @@ class _CheckpointConnector:
         model_provided: bool,
         path_provided: bool
     ) -> str | Path | None:
+        # Resolves stage argument, mutable Trainer policy, implicit best selection,
+        # symbolic best or last values, unsupported integrations, and concrete
+        # artifact validation into one normalized path.
         selected_path: str | Path | None = checkpoint_path
         if self._user_managed:
             if not path_provided:
@@ -111,6 +152,8 @@ class _CheckpointConnector:
         return normalized_path
 
     def reset_training_continuation(self) -> None:
+        # Clears every cursor, metric, optimizer, scheduler, and RNG coordinate
+        # retained for an incomplete or multiprocessing-owned fit.
         self.train_dataloader_states: list[DataLoaderState] = []
         self.train_dataloader_state_active: bool = False
         self.train_dataloader_batches_completed: int = 0
@@ -138,6 +181,9 @@ class _CheckpointConnector:
         scheduler_states: list[CheckpointValue],
         trainer_configuration: CheckpointValue
     ) -> CheckpointDict:
+        # Assembles one schema-v2 artifact from model representation, effective
+        # configuration, participant state, exact partial-epoch coordinates, and
+        # metadata, omitting all continuation fields for weights-only output.
         checkpoint: CheckpointDict = {
             "schema_version": 2,
             "epoch": epoch,
@@ -214,6 +260,8 @@ class _CheckpointConnector:
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Loads through Strategy representation and validates the complete schema
+        # before the caller may mutate live participants.
         checkpoint: CheckpointDict = self._strategy.checkpoint.load(
             checkpoint_path,
             weights_only
@@ -226,6 +274,8 @@ class _CheckpointConnector:
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Reads and validates metadata without yet applying distributed model or
+        # optimizer state.
         checkpoint: CheckpointDict = self._strategy.checkpoint.load_metadata(
             checkpoint_path,
             weights_only
@@ -239,6 +289,8 @@ class _CheckpointConnector:
         strict: bool,
         restore_optimizers: bool
     ) -> None:
+        # Applies model and optional optimizer representation through the selected
+        # Strategy checkpoint owner.
         self._strategy.checkpoint.restore(
             checkpoint,
             strict,
@@ -250,6 +302,8 @@ class _CheckpointConnector:
         checkpoint: CheckpointDict,
         current: _TrainerConfigurationSnapshot
     ) -> None:
+        # Rejects weights-only continuation and reports trajectory-critical
+        # effective configuration fields that differ from the current Trainer.
         checkpoint_type: str = self._checkpoint_type(checkpoint)
         if checkpoint_type == "weights":
             raise MisconfigurationError(
@@ -270,6 +324,7 @@ class _CheckpointConnector:
         self,
         checkpoint: CheckpointDict
     ) -> _TrainerConfigurationSnapshot:
+        # Parses the strict effective Trainer policy stored in the artifact.
         configuration: CheckpointValue | None = checkpoint.get(
             "trainer_configuration"
         )
@@ -294,6 +349,8 @@ class _CheckpointConnector:
         storage_options: CheckpointStorageOptions,
         synchronize: bool
     ) -> None:
+        # Delegates Strategy-aware persistence and optionally barriers after
+        # publication when subsequent operations require all ranks to observe it.
         self._strategy.checkpoint.save(
             checkpoint,
             filepath,
@@ -304,36 +361,45 @@ class _CheckpointConnector:
             self._strategy.barrier()
 
     def remove(self, filepath: CheckpointPath) -> None:
+        # Delegates artifact removal under Strategy rank policy.
         self._strategy.checkpoint.remove(filepath, self._strategy.global_rank)
 
     def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool:
         return self._strategy.checkpoint.is_checkpoint_path(checkpoint_path)
 
     def model_state_dict(self) -> CheckpointValue:
+        # Extracts model representation appropriate for local, DDP, or
+        # model-parallel execution.
         return cast(CheckpointValue, self._strategy.checkpoint.model_state_dict())
 
     def optimizer_state(
         self,
         optimizer: torch.optim.Optimizer
     ) -> OptimizerState:
+        # Extracts one Strategy-aware optimizer representation.
         return self._strategy.checkpoint.optimizer_state(optimizer)
 
     def connect_optimizers(
         self,
         optimizers: list[torch.optim.Optimizer]
     ) -> None:
+        # Connects the complete optimizer list before save or resume.
         self._strategy.checkpoint.connect_optimizers(optimizers)
 
     def teardown(self) -> None:
+        # Releases Strategy checkpoint preload and transport resources.
         self._strategy.checkpoint.teardown()
 
     def capture_random_state(self) -> CheckpointDict:
+        # Serializes the active stochastic streams through their strict Pydantic
+        # transport model.
         return cast(
             CheckpointDict,
             self._randomness.capture().model_dump(mode="python")
         )
 
     def restore_random_state(self, state: CheckpointDict) -> None:
+        # Validates random stream schema before mutating process-global generators.
         snapshot: _RandomStateSnapshot = self._parse_random_state(state)
         self._randomness.restore(snapshot)
 
@@ -347,6 +413,9 @@ class _CheckpointConnector:
         restore_datamodule_state: bool,
         restore_schedulers: bool
     ) -> tuple[int, int, int, int, CheckpointDict | None]:
+        # Restores scheduler, current RNG, callback, optional DataModule, and
+        # precision state in order, then returns logical continuation coordinates
+        # for Trainer and TrainingEpochLoop.
         scheduler_list: list[_SchedulerInstance] = (
             list(schedulers)
             if schedulers is not None
@@ -372,6 +441,8 @@ class _CheckpointConnector:
         checkpoint: CheckpointDict,
         schedulers: list[_SchedulerInstance]
     ) -> None:
+        # Requires exact scheduler cardinality and mapping state before applying
+        # each configuration in current order.
         scheduler_states: CheckpointValue | None = checkpoint.get("lr_schedulers")
         if scheduler_states is None:
             if schedulers:
@@ -397,6 +468,8 @@ class _CheckpointConnector:
             current_scheduler.load_state_dict(cast(StateDict, scheduler_state))
 
     def _restore_callback_states(self, checkpoint: CheckpointDict) -> None:
+        # Warns about saved callbacks absent from the current Trainer and restores
+        # each matching callback from an isolated mapping copy.
         callback_states_value: CheckpointValue | None = checkpoint.get("callbacks")
         if callback_states_value is None:
             return
@@ -435,6 +508,8 @@ class _CheckpointConnector:
         checkpoint: CheckpointDict,
         precision_plugin: Precision
     ) -> None:
+        # Restores state qualified by the concrete precision policy name when
+        # present.
         precision_state: CheckpointValue | None = checkpoint.get(
             type(precision_plugin).__qualname__
         )
@@ -451,6 +526,8 @@ class _CheckpointConnector:
         self,
         checkpoint: CheckpointDict
     ) -> tuple[int, int, int, int, CheckpointDict | None]:
+        # Parses non-bool integer epoch, optimizer-step, batch, and global-batch
+        # coordinates plus a validated optional epoch-start RNG snapshot.
         epoch: int = self.integer_value(checkpoint.get("epoch"), "epoch", 0)
         global_step: int = self.integer_value(
             checkpoint.get("global_step"),
@@ -494,6 +571,7 @@ class _CheckpointConnector:
         self,
         state: CheckpointDict
     ) -> _RandomStateSnapshot:
+        # Strictly validates every random stream field before restoration.
         try:
             return _RandomStateSnapshot.model_validate(state, strict=True)
         except ValidationError as exception:
@@ -503,6 +581,7 @@ class _CheckpointConnector:
         self,
         checkpoint: CheckpointDict
     ) -> list[DataLoaderState]:
+        # Extracts ordered stateful-loader mappings from nested fit-loop state.
         state_dict: CheckpointDict = self._fit_loop_state(checkpoint)
         combined_loader_value: CheckpointValue | None = state_dict.get(
             "combined_loader"
@@ -520,6 +599,8 @@ class _CheckpointConnector:
         return states
 
     def epoch_metric_state(self, checkpoint: CheckpointDict) -> CheckpointDict:
+        # Selects this Strategy rank's partial-epoch metric state after requiring
+        # checkpoint rank cardinality to match the active world.
         states: list[CheckpointDict] = self._epoch_metric_states(checkpoint)
         if not states:
             return {}
@@ -533,6 +614,7 @@ class _CheckpointConnector:
         self,
         checkpoint: CheckpointDict
     ) -> list[CheckpointDict]:
+        # Parses the optional list of rank-local epoch metric mappings.
         state_dict: CheckpointDict = self._fit_loop_state(checkpoint)
         states_value: CheckpointValue | None = state_dict.get(
             "epoch_metrics_by_rank"
@@ -550,6 +632,8 @@ class _CheckpointConnector:
         return states
 
     def _validate_epoch_metric_states(self, checkpoint: CheckpointDict) -> int:
+        # Validates every storage key and observation entry before reporting rank
+        # cardinality to metadata validation.
         states: list[CheckpointDict] = self._epoch_metric_states(checkpoint)
         rank_state: CheckpointDict
         for rank_state in states:
@@ -568,6 +652,8 @@ class _CheckpointConnector:
         storage_key: str,
         entry: CheckpointDict
     ) -> None:
+        # Proves exact fields, epoch cadence, reduction, scalar-versus-Metric kind,
+        # storage identity, update count, and supported Metric state.
         expected_fields: set[str] = {
             "identity",
             "accumulator",
@@ -628,6 +714,8 @@ class _CheckpointConnector:
             raise ValueError("A scalar epoch metric cannot contain Metric state.")
 
     def _fit_loop_state(self, checkpoint: CheckpointDict) -> CheckpointDict:
+        # Traverses optional loops/fit_loop/state_dict nesting with mapping checks
+        # and returns an empty mapping for stateless or complete epochs.
         loops_value: CheckpointValue | None = checkpoint.get("loops")
         if loops_value is None:
             return {}
@@ -650,6 +738,7 @@ class _CheckpointConnector:
         checkpoint: CheckpointDict,
         datamodule: DataModule
     ) -> None:
+        # Restores state qualified by concrete DataModule class when present.
         state_key: str = type(datamodule).__qualname__
         datamodule_state: CheckpointValue | None = checkpoint.get(state_key)
         if datamodule_state is None:
@@ -666,6 +755,7 @@ class _CheckpointConnector:
         field_name: str,
         default: int
     ) -> int:
+        # Parses an optional checkpoint integer while rejecting bool coercion.
         if value is None:
             return default
         if isinstance(value, bool) or not isinstance(value, int):
@@ -677,16 +767,20 @@ class _CheckpointConnector:
 
     @property
     def path(self) -> str | Path | None:
+        # Current normalized or user-managed checkpoint selection.
         return self._path
 
     @path.setter
     def path(self, checkpoint_path: str | Path | None) -> None:
+        # Sets mutable Trainer path policy and records whether the client owns it.
         if checkpoint_path is not None and not isinstance(checkpoint_path, str | Path):
             raise TypeError("ckpt_path must be a string, Path, or None.")
         self._path: str | Path | None = checkpoint_path
         self._user_managed: bool = checkpoint_path is not None
 
     def _select_best_path(self, stage: TrainerStage) -> str:
+        # Resolves the first ModelCheckpoint best path, warns when several
+        # callbacks compete, and rejects absent or development-run state.
         checkpoint_callbacks: list[ModelCheckpoint] = [
             callback
             for callback in self._callback_connector.callbacks
@@ -713,6 +807,8 @@ class _CheckpointConnector:
         )
 
     def _select_last_path(self, stage: TrainerStage) -> str | None:
+        # Collects callback and directory last artifacts, validates format, and
+        # chooses the newest modification time or warns when none exists.
         candidates: list[str] = []
         callback: Callback
         for callback in self._callback_connector.callbacks:
@@ -756,6 +852,8 @@ class _CheckpointConnector:
         checkpoint: CheckpointDict,
         source: HyperparametersMixin
     ) -> None:
+        # Cleans unpicklable values and records the component's container identity
+        # plus an owned copy of its live mapping.
         source._clean_hparams()
         if not source.hparams:
             return
@@ -771,6 +869,8 @@ class _CheckpointConnector:
         )
 
     def _validate_schema(self, checkpoint: CheckpointDict) -> None:
+        # Validates every required schema-v2 trajectory, participant, metadata,
+        # and partial-rank invariant before live restoration.
         schema_version: CheckpointValue | None = checkpoint.get("schema_version")
         if isinstance(schema_version, bool) or not isinstance(schema_version, int):
             raise TypeError("Checkpoint `schema_version` must be an integer.")
@@ -829,6 +929,7 @@ class _CheckpointConnector:
             )
 
     def _checkpoint_type(self, checkpoint: CheckpointDict) -> str:
+        # Resolves the closed training-versus-weights artifact identity.
         metadata: CheckpointValue | None = checkpoint.get("metadata")
         if not isinstance(metadata, dict):
             raise TypeError("Checkpoint `metadata` must be a mapping.")
@@ -848,6 +949,7 @@ class _CheckpointConnector:
         checkpoint: CheckpointDict,
         field_name: str
     ) -> None:
+        # Validates optional ordered participant state as a list of mappings.
         states: CheckpointValue | None = checkpoint.get(field_name)
         if states is None:
             return
@@ -862,6 +964,8 @@ class _CheckpointConnector:
                 )
 
     def _validate_callback_states(self, checkpoint: CheckpointDict) -> None:
+        # Validates callback state keys and mapping values independently from the
+        # currently configured callback set.
         states: CheckpointValue | None = checkpoint.get("callbacks")
         if states is None:
             return
