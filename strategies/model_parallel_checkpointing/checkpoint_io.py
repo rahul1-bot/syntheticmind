@@ -239,32 +239,14 @@ class _ModelParallelCheckpointIO:
     ) -> tuple[DistributedCheckpointState, CheckpointDict]:
         metadata: CheckpointDict = dict(checkpoint)
         model_state: CheckpointValue | None = metadata.pop("state_dict", None)
-        model_state_alias: CheckpointValue | None = metadata.pop(
-            "model_state_dict",
-            None
-        )
-        if not isinstance(model_state, dict):
-            model_state: CheckpointValue | None = model_state_alias
         if not isinstance(model_state, dict):
             raise KeyError("Checkpoint is missing a model `state_dict`.")
         optimizer_states: CheckpointValue | None = metadata.pop(
             "optimizer_states",
             None
         )
-        optimizer_state_aliases: CheckpointValue | None = metadata.pop(
-            "optimizer_state_dicts",
-            None
-        )
-        optimizer_state: CheckpointValue | None = metadata.pop(
-            "optimizer_state_dict",
-            None
-        )
         if not isinstance(optimizer_states, list):
-            optimizer_states: CheckpointValue | None = optimizer_state_aliases
-        if not isinstance(optimizer_states, list):
-            optimizer_states: CheckpointValue | None = (
-                [optimizer_state] if isinstance(optimizer_state, dict) else []
-            )
+            optimizer_states: CheckpointValue | None = []
         distributed_state: DistributedCheckpointState = {
             "state_dict": cast(ModelState, model_state)
         }

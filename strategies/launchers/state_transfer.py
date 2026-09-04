@@ -12,7 +12,12 @@ from syntheticmind.strategies.launchers.contracts import (
     _GlobalState,
     _WorkerOutput
 )
-from syntheticmind.utilities.types import CheckpointDict, RunningStage, StateDict, TrainerStage
+from syntheticmind.utilities.types import (
+    DataLoaderState,
+    RunningStage,
+    StateDict,
+    TrainerStage
+)
 
 if TYPE_CHECKING:
     from syntheticmind.core.datamodule import DataModule
@@ -90,12 +95,12 @@ class _WorkerStateTransfer:
             total_val_batches=trainer._data_connector.total_val_batches,
             total_test_batches=trainer._data_connector.total_test_batches,
             total_predict_batches=trainer._data_connector.total_predict_batches,
-            train_dataloader_states=trainer._last_train_dataloader_states,
-            train_dataloader_state_active=trainer._train_dataloader_state_active,
+            train_dataloader_states=trainer._checkpoint_connector.train_dataloader_states,
+            train_dataloader_state_active=trainer._checkpoint_connector.train_dataloader_state_active,
             train_dataloader_batches_completed=(
-                trainer._last_train_dataloader_batches_completed
+                trainer._checkpoint_connector.train_dataloader_batches_completed
             ),
-            train_total_batch_idx=trainer._last_train_total_batch_idx,
+            train_total_batch_idx=trainer._checkpoint_connector.train_total_batch_idx,
             received_sigterm=trainer.received_sigterm,
             is_last_batch=trainer.is_last_batch,
             global_state=_GlobalState.capture()
@@ -171,16 +176,16 @@ class _WorkerStateTransfer:
         trainer._data_connector.total_predict_batches: list[int | None] | None = (
             worker_output.total_predict_batches
         )
-        trainer._last_train_dataloader_states: list[CheckpointDict] = (
+        trainer._checkpoint_connector.train_dataloader_states: list[DataLoaderState] = (
             worker_output.train_dataloader_states
         )
-        trainer._train_dataloader_state_active: bool = (
+        trainer._checkpoint_connector.train_dataloader_state_active: bool = (
             worker_output.train_dataloader_state_active
         )
-        trainer._last_train_dataloader_batches_completed: int = (
+        trainer._checkpoint_connector.train_dataloader_batches_completed: int = (
             worker_output.train_dataloader_batches_completed
         )
-        trainer._last_train_total_batch_idx: int = worker_output.train_total_batch_idx
+        trainer._checkpoint_connector.train_total_batch_idx: int = worker_output.train_total_batch_idx
         trainer._signal_connector.received_sigterm: bool = (
             trainer.received_sigterm or worker_output.received_sigterm
         )

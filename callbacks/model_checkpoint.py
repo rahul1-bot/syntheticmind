@@ -1,38 +1,3 @@
-# This module:
-# 1. Saves training checkpoints on the configured cadence: a rolling last.ckpt,
-#    monitored top-k checkpoints named from a filename template, and an
-#    optional exception checkpoint when a run fails
-# 2. Builds full-resume payloads through CheckpointState, including mid-epoch
-#    resume markers, and records save duration and file size as runtime
-#    metrics
-# 3. Persists its own selection state (best score, best path, retained top-k
-#    set) so checkpoint retention continues correctly across resumption
-#
-# Design decisions:
-# - All filesystem activity is restricted to rank zero, so distributed runs
-#   produce exactly one checkpoint directory without write races
-# - The saved epoch number is resume-oriented: a mid-epoch save records the
-#   current epoch together with the completed-batch count and the epoch-start
-#   random state, so resumption replays the same epoch from the interruption
-#   point, while an epoch-boundary save records the next epoch to begin
-# - Checkpoints are written to a same-directory temporary file and promoted by
-#   atomic rename, so a crash during writing can never leave a truncated file
-#   under a checkpoint name; the temporary file is removed in a finally block
-# - The filename template resolves against epoch, step, and the metric values;
-#   a collision with a retained checkpoint appends a version suffix instead of
-#   overwriting the earlier file
-# - Top-k retention sorts by score in the monitored direction and evicts beyond
-#   k, but never deletes the file recorded as the best path
-# - save_top_k accepts -1 to retain every eligible checkpoint and 0 to disable
-#   monitored saves while save_last may continue independently
-# - The exception path saves a full payload when the optimizer already exists
-#   and falls back to a weights-only partial payload marked in its metadata,
-#   so an early-construction failure still preserves the model weights
-# - Restored top-k paths that resolve outside the current checkpoint directory
-#   clear the retention state instead of adopting it, so a changed dirpath can
-#   never cause deletions in a previous run's directory
-#
-# Author: Rahul Sawhney
 
 from __future__ import annotations
 
@@ -86,11 +51,6 @@ class ModelCheckpoint(Checkpoint):
     FILE_EXTENSION: str = ".ckpt"
     STARTING_VERSION: int = 1
 
-    # Checkpointing callback driven by validation passes during fit. On each
-    # eligible validation end it refreshes last.ckpt, evaluates the monitored
-    # metric against the best score, saves and retains monitored checkpoints
-    # under the top-k policy, and reports save telemetry through the
-    # experiment logger.
     def __init__(
         self,
         dirpath: str | Path | None = None,
@@ -109,40 +69,6 @@ class ModelCheckpoint(Checkpoint):
         save_on_train_epoch_end: bool | None = None,
         enable_version_counter: bool = True
     ) -> None:
-        # Validates the cadence options and binds the checkpoint directory,
-        # monitored metric and direction, retention count, filename template,
-        # and exception-save policy. The best score starts at the identity
-        # element for the chosen direction so the first monitored value always
-        # qualifies.
-        #
-        # Args:
-        #     dirpath: Directory receiving every checkpoint file written by
-        #         this callback. Default: ``"checkpoints"``.
-        #     monitor: Metric key compared for ranked retention, read from
-        #         the trainer's callback metrics at each eligible
-        #         validation boundary. Default: ``"val_loss"``.
-        #     mode: Improvement direction for the monitored metric,
-        #         ``"min"`` or ``"max"``. Default: ``"min"``.
-        #     save_top_k: Number of best-ranked checkpoints retained;
-        #         displaced entries are deleted from disk. Default: ``1``.
-        #     filename: Filename template formatted with the current epoch
-        #         and global step. Default:
-        #         ``"checkpoint-epoch{epoch:02d}-step{step:05d}"``.
-        #     save_last: Whether a last.ckpt copy is refreshed at every
-        #         eligible boundary independently of the monitored ranking.
-        #         Default: ``True``.
-        #     every_n_epochs: Epoch cadence gating the validation-boundary
-        #         saves; zero disables monitored epoch-cadence saving.
-        #         Default: ``1``.
-        #     every_n_train_steps: Optional optimizer-step cadence for
-        #         mid-epoch saves; ``None`` disables step-cadence saving.
-        #         Must be at least one when provided. Default: ``None``.
-        #     save_on_exception: Whether a rescue checkpoint is written
-        #         when training aborts on an exception. Default: ``False``.
-        #
-        # Raises:
-        #     MisconfigurationError: If every_n_epochs is negative or
-        #         every_n_train_steps is provided below one.
         super().__init__()
         from syntheticmind.utilities.exceptions import MisconfigurationError
 
@@ -247,8 +173,6 @@ class ModelCheckpoint(Checkpoint):
 
     @override
     def setup(self, trainer: Trainer, module: Module, stage: TrainerStage) -> None:
-        # Creates the checkpoint directory on rank zero before the stage
-        # begins, so later saves never race on directory creation.
         self._resolve_dirpath(trainer)
         assert self.dirpath is not None
         if self.save_last == "link" and not is_local_path(self.dirpath):
@@ -316,11 +240,6 @@ class ModelCheckpoint(Checkpoint):
 
     @override
     def on_validation_end(self, trainer: Trainer, module: Module) -> None:
-        # Checkpoint decision point, executed on rank zero after each real
-        # validation pass inside fit. The rolling last.ckpt is refreshed
-        # first when enabled; the monitored path then requires the monitor
-        # key to be present, saves on improvement (or unconditionally with
-        # save_top_k=-1), and updates the retention set.
         if self._should_skip_saving_checkpoint(trainer):
             return
         if self._should_save_on_train_epoch_end(trainer) and not self._defer_save_until_validation:
@@ -369,9 +288,6 @@ class ModelCheckpoint(Checkpoint):
             self._save_last_checkpoint(trainer, module, monitor_candidates)
 
     def _should_save_on_validation_end(self, trainer: Trainer, module: Module) -> bool:
-        # Applies the configured cadence: a step interval, when set, gates on
-        # the global step and takes precedence; otherwise the epoch interval
-        # gates on the completed epoch count, and zero disables saving.
         del module
         if self._defer_save_until_validation:
             return True
@@ -383,7 +299,6 @@ class ModelCheckpoint(Checkpoint):
         )
 
     def _is_improvement(self, current: torch.Tensor) -> bool:
-        # Applies the strict improvement test in the monitored direction.
         if self.best_model_score is None:
             return True
         if self.mode == "min":
@@ -396,10 +311,6 @@ class ModelCheckpoint(Checkpoint):
         step: int,
         metrics: dict[str, float]
     ) -> str:
-        # Resolves the filename template against epoch, step, and the metric
-        # values, appends the checkpoint suffix when absent, and disambiguates
-        # collisions with retained checkpoints through a version suffix so an
-        # earlier retained file is never overwritten.
         candidates: dict[str, torch.Tensor] = {
             name: torch.tensor(value) for name, value in metrics.items()
         }
@@ -420,14 +331,6 @@ class ModelCheckpoint(Checkpoint):
         filepath: str | Path,
         synchronize: bool
     ) -> None:
-        # Assembles and writes one full-resume checkpoint. Mid-epoch state is
-        # read from the training epoch loop: when the batch loop is active,
-        # the completed-batch count and the epoch-start random state enter the
-        # payload and the current epoch is recorded for replay; at an epoch
-        # boundary the next epoch is recorded instead. The module and callback
-        # save hooks run on the assembled payload, the write is atomic through
-        # a same-directory temporary file, and save duration and size are
-        # logged as runtime metrics.
         if trainer.module is None:
             raise RuntimeError("ModelCheckpoint requires an attached Trainer module.")
         self._last_global_step_saved = trainer.global_step
@@ -461,10 +364,6 @@ class ModelCheckpoint(Checkpoint):
         module: Module,
         filepath: str | Path
     ) -> None:
-        # Writes a weights-only payload marked partial in its metadata, used
-        # by the exception path when the run failed before the optimizer
-        # existed. The write follows the same atomic temporary-file protocol
-        # as full checkpoints.
         trainer: Trainer = module.trainer
         profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
             trainer.profiler.profile("save_checkpoint")
@@ -477,8 +376,8 @@ class ModelCheckpoint(Checkpoint):
                 module.state_dict()
             )
             checkpoint: CheckpointDict = {
+                "schema_version": 1,
                 "state_dict": model_state_dict,
-                "model_state_dict": model_state_dict,
                 "metadata": {
                     "torch_version": str(torch.__version__),
                     "partial": True
@@ -491,11 +390,11 @@ class ModelCheckpoint(Checkpoint):
                 checkpoint
             )
 
-            trainer.strategy.checkpoint.save(
+            trainer._checkpoint_connector.save(
                 checkpoint,
                 filepath,
                 None,
-                trainer.global_rank
+                False
             )
 
     def _update_top_k(
@@ -503,10 +402,6 @@ class ModelCheckpoint(Checkpoint):
         score: torch.Tensor,
         filepath: str | Path
     ) -> None:
-        # Inserts the new checkpoint into the retention set, sorts by score in
-        # the monitored direction, and evicts entries beyond the retention
-        # count, deleting their files unless a file is the recorded best path.
-        # Unbounded retention (save_top_k=-1) appends without eviction.
         self.best_k_models[str(filepath)] = score
         if not self.best_k_models:
             return
@@ -909,7 +804,7 @@ class ModelCheckpoint(Checkpoint):
 
     def _remove_checkpoint(self, trainer: Trainer, filepath: str) -> None:
         del self
-        trainer.strategy.checkpoint.remove(filepath, trainer.global_rank)
+        trainer._checkpoint_connector.remove(filepath)
 
     @property
     def every_n_epochs(self) -> int | None:
@@ -933,11 +828,6 @@ class ModelCheckpoint(Checkpoint):
 
     @override
     def on_exception(self, trainer: Trainer, module: Module, exception: BaseException) -> None:
-        # Optional last-resort save on run failure, restricted to rank zero
-        # during fit. A full checkpoint is attempted when the optimizer
-        # exists; otherwise the partial weights-only form is written. A
-        # failure while saving is logged and suppressed so the original
-        # exception continues to propagate.
         if trainer.fast_dev_run or not self.save_on_exception:
             return
         if not is_rank_zero():
@@ -971,9 +861,6 @@ class ModelCheckpoint(Checkpoint):
 
     @property
     def state_key(self) -> str:
-        # Qualifies the checkpoint identity with monitor, direction, and both
-        # cadence options so differently configured instances persist their
-        # retention state independently.
         return self._generate_state_key(
             monitor=self.monitor,
             mode=self.mode,
@@ -988,9 +875,6 @@ class ModelCheckpoint(Checkpoint):
 
     @override
     def state_dict(self) -> StateDict:
-        # Persists the selection state: best score and path, the retained
-        # top-k set with stringified paths, the collision counter, and the
-        # step cadence for inspection.
         state_dict: StateDict = {
             "monitor": self.monitor,
             "best_model_score": self.best_model_score,
@@ -1006,10 +890,6 @@ class ModelCheckpoint(Checkpoint):
 
     @override
     def load_state_dict(self, state_dict: StateDict) -> None:
-        # Restores the selection state, then applies the cross-directory
-        # protection: when any restored top-k path resolves outside the
-        # current checkpoint directory, the retention state is cleared so
-        # eviction can never delete files that belong to another directory.
         best_model_path_value: StateValue = state_dict.get("best_model_path", "")
         if isinstance(best_model_path_value, str):
             self.best_model_path = best_model_path_value
@@ -1063,7 +943,6 @@ class ModelCheckpoint(Checkpoint):
 
     @override
     def __repr__(self) -> str:
-        # Compact configuration line for logs and interactive debugging.
         return (
             f"ModelCheckpoint("
             f"monitor={self.monitor!r}, "

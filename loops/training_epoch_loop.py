@@ -68,6 +68,7 @@ from syntheticmind.utilities.types import (
     Batch,
     CheckpointDict,
     ClipAlgorithm,
+    DataLoaderState,
     PrecisionType,
     StepOutput
 )
@@ -190,7 +191,7 @@ class TrainingEpochLoop(Loop):
         self._resume_rng_state: CheckpointDict | None = None
         self._resume_checkpoint_rng_state: CheckpointDict | None = None
         self._combined_loader_state_restored: bool = False
-        self._completed_loader_states: list[dict[str, object]] = []
+        self._completed_loader_states: list[DataLoaderState] = []
         self._use_completed_loader_states: bool = False
         self.is_last_batch: bool = False
 
@@ -207,7 +208,7 @@ class TrainingEpochLoop(Loop):
         self._resume_rng_state = None
         self._resume_checkpoint_rng_state = None
         self._combined_loader_state_restored: bool = False
-        self._completed_loader_states: list[dict[str, object]] = []
+        self._completed_loader_states: list[DataLoaderState] = []
         self._use_completed_loader_states: bool = False
 
     def run(self) -> None:
@@ -221,13 +222,15 @@ class TrainingEpochLoop(Loop):
         # flushes any accumulated gradients and epoch metrics are dispatched.
         self.validation_ran_this_epoch: bool = False
 
-        from syntheticmind.state.checkpoint_state import CheckpointState
-
         if self._resume_rng_state is not None:
-            CheckpointState._restore_rng_states(self._resume_rng_state)
+            self.trainer._checkpoint_connector.restore_rng_state(
+                self._resume_rng_state
+            )
             self._resume_rng_state: CheckpointDict | None = None
 
-        self._epoch_start_rng_state: CheckpointDict | None = CheckpointState._collect_rng_states()
+        self._epoch_start_rng_state: CheckpointDict | None = (
+            self.trainer._checkpoint_connector.collect_rng_state()
+        )
 
         trainer: Trainer = self.trainer
         module: Module | None = trainer.module
@@ -282,7 +285,7 @@ class TrainingEpochLoop(Loop):
             and not loader_is_sized
         )
         if self._use_completed_loader_states:
-            self._completed_loader_states: list[dict[str, object]] = (
+            self._completed_loader_states: list[DataLoaderState] = (
                 combined_loader._state_dicts()
             )
         dataloader_iterator_start_time: float = time.perf_counter()
@@ -336,7 +339,7 @@ class TrainingEpochLoop(Loop):
             if batch_idx < skip_batches:
                 continue
             if self._resume_checkpoint_rng_state is not None:
-                CheckpointState._restore_rng_states(
+                self.trainer._checkpoint_connector.restore_rng_state(
                     self._resume_checkpoint_rng_state
                 )
                 self._resume_checkpoint_rng_state = None
@@ -456,8 +459,8 @@ class TrainingEpochLoop(Loop):
                     raise RuntimeError(
                         "Stateful training data did not produce a loader-state snapshot."
                     )
-                self._completed_loader_states: list[dict[str, object]] = cast(
-                    list[dict[str, object]],
+                self._completed_loader_states: list[DataLoaderState] = cast(
+                    list[DataLoaderState],
                     fetched_loader_states
                 )
             if self.is_last_batch:
@@ -523,7 +526,7 @@ class TrainingEpochLoop(Loop):
                 break
 
         if self._resume_checkpoint_rng_state is not None:
-            CheckpointState._restore_rng_states(
+            self.trainer._checkpoint_connector.restore_rng_state(
                 self._resume_checkpoint_rng_state
             )
             self._resume_checkpoint_rng_state = None

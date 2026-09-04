@@ -235,3 +235,12 @@
     3. Sanity validation must clear every observable metric view after execution so early diagnostic batches cannot alter checkpoint ranking, early stopping, progress output, or experiment records.
     4. Logger selection, default version discovery, and hyperparameter emission share destination identity and therefore belong to the connector rather than a free configuration module.
     5. Multiprocessing launch must transfer all three metric views and the last displayed stage as one observation snapshot; transferring only public logged metrics loses callback and progress semantics.
+
+| Memory | Checkpoint Trajectory Ownership | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
+
+    1. A resumable checkpoint is a trajectory aggregate, not a model-weight file: optimizer, scheduler, callbacks, DataModule, precision, loop progress, loader cursor, random streams, epoch, and global step must share one coordinator.
+    2. Strategy owns the representation of model and optimizer state because sharding depends on execution topology; the Trainer connector owns when that representation joins the remaining trajectory and in which order it restores.
+    3. `CheckpointIO` owns transport and atomic persistence but must not interpret training lifecycle state. `ModelCheckpoint` owns cadence and retention but must not construct a competing payload.
+    4. A stateless class named `CheckpointState` obscures behavior and lifecycle. Path preload caches, user-managed selection, continuation coordinates, and schema validation prove that checkpoint coordination is a live connector responsibility.
+    5. Private checkpoints require one explicit schema version and one canonical key per semantic field. Emitting singular and plural aliases increases ambiguity and restoration branches without serving current SyntheticMind consumers.
+    6. Full, sharded, asynchronous, weights-only, mid-epoch, and failure-atomic paths must be verified separately because success in one persistence representation does not prove another.

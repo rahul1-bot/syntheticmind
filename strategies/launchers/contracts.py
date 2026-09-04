@@ -7,7 +7,7 @@ import torch
 from pydantic import BaseModel, ConfigDict
 
 from syntheticmind.utilities.types import (
-    CheckpointDict,
+    DataLoaderState,
     DataLoaderSource,
     ModelOutput,
     RunningStage,
@@ -104,12 +104,10 @@ class _WorkerOutput(BaseModel):
     total_val_batches: list[int | None] | None
     total_test_batches: list[int | None] | None
     total_predict_batches: list[int | None] | None
-    train_dataloader_states: list[CheckpointDict]
+    train_dataloader_states: list[DataLoaderState]
     train_dataloader_state_active: bool
     train_dataloader_batches_completed: int
     train_total_batch_idx: int
     received_sigterm: bool
     is_last_batch: bool
     global_state: _GlobalState
-    CheckpointDict,
-    DataLoaderSource,

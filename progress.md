@@ -213,3 +213,17 @@
     2. The next bounded phase must establish the Trainer checkpoint connector as the only full-trajectory coordinator while preserving Strategy-specific model and optimizer state semantics and `CheckpointIO` storage ownership.
     3. The behavior-rich `state/checkpoint_state.py` and the Strategy-local class named `_CheckpointConnector` must lose their competing connector identities; model-parallel sharded publication remains an independent persistence mechanism only where distributed state requires it.
     4. Verification must cover full and weights-only save, best and last selection, strict and relaxed restore, optimizer and scheduler continuation, callbacks, DataModule, precision, loops, random state, stateful loaders, async I/O, full and sharded model parallelism, failure atomicity, and launchers.
+
+| Progress Complete | Checkpoint Connector Reconstruction | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
+
+    1. ✅ One Trainer connector now owns checkpoint selection, schema, payload assembly, component restoration, random streams, loop and loader continuation, storage dispatch, and synchronization.
+    2. ✅ The former checkpoint state namespace and Strategy checkpoint-connector identity were removed; Strategy checkpoint representation and storage I/O remain subordinate boundaries with distinct semantics.
+    3. ✅ Checkpoints use one strict schema version and canonical field set without duplicated legacy aliases, while weights-only artifacts omit optimizer, scheduler, callback, precision, and random state.
+    4. ✅ Best, last, user-managed, asynchronous, stateful-loader, DDP launcher, full model-parallel, sharded model-parallel, invalid-schema, and failure-atomic publication paths pass.
+
+| Progress Active | Optimization Execution Reconstruction | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
+
+    1. `core/optimizer.py` still mixes model-facing optimizer vocabulary, configuration parsing, a managed wrapper, mock optimizer behavior, module functions, a callable closure dependency, dynamic class mutation, and broad annotations.
+    2. The training epoch loop still owns automatic closure construction, manual backward, gradient accumulation, optimizer stepping, clipping, and scheduler cadence in one oversized class rather than recognized automatic and manual optimization modes.
+    3. The next phase must keep `core/optimizer.py` as the model-facing optimizer contract and place execution under `loops/optimization/automatic.py` and `manual.py`, with Strategy controlling setup order and precision controlling numerical stepping.
+    4. Verification must cover closure semantics, automatic and manual optimization, multiple optimizers, accumulation tails, clipping, mixed precision, step and plateau schedulers, checkpoint continuation, DDP synchronization, spawn, fork, and model parallelism.

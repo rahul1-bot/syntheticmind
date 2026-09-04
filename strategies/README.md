@@ -23,4 +23,4 @@ Strategy
 
 Files are admitted by ML or distributed-systems concepts, not by line-count pressure. Shared behavior remains on `Strategy` or `ParallelStrategy`; concrete strategy modules contain only behavior that changes the selected execution algorithm. Internal implementation mechanisms do not become public strategy concepts merely because they are reusable.
 
-The existing strategy-checkpoint component and model-parallel checkpointing package remain private transitional machinery. Their final ownership is the Trainer checkpoint connector for full-trajectory coordination, the selected Strategy for topology-specific state representation, and `CheckpointIO` for storage transport.
+`checkpoint.py` defines the private Strategy checkpoint contract and ordinary single-file state implementation. The model-parallel checkpointing package supplies the topology-specific distributed implementation. Full-trajectory assembly, path selection, restoration order, and resume state belong exclusively to the Trainer checkpoint connector; `CheckpointIO` owns storage transport.

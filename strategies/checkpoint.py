@@ -75,7 +75,7 @@ class StrategyCheckpoint(Protocol):
     def configured_checkpoint_io(self) -> CheckpointIO | None: ...
 
 
-class _CheckpointConnector(StrategyCheckpoint):
+class _SingleFileCheckpoint(StrategyCheckpoint):
     def __init__(self, checkpoint_io: CheckpointIO | None) -> None:
         if checkpoint_io is not None:
             self._validate_checkpoint_io(checkpoint_io)
@@ -168,10 +168,7 @@ class _CheckpointConnector(StrategyCheckpoint):
         strict: bool,
         restore_optimizers: bool
     ) -> None:
-        state_dict: CheckpointValue | None = checkpoint.get(
-            "state_dict",
-            checkpoint.get("model_state_dict")
-        )
+        state_dict: CheckpointValue | None = checkpoint.get("state_dict")
         if not isinstance(state_dict, Mapping):
             raise KeyError("Checkpoint is missing a model `state_dict`.")
         incompatible_keys: tuple[list[str], list[str]] = cast(
@@ -224,10 +221,7 @@ class _CheckpointConnector(StrategyCheckpoint):
         self,
         checkpoint: Mapping[str, CheckpointValue]
     ) -> None:
-        optimizer_states: CheckpointValue | None = checkpoint.get(
-            "optimizer_states",
-            checkpoint.get("optimizer_state_dicts")
-        )
+        optimizer_states: CheckpointValue | None = checkpoint.get("optimizer_states")
         if isinstance(optimizer_states, list):
             if len(optimizer_states) != len(self._optimizers):
                 raise KeyError(
@@ -243,10 +237,6 @@ class _CheckpointConnector(StrategyCheckpoint):
                 if not isinstance(serialized_optimizer_state, dict):
                     raise TypeError("Optimizer checkpoint state must be a dictionary.")
                 optimizer.load_state_dict(cast(OptimizerState, serialized_optimizer_state))
-            return
-        optimizer_state: CheckpointValue | None = checkpoint.get("optimizer_state_dict")
-        if isinstance(optimizer_state, dict) and len(self._optimizers) == 1:
-            self._optimizers[0].load_state_dict(cast(OptimizerState, optimizer_state))
             return
         if self._optimizers:
             raise KeyError("Checkpoint is missing resumable optimizer state.")

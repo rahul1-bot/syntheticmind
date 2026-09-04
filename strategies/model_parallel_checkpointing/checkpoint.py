@@ -9,7 +9,7 @@ from syntheticmind.plugins.io import (
     CheckpointPath,
     CheckpointStorageOptions
 )
-from syntheticmind.strategies.checkpoint_connector import StrategyCheckpoint
+from syntheticmind.strategies.checkpoint import StrategyCheckpoint
 from syntheticmind.strategies.model_parallel_checkpointing.checkpoint_io import (
     ModelParallelCheckpointFormat,
     _ModelParallelCheckpointIO

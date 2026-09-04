@@ -225,3 +225,13 @@
     4. Callback, logged, and progress views remain distinct; sanity results do not leak into live views, public properties return defensive mappings, and launcher transfer preserves the selected worker's observable state.
     5. The connector contains no broad annotation, free function, source prose, custom callable object, or unannotated assignment and remains below the project class threshold without artificial fragments.
     6. Local metric views, CSV metrics and hyperparameters, distributed reductions, TorchMetrics, DDP stage transitions, spawn, fork, progress rendering, and launcher state transfer pass after the migration.
+
+| Architecture Decision | Checkpoint Connector Ownership | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
+
+    1. The Trainer checkpoint connector is now the sole full-trajectory coordinator for checkpoint path selection, canonical payload construction, Strategy state loading, scheduler and callback restoration, DataModule and precision state, random streams, loop and loader continuation, storage dispatch, and synchronization.
+    2. The former behavior-rich `CheckpointState` namespace class was deleted. Its assembly, restoration, random-state, coordinate, DataModule, and loader-continuation behavior moved onto the live connector that owns checkpoint lifecycle state.
+    3. Strategy-side `checkpoint_connector.py` was renamed to `checkpoint.py`, and its ordinary implementation is `_SingleFileCheckpoint`; Connector terminology now refers only to Trainer composition rather than Strategy-local state representation.
+    4. SyntheticMind emits and accepts one private schema with `schema_version=1`, `state_dict`, plural optimizer and scheduler state, callbacks, component state, loop continuation, random state, and metadata. Historical duplicate singular, alias, and unversioned forms are rejected.
+    5. `ModelCheckpoint` retains save cadence and retention policy, Strategy retains topology-specific state representation, and `CheckpointIO` retains storage transport. Neither callback nor Strategy independently coordinates the full training trajectory.
+    6. The cohesive connector exceeds the generic source-size budget under the explicit concept-integrity rule; splitting path, payload, restoration, random streams, and continuation would recreate competing checkpoint owners.
+    7. Best and last selection, user-managed paths, weights-only artifacts, strict schema rejection, asynchronous storage, callback and hyperparameter state, exact stateful-loader continuation, DDP spawn and fork, full and sharded model-parallel resume, and injected distributed publication failure pass.

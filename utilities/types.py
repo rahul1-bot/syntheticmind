@@ -42,6 +42,7 @@ __all__: list[str] = [
     "DeviceTransferable",
     "Batch",
     "DataLoaderSource",
+    "DataLoaderState",
     "StepArgument",
     "StepOutput",
     "TrainingStepOutput",
@@ -141,6 +142,8 @@ type DataLoaderSource = (
     | list[DataLoaderSource]
     | tuple[DataLoaderSource, ...]
 )
+
+type DataLoaderState = dict[str, CheckpointValue]
 
 type StepArgument = Batch | int
 

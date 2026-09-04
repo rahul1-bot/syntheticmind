@@ -9,9 +9,9 @@ from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.core.module import Module
 from syntheticmind.plugins.io import CheckpointIO
 from syntheticmind.precision.precision import Precision
-from syntheticmind.strategies.checkpoint_connector import (
+from syntheticmind.strategies.checkpoint import (
     StrategyCheckpoint,
-    _CheckpointConnector
+    _SingleFileCheckpoint
 )
 from syntheticmind.strategies.launcher import _ProcessLauncher
 from syntheticmind.utilities.model_initialization import _ModuleInitializer
@@ -51,7 +51,7 @@ class Strategy:
         self.is_distributed: bool = False
         self.model: nn.Module | None = None
         self.optimizers: list[torch.optim.Optimizer] = []
-        self.checkpoint: StrategyCheckpoint = _CheckpointConnector(checkpoint_io)
+        self.checkpoint: StrategyCheckpoint = _SingleFileCheckpoint(checkpoint_io)
         self.precision_plugin: Precision = precision_plugin or Precision()
         self.configured_precision_plugin: Precision | None = precision_plugin
         self._module: Module | None = None

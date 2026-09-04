@@ -1,14 +1,7 @@
-# syntheticmind.state: The Trainer and Checkpoint State
+# syntheticmind.state: Transitional Trainer State
 
-`state/` defines the serializable state containers that make runs resumable. Everything a checkpoint restores is declared here, so resumability is a property of explicit state objects rather than of scattered attributes.
+`state/` temporarily contains only `TrainerState`, the live stage, status, epoch, global-step, interruption, and stopping state advanced by Trainer and loops.
 
-| Module | Contents |
-|---|---|
-| `trainer_state.py` | `TrainerState`, the live progress of a run: the current stage, the epoch and global-step counters, and the stopping status. The loops advance it, and checkpoint save serializes it. |
-| `checkpoint_state.py` | `CheckpointState`, the complete durable state of a run: model parameters, optimizer and scheduler states, callback states, datamodule state, trainer progress counters, and the random-number-generator state for Python, NumPy, and PyTorch. |
+Checkpoint payload assembly and restoration are not state-container responsibilities. They now belong to `trainer/connectors/checkpoint_connector.py`, which coordinates Strategy-specific model and optimizer state, schedulers, callbacks, DataModule state, precision state, loop and loader continuation, and random streams.
 
-Restoring a `CheckpointState` continues a run from its last durable point with the same optimization trajectory and the same randomness stream.
-
-## Related Components
-
-The persistence functions live in `../utilities/checkpoint.py`. The durable training checkpoints of the study and its Retained Project Checkpoints are instances of this state contract.
+`TrainerState` will move to `trainer/states.py` when the canonical Trainer module leaves `core/`; the top-level `state/` package then disappears.

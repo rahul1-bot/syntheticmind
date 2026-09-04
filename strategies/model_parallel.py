@@ -13,7 +13,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel
 from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.precision.precision import Precision
-from syntheticmind.strategies.checkpoint_connector import StrategyCheckpoint
+from syntheticmind.strategies.checkpoint import StrategyCheckpoint
 from syntheticmind.strategies.model_parallel_checkpointing.checkpoint import (
     _ModelParallelCheckpoint
 )

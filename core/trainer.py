@@ -46,7 +46,6 @@ from syntheticmind.plugins import Plugin
 from syntheticmind.plugins.io import CheckpointStorageOptions
 from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
-from syntheticmind.state.checkpoint_state import CheckpointState
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.launcher import _ProcessLauncher
@@ -56,6 +55,7 @@ from syntheticmind.trainer.connectors.accelerator_connector import (
     _AcceleratorConnector
 )
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
+from syntheticmind.trainer.connectors.checkpoint_connector import _CheckpointConnector
 from syntheticmind.trainer.connectors.data_connector import _DataConnector
 from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
     _LoggerConnector
@@ -79,6 +79,7 @@ from syntheticmind.utilities.types import (
     CheckpointDict,
     CheckpointValue,
     ClipAlgorithm,
+    DataLoaderState,
     DataLoaderSource,
     HyperparameterDict,
     ModelOutput,
@@ -428,8 +429,6 @@ class Trainer:
             if resume_from_checkpoint is not None
             else None
         )
-        self._ckpt_path: str | Path | None = None
-        self._ckpt_path_user_managed: bool = False
 
         if accumulate_grad_batches < 1:
             raise MisconfigurationError("accumulate_grad_batches must be >= 1")
@@ -442,6 +441,11 @@ class Trainer:
             resolved_enable_progress_bar,
             resolved_enable_model_summary,
             max_time
+        )
+        self._checkpoint_connector: _CheckpointConnector = _CheckpointConnector(
+            self.strategy,
+            self._callback_connector,
+            fast_dev_run_enabled
         )
 
         self._logger_connector: _LoggerConnector = _LoggerConnector(
@@ -514,10 +518,6 @@ class Trainer:
         self.optimizer: torch.optim.Optimizer | None = None
         self.scheduler: _SchedulerInstance | None = None
         self.scheduler_config: LRSchedulerConfig | None = None
-        self._last_train_dataloader_states: list[dict[str, object]] = []
-        self._train_dataloader_state_active: bool = False
-        self._last_train_dataloader_batches_completed: int = 0
-        self._last_train_total_batch_idx: int = -1
         self._dataloader_fetch_time_seconds: dict[RunningStage, float] = {}
         self._dataloader_iterator_creation_time_seconds: dict[RunningStage, float] = {}
         self._active_exception: BaseException | None = None
@@ -554,7 +554,7 @@ class Trainer:
         requested_checkpoint_path: str | Path | None = ckpt_path
         if (
             requested_checkpoint_path is None
-            and not self._ckpt_path_user_managed
+            and not self._checkpoint_connector.user_managed
         ):
             requested_checkpoint_path = self.resume_from_checkpoint
         resume_path: str | Path | None = self._select_checkpoint_path(
@@ -595,10 +595,7 @@ class Trainer:
         module._reset_logging_state()
         self._reset_progress_bar_metrics()
         self._data_connector.reset_fit()
-        self._last_train_dataloader_states: list[dict[str, object]] = []
-        self._train_dataloader_state_active: bool = False
-        self._last_train_dataloader_batches_completed: int = 0
-        self._last_train_total_batch_idx: int = -1
+        self._checkpoint_connector.reset_training_continuation()
         self.fit_loop.should_stop = False
         if self.fit_loop.epoch_loop is not None:
             self.fit_loop.epoch_loop.reset_on_run()
@@ -632,16 +629,16 @@ class Trainer:
             preloaded_checkpoint: CheckpointDict | None = None
             if resume_path is not None:
                 preloaded_checkpoint: CheckpointDict | None = (
-                    self.strategy.checkpoint.load_metadata(
+                    self._checkpoint_connector.load_metadata(
                         resume_path,
                         weights_only
                     )
                 )
-                resume_epoch: int = CheckpointState._integer_value(
+                resume_epoch: int = self._checkpoint_connector.integer_value(
                     preloaded_checkpoint.get("epoch"),
                     0
                 )
-                resume_global_step: int = CheckpointState._integer_value(
+                resume_global_step: int = self._checkpoint_connector.integer_value(
                     preloaded_checkpoint.get("global_step"),
                     0
                 )
@@ -654,7 +651,7 @@ class Trainer:
                 module._current_epoch = resume_epoch
                 module._global_step = resume_global_step
                 if datamodule is not None:
-                    CheckpointState.load_datamodule_state(
+                    self._checkpoint_connector.load_datamodule_state(
                         preloaded_checkpoint,
                         datamodule
                     )
@@ -1596,7 +1593,7 @@ class Trainer:
         self.strategy.optimizers: list[torch.optim.Optimizer] = list(
             connected_optimizers
         )
-        self.strategy.checkpoint.connect_optimizers(self.strategy.optimizers)
+        self._checkpoint_connector.connect_optimizers(self.strategy.optimizers)
         return module, connected_optimizers, connected_lr_schedulers
 
     def _call_on_validation_model_zero_grad(self, module: Module) -> None:
@@ -1639,7 +1636,7 @@ class Trainer:
         restore_datamodule_state: bool = True
     ) -> None:
         loaded_checkpoint: CheckpointDict = (
-            self.strategy.checkpoint.load(path, weights_only)
+            self._checkpoint_connector.load(path, weights_only)
             if checkpoint is None
             else checkpoint
         )
@@ -1651,7 +1648,7 @@ class Trainer:
         )
         self._call_callback_hooks(module, "on_load_checkpoint", loaded_checkpoint)
         self.precision_plugin.on_load_checkpoint(loaded_checkpoint)
-        self.strategy.checkpoint.restore(
+        self._checkpoint_connector.restore_strategy_state(
             loaded_checkpoint,
             strict=module.strict_loading,
             restore_optimizers=self.state.stage == "fit"
@@ -1661,32 +1658,28 @@ class Trainer:
         completed_batches: int
         total_batch_idx: int
         epoch_rng_state: CheckpointDict | None
-        epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state = CheckpointState.restore(
-            checkpoint=loaded_checkpoint,
-            model=module,
-            optimizers=(self.optimizers if self.state.stage == "fit" else []),
-            scheduler=(self.scheduler if self.state.stage == "fit" else None),
-            schedulers=(self.schedulers if self.state.stage == "fit" else []),
-            callbacks=self.callbacks,
-            datamodule=self.datamodule,
-            precision_plugin=self.precision_plugin,
-            restore_datamodule_state=restore_datamodule_state,
-            strict=module.strict_loading,
-            restore_model=False,
-            restore_optimizers=False
+        epoch, global_step, completed_batches, total_batch_idx, epoch_rng_state = (
+            self._checkpoint_connector.restore_training_state(
+                checkpoint=loaded_checkpoint,
+                scheduler=(self.scheduler if self.state.stage == "fit" else None),
+                schedulers=(self.schedulers if self.state.stage == "fit" else []),
+                datamodule=self.datamodule,
+                precision_plugin=self.precision_plugin,
+                restore_datamodule_state=restore_datamodule_state
+            )
         )
-        combined_loader_states: list[dict[str, object]] = (
-            CheckpointState.combined_loader_states(loaded_checkpoint)
+        combined_loader_states: list[DataLoaderState] = (
+            self._checkpoint_connector.combined_loader_states(loaded_checkpoint)
             if self.state.stage == "fit"
             else []
         )
         if combined_loader_states:
-            self._last_train_dataloader_states: list[dict[str, object]] = (
+            self._checkpoint_connector.train_dataloader_states: list[DataLoaderState] = (
                 combined_loader_states
             )
-            self._train_dataloader_state_active: bool = True
-            self._last_train_dataloader_batches_completed: int = completed_batches
-            self._last_train_total_batch_idx: int = total_batch_idx
+            self._checkpoint_connector.train_dataloader_state_active: bool = True
+            self._checkpoint_connector.train_dataloader_batches_completed: int = completed_batches
+            self._checkpoint_connector.train_total_batch_idx: int = total_batch_idx
             if self._data_connector.train_combined_loader is not None:
                 self._data_connector.train_combined_loader._load_state_dicts(
                     combined_loader_states
@@ -1726,104 +1719,12 @@ class Trainer:
         model_provided: bool,
         ckpt_path_provided: bool
     ) -> str | Path | None:
-        if self._ckpt_path_user_managed:
-            if not ckpt_path_provided:
-                ckpt_path = self._ckpt_path
-            elif ckpt_path != self._ckpt_path:
-                if self.is_global_zero:
-                    warnings.warn(
-                        f"`trainer.ckpt_path={self._ckpt_path!r}` is overridden by "
-                        f"`Trainer.{stage}(ckpt_path={ckpt_path!r})`.",
-                        UserWarning,
-                        stacklevel=3
-                    )
-                self._ckpt_path_user_managed = False
-        if ckpt_path is None and not model_provided and stage != "fit":
-            ckpt_path = "best"
-            if self.is_global_zero:
-                warnings.warn(
-                    f"`Trainer.{stage}(ckpt_path=None)` was called without a model; "
-                    "the best checkpoint from the previous fit will be loaded. Pass "
-                    "a model to use its current weights, or set `ckpt_path` explicitly.",
-                    UserWarning,
-                    stacklevel=3
-                )
-        if ckpt_path is None:
-            self._ckpt_path = None
-            return None
-        if isinstance(ckpt_path, str) and ckpt_path == "best":
-            model_checkpoint_callbacks: list[ModelCheckpoint] = [
-                callback
-                for callback in self.checkpoint_callbacks
-                if isinstance(callback, ModelCheckpoint)
-            ]
-            if len(model_checkpoint_callbacks) > 1 and self.is_global_zero:
-                warnings.warn(
-                    f"`Trainer.{stage}(ckpt_path='best')` received multiple "
-                    "ModelCheckpoint callbacks; the first callback owns best-checkpoint "
-                    "selection.",
-                    UserWarning,
-                    stacklevel=3
-                )
-            if model_checkpoint_callbacks:
-                best_model_path: str = model_checkpoint_callbacks[0].best_model_path
-                if best_model_path:
-                    self._ckpt_path = best_model_path
-                    return best_model_path
-            if self.fast_dev_run:
-                raise MisconfigurationError(
-                    f"`Trainer.{stage}(ckpt_path='best')` is unavailable with "
-                    "`fast_dev_run=True`; pass an exact checkpoint path."
-                )
-            raise MisconfigurationError(
-                f"`Trainer.{stage}(ckpt_path='best')` requires the first "
-                "ModelCheckpoint callback to have a saved `best_model_path`."
-            )
-        if isinstance(ckpt_path, str) and ckpt_path == "last":
-            candidates: list[str] = []
-            for callback in self.checkpoint_callbacks:
-                if not isinstance(callback, ModelCheckpoint):
-                    continue
-                if callback.last_model_path:
-                    last_model_path: str = callback.last_model_path
-                    if self.strategy.checkpoint.is_checkpoint_path(last_model_path):
-                        candidates.append(last_model_path)
-                directory: str = callback._resolve_dirpath(self)
-                for candidate in list_directory(directory):
-                    candidate_name: str = basename(candidate)
-                    if (
-                        candidate_name.startswith("last")
-                        and candidate_name.endswith(".ckpt")
-                        and self.strategy.checkpoint.is_checkpoint_path(candidate)
-                    ):
-                        candidates.append(candidate)
-            unique_candidates: set[str] = set(candidates)
-            if not unique_candidates:
-                self._ckpt_path = None
-                if self.is_global_zero:
-                    warnings.warn(
-                        f"`Trainer.{stage}(ckpt_path='last')` found no last checkpoint; "
-                        "no checkpoint will be loaded. Configure "
-                        "`ModelCheckpoint(save_last=True)` to enable it.",
-                        UserWarning,
-                        stacklevel=3
-                    )
-                return None
-            path: str = max(
-                unique_candidates,
-                key=modified_time
-            )
-            self._ckpt_path = path
-            return path
-        if isinstance(ckpt_path, str) and ckpt_path in {"hpc", "registry"}:
-            raise MisconfigurationError(
-                f"`ckpt_path={ckpt_path!r}` is unavailable without its corresponding integration."
-            )
-        path: str = normalize_path(ckpt_path)
-        if not self.strategy.checkpoint.is_checkpoint_path(path):
-            raise FileNotFoundError(f"Checkpoint not found: {path}")
-        self._ckpt_path = path
-        return path
+        return self._checkpoint_connector.select_path(
+            ckpt_path,
+            stage,
+            model_provided,
+            ckpt_path_provided
+        )
 
     def _resolve_checkpoint_callback_directories(self) -> None:
         for callback in self.checkpoint_callbacks:
@@ -1863,33 +1764,35 @@ class Trainer:
         is_mid_epoch: bool = has_batch_progress and (
             self._is_mid_epoch_validation or not is_validation_checkpoint
         )
-        combined_loader_states: list[dict[str, object]] = []
+        combined_loader_states: list[DataLoaderState] = []
         if (
             is_mid_epoch
             and self._data_connector.train_combined_loader is not None
         ):
-            combined_loader_states: list[dict[str, object]] = (
+            combined_loader_states: list[DataLoaderState] = cast(
+                list[DataLoaderState],
                 epoch_loop._completed_loader_states
                 if epoch_loop is not None
                 and epoch_loop._use_completed_loader_states
                 else self._data_connector.train_combined_loader._state_dicts()
             )
-        elif self._train_dataloader_state_active:
-            combined_loader_states: list[dict[str, object]] = (
-                self._last_train_dataloader_states
+        elif self._checkpoint_connector.train_dataloader_state_active:
+            combined_loader_states: list[DataLoaderState] = cast(
+                list[DataLoaderState],
+                self._checkpoint_connector.train_dataloader_states
             )
         checkpoint_completed_batches: int = (
             completed_batches
             if is_mid_epoch
-            else self._last_train_dataloader_batches_completed
-            if self._train_dataloader_state_active
+            else self._checkpoint_connector.train_dataloader_batches_completed
+            if self._checkpoint_connector.train_dataloader_state_active
             else 0
         )
         checkpoint_total_batch_idx: int = (
             total_batch_idx
             if total_batch_idx >= 0
-            else self._last_train_total_batch_idx
-            if self._train_dataloader_state_active
+            else self._checkpoint_connector.train_total_batch_idx
+            if self._checkpoint_connector.train_dataloader_state_active
             else -1
         )
         epoch: int = self.state.current_epoch
@@ -1910,29 +1813,25 @@ class Trainer:
                 optimizer_states.append(
                     cast(
                         CheckpointValue,
-                        self.strategy.checkpoint.optimizer_state(optimizer)
+                        self._checkpoint_connector.optimizer_state(optimizer)
                     )
                 )
-        checkpoint: CheckpointDict = CheckpointState.build(
+        checkpoint: CheckpointDict = self._checkpoint_connector.build(
             model=module,
-            optimizers=self.optimizers,
             scheduler=self.scheduler,
             schedulers=self.schedulers,
             epoch=epoch,
             global_step=self.state.global_step,
-            callbacks=self.callbacks,
             datamodule=self.datamodule,
             completed_batches=checkpoint_completed_batches,
             total_batch_idx=checkpoint_total_batch_idx,
             epoch_rng_state=epoch_rng_state if is_mid_epoch else None,
             combined_loader_states=combined_loader_states,
-            strategy_name=type(self.strategy).__name__,
-            world_size=self.world_size,
             precision_plugin=self.precision_plugin,
             weights_only=weights_only,
             model_state_dict=cast(
                 CheckpointValue,
-                self.strategy.checkpoint.model_state_dict()
+                self._checkpoint_connector.model_state_dict()
             ),
             optimizer_states=optimizer_states
         )
@@ -1983,17 +1882,12 @@ class Trainer:
         )
         with profile_context:
             checkpoint: CheckpointDict = self._build_checkpoint(weights_only)
-            self.strategy.checkpoint.save(
+            self._checkpoint_connector.save(
                 checkpoint,
                 filepath,
                 storage_options,
-                self.global_rank
+                synchronize
             )
-            if synchronize:
-                if self._profiler_is_setup:
-                    self._call_strategy_hook("barrier", self.strategy.barrier)
-                else:
-                    self.strategy.barrier()
 
     def _handle_exception(
         self,
@@ -2068,7 +1962,7 @@ class Trainer:
         self._attempt_teardown("strategy.teardown", self.strategy.teardown, failures)
         self._attempt_teardown(
             "checkpoint.teardown",
-            self.strategy.checkpoint.teardown,
+            self._checkpoint_connector.teardown,
             failures
         )
         self._attempt_teardown(
@@ -2349,14 +2243,11 @@ class Trainer:
 
     @property
     def ckpt_path(self) -> str | Path | None:
-        return self._ckpt_path
+        return self._checkpoint_connector.path
 
     @ckpt_path.setter
     def ckpt_path(self, ckpt_path: str | Path | None) -> None:
-        if ckpt_path is not None and not isinstance(ckpt_path, str | Path):
-            raise TypeError("`ckpt_path` must be a string, Path, or None.")
-        self._ckpt_path = ckpt_path
-        self._ckpt_path_user_managed = ckpt_path is not None
+        self._checkpoint_connector.path = ckpt_path
 
     @property
     def logger(self) -> Logger | None:
