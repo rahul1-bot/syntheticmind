@@ -79,14 +79,14 @@
     5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
     6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, nonzero-node multiprocessing rank derivation, tensor-parallel resume, and composable FSDP2 distributed-checkpoint resume pass.
 
-| Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
+| Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 06:30 PM | Name: Ghost |
 
     1. Runtime-checkable Accelerator and ClusterEnvironment contracts define type-level discovery, parsing, topology, availability, naming, and detection through `@classmethod`; concrete implementations explicitly inherit the Protocols and mark every implementation with `@override`.
     2. Trainer accelerator composition belongs to one internal `AcceleratorConnector` covering backend and device parsing, nodes, Strategy, precision, cluster environment, checkpoint I/O, and layer synchronization.
     3. The former temporary topology, plugin-configuration, and resolver objects were removed; a stateful GPU parser owns count, identifier, uniqueness, and availability invariants.
     4. Accelerators own backend discovery, binding, and device-local questions; Strategies own execution semantics; the connector validates their compatibility and injects plugins in deterministic order.
     5. Precision construction covers CPU float16 fallback, model-parallel restrictions, recursive conversion, and the NVIDIA Transformer Engine 2.18 autocast and strict delayed-scaling boundary.
-    6. Trainer remains the sole public composition surface. Class and instance invocation, runtime Protocol conformance, CPU, MPS, unavailable CUDA, precision contexts, layer synchronization, plugin conflicts, DDP launchers, model parallelism, and Transformer Engine behavior pass.
+    6. Trainer remains the sole public composition surface. Runtime Protocol conformance, the zero-invalid-override census, CPU bfloat16 and live MPS float16 mixed training, unavailable CUDA, layer synchronization, plugin conflicts, DDP launchers, model parallelism, and Transformer Engine behavior pass.
 
 | Architecture Decision | Callback Contract, Monitoring, and Connector Ownership | Date: 04 September 2026 | Time: 04:47 PM | Name: Ghost |
 

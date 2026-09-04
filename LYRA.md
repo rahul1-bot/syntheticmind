@@ -112,14 +112,14 @@
     5. Process-group lifetime follows the participating process rather than an individual stage, and one environment owner derives global rank from node and local coordinates consistently for subprocess and multiprocessing launch.
     6. Empty initialization preserves RNG, precision contexts direct construction dtype, meta tensors materialize through reset operations, and exact two-rank tensor-parallel plus composable FSDP2 distributed-checkpoint trajectories pass.
 
-| Strategic Note | Execution Collaborator Reconstruction | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
+| Strategic Note | Execution Collaborator Reconstruction | Date: 04 September 2026 | Time: 06:30 PM | Name: Ghost |
 
     1. Device and cluster-environment type operations use classmethod Protocol obligations with explicit concrete inheritance and overrides; layer synchronization retains its separate structural contract without placeholder behavior.
     2. Device selection has one invariant owner, and resolved topology is an immutable validated boundary rather than a mutable dataclass assembled by a free function.
     3. Precision retains one concrete shared lifecycle while recursive conversion now belongs to that lifecycle directly, avoiding a stateless converter object and duplicate conversion paths.
     4. Transformer Engine is isolated as an optional external adapter and follows the current NVIDIA `autocast` and delayed-scaling contract instead of the historical `fp8_autocast` call shape.
-    5. Runtime evidence covers the local Apple MPS device, CPU true and mixed precision, distributed CPU execution, cluster launch reconstruction, reversible synchronized batch normalization, and the unavailable optional dependency boundary.
-    6. The next phase is optimizer and training-closure ownership, where historical module functions, callable objects, opaque closure returns, and dynamically mutated optimizer classes still violate the governing architecture.
+    5. Runtime evidence covers local MPS float16 mixed precision, CPU bfloat16 mixed and true precision, distributed CPU execution, cluster launch reconstruction, reversible synchronized batch normalization, and the unavailable CUDA boundary.
+    6. The complete project-class audit contains no invalid override marker; the autocast cache context now implements its structural protocol directly without false decorator inheritance.
 
 | Strategic Note | Shared Contract and Override Direction | Date: 04 September 2026 | Time: 05:44 PM | Name: Ghost |
 

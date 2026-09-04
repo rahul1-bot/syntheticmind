@@ -1,5 +1,5 @@
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, ContextDecorator, contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from functools import partial
 from types import TracebackType
 from typing import Literal, cast, override
@@ -22,7 +22,7 @@ from syntheticmind.types import (
 __all__: list[str] = ["MixedPrecision"]
 
 
-class _AutocastCacheContext(ContextDecorator):
+class _AutocastCacheContext:
     def __init__(
         self,
         context_manager: AbstractContextManager[None],
@@ -31,11 +31,9 @@ class _AutocastCacheContext(ContextDecorator):
         self._context_manager: AbstractContextManager[None] = context_manager
         self._clear_cache: bool = clear_cache
 
-    @override
     def __enter__(self) -> None:
         return self._context_manager.__enter__()
 
-    @override
     def __exit__(
         self,
         exception_type: type[BaseException] | None,
