@@ -26,6 +26,37 @@ class CUDAAccelerator(Accelerator):
             return torch.device("cuda", 0)
         return self._device
 
+    @override
+    def get_device_stats(self, device: torch.device) -> dict[str, float]:
+        if device.type != "cuda":
+            raise MisconfigurationError(f"CUDAAccelerator cannot inspect {device}.")
+        device_index: int = (
+            device.index
+            if device.index is not None
+            else torch.cuda.current_device()
+        )
+        memory_statistics: dict[str, int] = torch.cuda.memory_stats(device_index)
+        selected_keys: tuple[str, ...] = (
+            "allocated_bytes.all.current",
+            "allocated_bytes.all.peak",
+            "reserved_bytes.all.current",
+            "reserved_bytes.all.peak",
+            "active_bytes.all.current",
+            "active_bytes.all.peak",
+            "num_alloc_retries",
+            "num_ooms"
+        )
+        statistics: dict[str, float] = {
+            f"cuda/{key}": float(memory_statistics.get(key, 0))
+            for key in selected_keys
+        }
+        free_bytes: int
+        total_bytes: int
+        free_bytes, total_bytes = torch.cuda.mem_get_info(device_index)
+        statistics["cuda/free_bytes"] = float(free_bytes)
+        statistics["cuda/total_bytes"] = float(total_bytes)
+        return statistics
+
     @staticmethod
     @override
     def parse_devices(devices: DeviceInput) -> int | list[int]:

@@ -237,7 +237,7 @@
 
 | Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. EarlyStopping, device statistics, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
+    1. EarlyStopping, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, or persisted-state defects.
     2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose distributed quantities or persisted state remain semantically wrong.
     3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
 
@@ -271,3 +271,10 @@
     3. ✅ CUDA and MPS synchronize before clock reads, recursive tensor cardinalities must agree, and custom batch-size functions have a strict result contract.
     4. ✅ Window and epoch sample, batch, and duration metrics reach callback views and rank-zero logger output.
     5. ✅ CPU accumulation, nested and dynamic cardinality, invalid boundaries, MPS execution, spawned DDP global totals, and tensor-parallel axis probes pass.
+
+| Progress Complete | Accelerator-Owned Device Statistics | Date: 04 September 2026 | Time: 12:58 PM | Name: Ghost |
+
+    1. ✅ Accelerator now owns the device-stat contract, and CPU, CUDA, and MPS implementations expose backend-specific counters through one method.
+    2. ✅ DeviceStatsMonitor supports train, validation, test, and prediction cadence through the selected accelerator without direct CUDA globals.
+    3. ✅ Optional filter keys validate against the live backend, callback metrics remain device-resident, and logger persistence remains rank-zero-owned.
+    4. ✅ CPU, mocked CUDA, live MPS, invalid filters and configuration, local Trainer stages, MPS training, and spawned DDP persistence pass.

@@ -187,3 +187,9 @@
     1. Strategy now distinguishes data-parallel sample replication from total distributed world size, preventing tensor-parallel ranks from inflating throughput.
     2. Training rates include data wait and compute, exclude validation pauses, and synchronize accelerator work before measuring elapsed time.
     3. Accumulation windows count every microbatch while emitting on optimizer progress, with explicit custom cardinality for nonstandard batch structures.
+
+| Strategic Note | Accelerator Statistics Contract | Date: 04 September 2026 | Time: 12:58 PM | Name: Ghost |
+
+    1. Device-stat meaning now belongs to the selected Accelerator, while the callback owns only lifecycle cadence, filtering, metric routing, and rank-zero persistence.
+    2. CPU, CUDA, and MPS expose distinct native counter families without pretending that CUDA globals represent every accelerator.
+    3. Live MPS, source-shaped CUDA, CPU, filter, stage, and spawned DDP evidence establish the current monitoring boundary.

@@ -118,14 +118,13 @@
     5. Checkpoint artifact reading and live-state restoration are separate operations. Metadata may be loaded before model construction, while restoration must occur only after the model and optimizers exist; a bounded preload cache preserves this ordering without duplicate disk reads.
     6. Asynchronous checkpointing requires a main-thread snapshot before worker submission. The snapshot and background save belong to the checkpoint plugin itself and do not justify nested functions, module functions, or a callable wrapper object.
 
-| Memory | Device and Precision Boundary Design | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
+| Memory | Accelerator and Precision Boundary Design | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
 
-    1. Static backend queries do not require an abstract base carrying placeholder methods; a structural accelerator contract preserves custom backend substitution while concrete accelerators retain device-specific binding.
-    2. Integer GPU configuration means a device count, while a string such as `"2"` means the explicit identifier two and `"-1"` means every available device. Conflating numeric strings with counts silently changes placement semantics.
-    3. Frozen resolved configuration requires immutable nested values as well as a frozen outer model; tuple device identifiers prevent mutation that a frozen model containing a list would still permit.
-    4. A recursive tensor-conversion algorithm used only by precision policies belongs on the concrete precision lifecycle. A stateless converter class adds an object and dependency edge without adding an independent boundary.
-    5. Optional-library integration should isolate dynamic imports and attribute adaptation in one adapter. The owning precision policy should expose stable domain configuration rather than leaking arbitrary mappings or module-shaped Protocol collections.
-    6. Current Transformer Engine uses a general `autocast` context with a `recipe` argument, and current FP8 Linear guidance requires both matrix dimensions to be divisible by sixteen. Version checks and adapter tests must encode that current boundary explicitly.
+    1. Static backend queries do not require an abstract implementation base; a structural accelerator contract preserves substitution while concrete accelerators own discovery, parsing, binding, and backend-local observations.
+    2. Integer GPU configuration is a device count, numeric strings are explicit identifiers, and `-1` selects every device; one stateful parser must preserve these distinct meanings.
+    3. Accelerator, Strategy, precision, environment, checkpoint storage, and layer synchronization form one compatibility matrix and therefore require one Trainer connector rather than independent temporary resolver objects.
+    4. Recursive conversion belongs to the concrete precision lifecycle, while optional libraries belong in isolated adapters with stable domain configuration.
+    5. Transformer Engine uses the current autocast recipe API and sixteen-by-sixteen FP8 Linear constraint; version and adapter evidence must encode that boundary.
 
 | Memory | Concept Integrity Versus Mechanical Decomposition | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
 
@@ -135,14 +134,6 @@
     4. The strongest topology test is whether an ML researcher can identify the concept, its lifecycle, and its algorithmic variants without referring to code size. DDP, FSDP, precision, dataloaders, and checkpoints pass; generic runtime, resolver, forwarding, and state-container names require stronger internal evidence.
     5. Package width is harmless when each file is a selectable recognized implementation, as with callbacks or strategies. The same width is architectural debt when files are fragments created to satisfy numeric budgets.
     6. Concept-first decomposition still requires directed dependencies, bounded public surface, explicit state ownership, and runtime evidence; it overrides mechanical splitting, not correctness or maintainability review.
-
-| Memory | Accelerator Connector Admission Evidence | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
-
-    1. Accelerator, device count, node count, Strategy, precision, cluster environment, checkpoint I/O, and synchronized-layer policy form one compatibility matrix during Trainer construction; resolving them independently permits contradictory intermediate states.
-    2. A resolved device list containing live `torch.device` objects is runtime composition state, not a portable Pydantic data model and not an independent topology concept.
-    3. Precision selection cannot be owned by a standalone resolver because validity and fallback depend on the chosen accelerator, Strategy, and explicitly supplied plugin.
-    4. Strategy instances that already configure accelerators or devices must conflict with explicit Trainer values rather than silently choosing one source, while default `auto` values permit Strategy-owned configuration.
-    5. A connector earns its class and module through cross-component ordering and compatibility invariants; deleting several stateless resolvers is evidence that the connector consolidates a real boundary rather than renaming utility code.
 
 | Memory | Callback Composition Without Trainer Coupling | Date: 04 September 2026 | Time: 09:13 AM | Name: Ghost |
 
@@ -294,3 +285,10 @@
     3. Accelerator timing requires synchronization immediately before reading the clock, or queued CUDA and MPS work makes elapsed time and rate measurements dishonest.
     4. Recursive inference may accept a batch size only when all reachable tensors agree. A domain-specific callable is the honest boundary for structures whose cardinality cannot be inferred generically.
     5. Accumulation windows emit on optimizer progress while counting every contributing microbatch, preserving both sample and batch rates.
+
+| Memory | Device Statistics Belong to Accelerators | Date: 04 September 2026 | Time: 12:58 PM | Name: Ghost |
+
+    1. A device-monitor callback should schedule and route observations, while the selected Accelerator owns which counters exist, how the device is addressed, and what each backend can report.
+    2. CUDA allocator state, Apple MPS memory state, and CPU process or load state are different domains; forcing them through CUDA globals misreports the selected runtime.
+    3. Filter validation must occur against the live backend's available keys so misspellings fail before silently producing an empty metric stream.
+    4. Device statistics are per-rank observations; the current single experiment logger records global rank zero, while callback values remain on the selected device.

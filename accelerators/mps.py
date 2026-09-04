@@ -23,6 +23,16 @@ class MPSAccelerator(Accelerator):
     def get_device(self) -> torch.device:
         return self._device
 
+    @override
+    def get_device_stats(self, device: torch.device) -> dict[str, float]:
+        if device.type != "mps":
+            raise MisconfigurationError(f"MPSAccelerator cannot inspect {device}.")
+        return {
+            "mps/current_allocated_bytes": float(torch.mps.current_allocated_memory()),
+            "mps/driver_allocated_bytes": float(torch.mps.driver_allocated_memory()),
+            "mps/recommended_max_bytes": float(torch.mps.recommended_max_memory())
+        }
+
     @staticmethod
     @override
     def parse_devices(devices: DeviceInput) -> int | list[int]:

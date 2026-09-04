@@ -1,3 +1,5 @@
+import os
+import time
 from typing import override
 
 import torch
@@ -22,6 +24,21 @@ class CPUAccelerator(Accelerator):
     @override
     def get_device(self) -> torch.device:
         return self._device
+
+    @override
+    def get_device_stats(self, device: torch.device) -> dict[str, float]:
+        if device.type != "cpu":
+            raise MisconfigurationError(f"CPUAccelerator cannot inspect {device}.")
+        statistics: dict[str, float] = {
+            "cpu/process_time_seconds": time.process_time(),
+            "cpu/count": float(os.cpu_count() or 1)
+        }
+        if hasattr(os, "getloadavg"):
+            load_average: tuple[float, float, float] = os.getloadavg()
+            statistics["cpu/load_average_1m"] = load_average[0]
+            statistics["cpu/load_average_5m"] = load_average[1]
+            statistics["cpu/load_average_15m"] = load_average[2]
+        return statistics
 
     @staticmethod
     @override

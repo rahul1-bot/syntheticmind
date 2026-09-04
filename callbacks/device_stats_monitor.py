@@ -1,60 +1,207 @@
-# This module:
-# 1. Records CUDA memory statistics (allocated and reserved megabytes for the
-#    current device) into the experiment logger on a step cadence
-#
-# Design decisions:
-# - Allocated and reserved memory are reported side by side because their gap
-#   exposes allocator fragmentation, which allocated alone cannot show
-# - The monitor degrades to a no-op without CUDA or without a logger, so it is
-#   safe to include unconditionally in device-agnostic configurations
-# - Emission is throttled to the configured step cadence and restricted to
-#   rank zero
-#
-# Author: Rahul Sawhney
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, override
+from typing import Literal, override
 
+import syntheticmind
 import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.types import Batch, StepOutput
-
-if TYPE_CHECKING:
-    from syntheticmind.trainer.trainer import Trainer
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import Batch, ModelOutput, StepOutput, TrainerStage
 
 __all__: list[str] = ["DeviceStatsMonitor"]
 
+type _DeviceStage = Literal["train", "validation", "test", "prediction"]
+
 
 class DeviceStatsMonitor(Callback):
-    # CUDA memory telemetry on the training batch cadence. Each emission
-    # reports the allocated and reserved bytes of the current device in
-    # megabytes against the global step.
-    def __init__(self, log_every_n_steps: int = 50) -> None:
-        # Binds the emission cadence in optimizer steps.
+    def __init__(
+        self,
+        log_every_n_steps: int = 50,
+        filter_keys: set[str] | None = None
+    ) -> None:
         super().__init__()
+        if type(log_every_n_steps) is not int or log_every_n_steps < 1:
+            raise ValueError("`log_every_n_steps` must be a positive integer.")
+        if filter_keys is not None and (
+            not isinstance(filter_keys, set)
+            or not all(isinstance(key, str) for key in filter_keys)
+        ):
+            raise TypeError("`filter_keys` must be a set of strings or None.")
         self.log_every_n_steps: int = log_every_n_steps
+        self.filter_keys: frozenset[str] | None = (
+            None if filter_keys is None else frozenset(filter_keys)
+        )
+        self._last_train_step: int = -1
+
+    @override
+    def setup(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        stage: TrainerStage
+    ) -> None:
+        del module, stage
+        if not trainer.loggers:
+            raise MisconfigurationError(
+                "DeviceStatsMonitor requires at least one configured logger."
+            )
+
+    @override
+    def on_train_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        del module
+        self._validate_filters(trainer)
+
+    @override
+    def on_validation_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        del module
+        if not trainer.sanity_checking:
+            self._validate_filters(trainer)
+
+    @override
+    def on_test_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        del module
+        self._validate_filters(trainer)
+
+    @override
+    def on_predict_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        del module
+        self._validate_filters(trainer)
 
     @override
     def on_train_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        outputs: StepOutput,
+        batch: Batch,
+        batch_idx: int
     ) -> None:
-        # Reads the current device's allocated and reserved memory and emits
-        # both in megabytes, gated on rank zero, the step cadence, CUDA
-        # availability, and logger presence.
+        del module, outputs, batch, batch_idx
+        if trainer.global_step <= 0:
+            return
+        if trainer.global_step == self._last_train_step:
+            return
+        if trainer.global_step % self.log_every_n_steps != 0:
+            return
+        self._emit(trainer, "train", trainer.global_step)
+        self._last_train_step: int = trainer.global_step
+
+    @override
+    def on_validation_batch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        outputs: StepOutput,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0
+    ) -> None:
+        del module, outputs, batch, dataloader_idx
+        if trainer.sanity_checking:
+            return
+        self._emit_evaluation_batch(trainer, "validation", batch_idx)
+
+    @override
+    def on_test_batch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        outputs: StepOutput,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0
+    ) -> None:
+        del module, outputs, batch, dataloader_idx
+        self._emit_evaluation_batch(trainer, "test", batch_idx)
+
+    @override
+    def on_predict_batch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        outputs: ModelOutput,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0
+    ) -> None:
+        del module, outputs, batch, dataloader_idx
+        self._emit_evaluation_batch(trainer, "prediction", batch_idx)
+
+    def _emit_evaluation_batch(
+        self,
+        trainer: syntheticmind.Trainer,
+        stage: Literal["validation", "test", "prediction"],
+        batch_idx: int
+    ) -> None:
+        if (batch_idx + 1) % self.log_every_n_steps != 0:
+            return
+        self._emit(trainer, stage, trainer.global_step)
+
+    def _validate_filters(self, trainer: syntheticmind.Trainer) -> None:
+        if self.filter_keys is None or not trainer.is_global_zero:
+            return
+        statistics: dict[str, float] = trainer.accelerator.get_device_stats(
+            trainer.strategy.root_device
+        )
+        missing_keys: set[str] = set(self.filter_keys) - set(statistics)
+        if missing_keys:
+            raise MisconfigurationError(
+                f"DeviceStatsMonitor filter keys are unavailable: {sorted(missing_keys)}. "
+                f"Available keys: {sorted(statistics)}."
+            )
+
+    def _emit(
+        self,
+        trainer: syntheticmind.Trainer,
+        stage: _DeviceStage,
+        step: int
+    ) -> None:
         if not trainer.is_global_zero:
             return
-        if module.global_step % self.log_every_n_steps != 0:
+        statistics: dict[str, float] = trainer.accelerator.get_device_stats(
+            trainer.strategy.root_device
+        )
+        if self.filter_keys is not None:
+            statistics = {
+                name: value
+                for name, value in statistics.items()
+                if name in self.filter_keys
+            }
+        metrics: dict[str, float] = {
+            f"device/{stage}/{name}": value
+            for name, value in statistics.items()
+        }
+        if not metrics:
             return
-        if not torch.cuda.is_available():
-            return
-        device_idx: int = torch.cuda.current_device()
-        allocated_mb: float = torch.cuda.memory_allocated(device_idx) / (1024 * 1024)
-        reserved_mb: float = torch.cuda.memory_reserved(device_idx) / (1024 * 1024)
-        if trainer.loggers:
-            trainer._log_metrics(
-                {"device/memory_allocated_mb": allocated_mb, "device/memory_reserved_mb": reserved_mb},
-                step=module.global_step
-            )
+        trainer._logger_connector.callback_metrics.update(
+            {
+                name: torch.tensor(value, device=trainer.strategy.root_device)
+                for name, value in metrics.items()
+            }
+        )
+        trainer._log_metrics(metrics, step=step)
+
+    @override
+    def __repr__(self) -> str:
+        return (
+            f"DeviceStatsMonitor(log_every_n_steps={self.log_every_n_steps}, "
+            f"filter_keys={self.filter_keys!r})"
+        )

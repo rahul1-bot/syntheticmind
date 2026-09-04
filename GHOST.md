@@ -61,16 +61,6 @@
     5. Model-parallel checkpoint internals now occupy the semantic `strategies/model_parallel_checkpointing/` subpackage, preserving the established `ModelParallelStrategy` import and class identity while reducing the top-level strategy package from the topology-review threshold to five direct modules.
     6. Full and sharded uninterrupted-versus-resumed runs produce bit-identical three-step model state, and distributed failure injection confirms that shard, metadata, and pointer failures preserve the previously published generation on both ranks.
 
-| Architecture Decision | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
-
-    1. `Accelerator`, `ClusterEnvironment`, and `LayerSync` are now contract-only runtime-checkable Protocols because each is a current Trainer plugin or substitution boundary. CPU, CUDA, MPS, local-cluster, and synchronized-batch-normalization implementations inherit their contracts explicitly and mark all implementations with `@override`.
-    2. GPU device selection moved from an orphan module function into a stateful parser that owns accelerator identity, available-device count, count expansion, explicit identifiers, uniqueness, and availability invariants.
-    3. `DeviceTopology` is now a strict immutable Pydantic resolved-configuration model with class-owned resolution. Its device identifiers and participating devices use tuples at the immutable boundary, while Trainer preserves the established public list representation.
-    4. `PluginConfiguration` is now a strict immutable Pydantic resolved record rather than a dataclass, and plugin conflict resolution validates checkpoint, precision, environment, and layer-synchronization categories through their actual contracts.
-    5. Recursive floating-point conversion moved onto the concrete precision owner, eliminating the stateless converter class while preserving nested tensor, mapping, tuple, named-tuple, and list behavior across half, double, and Transformer Engine modes.
-    6. Transformer Engine integration now targets the NVIDIA 2.18 API through one optional adapter, uses `autocast(enabled=True, recipe=...)`, enforces current sixteen-by-sixteen Linear replacement constraints, and accepts a strict delayed-scaling configuration or live structural recipe instead of an unvalidated mapping.
-    7. Accelerator, plugin, and precision Python modules now contain no `Any`, generic `object`, ABC, abstract method, module-level function, custom `__call__`, source comment, docstring, or terminal trailing comma. CPU, MPS, unavailable CUDA, direct and spawned DDP, local model parallelism, precision contexts, layer-sync round trips, plugin conflicts, strict recipe validation, and a source-shaped Transformer Engine adapter probe pass without static analysis.
-
 | Architecture Decision | Concept-First Framework Topology | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
 
     1. Rahul established a project-specific authority rule for SyntheticMind: machine-learning and distributed-systems concepts control module, class, and package decomposition before generic line-count or package-width guidance.
@@ -89,14 +79,14 @@
     5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
     6. Single-device fitting, two-rank DDP manual optimization and wrapped forwards, multi-stage distributed dataloaders, spawn and fork launch, and full and sharded model-parallel exact resume pass after the hierarchy change.
 
-| Architecture Decision | Accelerator Connector Ownership | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
+| Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
 
-    1. Trainer accelerator composition now belongs to one internal `AcceleratorConnector` covering backend selection, device parsing, node count, Strategy selection, precision, cluster environment, checkpoint I/O, and layer synchronization.
-    2. The former `DeviceTopology`, `PluginConfiguration`, `PluginResolver`, and `PrecisionResolver` surfaces were removed because they fragmented one compatibility decision and used temporary runtime records instead of an owning lifecycle component.
-    3. Accelerators retain only backend-specific discovery, parsing, and binding. Strategies retain execution semantics, while the connector validates their combined topology and injects the selected plugins in deterministic order.
-    4. Precision construction remains dependent on accelerator and Strategy compatibility, including CPU float16 fallback, explicitly supplied precision plugins, and model-parallel precision restrictions.
-    5. The connector is internal and creates no alternate stage entrypoint; Trainer remains the public orchestration surface and retains direct properties for the resolved runtime graph.
-    6. Configuration matrices, CPU and MPS execution, unavailable CUDA rejection, checkpoint-plugin injection, DDP subprocess, spawn and fork launch, and model-parallel full and sharded execution pass after the migration.
+    1. Runtime-checkable Accelerator, ClusterEnvironment, LayerSync, and checkpoint storage contracts retain current substitution boundaries with explicit implementations and genuine `@override` methods.
+    2. Trainer accelerator composition belongs to one internal `AcceleratorConnector` covering backend and device parsing, nodes, Strategy, precision, cluster environment, checkpoint I/O, and layer synchronization.
+    3. The former temporary topology, plugin-configuration, and resolver objects were removed; a stateful GPU parser owns count, identifier, uniqueness, and availability invariants.
+    4. Accelerators own backend discovery, binding, and device-local questions; Strategies own execution semantics; the connector validates their compatibility and injects plugins in deterministic order.
+    5. Precision construction covers CPU float16 fallback, model-parallel restrictions, recursive conversion, and the NVIDIA Transformer Engine 2.18 autocast and strict delayed-scaling boundary.
+    6. Trainer remains the sole public composition surface. CPU, MPS, unavailable CUDA, precision contexts, layer synchronization, plugin conflicts, DDP launchers, model parallelism, and Transformer Engine adapter behavior pass.
 
 | Architecture Decision | Callback Connector Ownership | Date: 04 September 2026 | Time: 09:13 AM | Name: Ghost |
 
@@ -296,3 +286,11 @@
     4. Recursive batch-cardinality inference requires every reachable tensor to agree; ambiguous structures fail, while the standard optional `batch_size_fn` supports domain-specific batches with a validated non-negative result.
     5. Window and epoch metrics enter callback views and the rank-zero logger, while configuration requires a logger and a positive optimizer-step cadence.
     6. CPU accumulation windows, nested and custom batch cardinality, invalid configuration, MPS synchronization, DDP global sample totals, rank-zero persistence, and tensor-parallel axis semantics pass.
+
+| Architecture Decision | Accelerator-Owned Device Statistics | Date: 04 September 2026 | Time: 12:58 PM | Name: Ghost |
+
+    1. The Accelerator contract now includes device-stat collection because backend-specific counters and units belong with device discovery and binding rather than inside a callback switchboard.
+    2. CPU reports process time, logical core count, and available load averages; CUDA reports selected allocator current and peak counters, retries, out-of-memory events, and free or total bytes; MPS reports current, driver, and recommended maximum bytes.
+    3. `DeviceStatsMonitor` observes the selected accelerator across training, validation, test, and prediction, validates optional backend keys, follows optimizer-step or evaluation-batch cadence, and requires a logger.
+    4. Callback metrics remain device-resident and logger persistence remains rank-zero-owned, while custom accelerators must satisfy the same explicit statistics contract.
+    5. CPU and live MPS adapters, source-shaped CUDA behavior, filters, invalid configuration, train and validation stages, MPS Trainer execution, and spawned DDP persistence pass.
