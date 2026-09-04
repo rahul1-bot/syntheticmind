@@ -82,6 +82,7 @@ class ModelCheckpoint(Checkpoint):
             configuration.save_weights_only
         )
         self._pending_batch_trigger_time: float | None = None
+        self._pending_epoch_trigger_time: float | None = None
         self._identity_dirpath: str | None = self._paths.dirpath
         self._identity_filename: str | None = configuration.filename
         self.verbose: bool = configuration.verbose
@@ -174,6 +175,7 @@ class ModelCheckpoint(Checkpoint):
     ) -> None:
         del trainer, module
         self._pending_batch_trigger_time: float | None = None
+        self._pending_epoch_trigger_time: float | None = None
         self._schedule.start()
 
     @override
@@ -198,14 +200,31 @@ class ModelCheckpoint(Checkpoint):
     def _save_after_batch(
         self,
         trainer: syntheticmind.Trainer,
-        module: Module
+        module: Module,
+        defer_to_epoch: bool
     ) -> None:
         trigger_time: float | None = self._pending_batch_trigger_time
         if trigger_time is None or not trainer._checkpoint_is_durable:
             return
         self._pending_batch_trigger_time: float | None = None
+        if defer_to_epoch:
+            pending_epoch_time: float | None = self._pending_epoch_trigger_time
+            self._pending_epoch_trigger_time: float | None = (
+                trigger_time
+                if pending_epoch_time is None
+                else max(trigger_time, pending_epoch_time)
+            )
+            return
         if self._schedule.should_skip(trainer):
             return
+        self._save_trigger(trainer, module, trigger_time)
+
+    def _save_trigger(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        trigger_time: float
+    ) -> None:
         candidates: dict[str, torch.Tensor] = self._synchronize_monitor_candidates(
             trainer,
             module
@@ -213,7 +232,14 @@ class ModelCheckpoint(Checkpoint):
         if self.monitor is not None and self.monitor not in candidates:
             self._schedule.defer()
             return
-        self._transaction.save_trigger(trainer, candidates, trigger_time, True)
+        was_deferred: bool = self._schedule.deferred_until_validation
+        self._schedule.clear_deferred()
+        try:
+            self._transaction.save_trigger(trainer, candidates, trigger_time, True)
+        except BaseException:
+            if was_deferred:
+                self._schedule.defer()
+            raise
 
     @override
     def on_validation_end(
@@ -221,29 +247,33 @@ class ModelCheckpoint(Checkpoint):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        del module
         if self._schedule.should_skip(trainer):
-            return
-        if not self.save_weights_only and not trainer._checkpoint_is_durable:
             return
         if not self._schedule.validation_trigger(trainer):
             return
-        candidates: dict[str, torch.Tensor] = self._synchronize_monitor_candidates(
+        trigger_time: float = time.monotonic()
+        if trainer._is_mid_epoch_validation:
+            self._pending_batch_trigger_time: float | None = trigger_time
+        else:
+            self._pending_epoch_trigger_time: float | None = trigger_time
+
+    def _save_after_epoch(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        trigger_time: float | None = self._pending_epoch_trigger_time
+        if trigger_time is None:
+            return
+        self._pending_epoch_trigger_time: float | None = None
+        if self._schedule.should_skip(trainer):
+            return
+        self._save_trigger(
             trainer,
-            module
+            module,
+            trigger_time
         )
-        was_deferred: bool = self._schedule.deferred_until_validation
-        self._schedule.clear_deferred()
-        try:
-            self._transaction.save_trigger(
-                trainer,
-                candidates,
-                time.monotonic(),
-                True
-            )
-        except BaseException:
-            if was_deferred:
-                self._schedule.defer()
-            raise
 
     @override
     def on_train_epoch_end(
@@ -251,6 +281,7 @@ class ModelCheckpoint(Checkpoint):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        self._save_after_epoch(trainer, module)
         if self._schedule.should_skip(trainer):
             return
         if not self._schedule.epoch_trigger(trainer):
@@ -381,6 +412,7 @@ class ModelCheckpoint(Checkpoint):
     ) -> None:
         del module
         self._pending_batch_trigger_time: float | None = None
+        self._pending_epoch_trigger_time: float | None = None
         if trainer.fast_dev_run or not self.save_on_exception:
             return
         if trainer.state.stage != "fit" or not trainer.is_global_zero:

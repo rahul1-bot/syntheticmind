@@ -329,7 +329,11 @@ class TrainingEpochLoop(Loop):
         self._checkpoint_is_durable: bool = (
             not module.automatic_optimization or not is_accumulating
         )
-        trainer._save_batch_checkpoints(module)
+        epoch_will_end: bool = self.is_last_batch or self._should_stop_batch_loop(
+            trainer,
+            trainer.state
+        )
+        trainer._save_batch_checkpoints(module, epoch_will_end)
         return is_accumulating
 
     def _should_stop_batch_loop(
@@ -376,7 +380,7 @@ class TrainingEpochLoop(Loop):
                 batch_idx + 1
             )
             self._checkpoint_is_durable: bool = True
-            trainer._save_batch_checkpoints(module)
+            trainer._save_batch_checkpoints(module, True)
         if module.automatic_optimization:
             self.update_lr_schedulers(
                 trainer,

@@ -124,15 +124,15 @@
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
     7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
 
-| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
+| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:02 PM | Name: Ghost |
 
     1. The Trainer checkpoint connector remains the sole trajectory coordinator; stage `ckpt_path` and mutable `trainer.ckpt_path` are the explicit selection controls, while the unused constructor `resume_from_checkpoint` alias and connector accessor were removed.
     2. Schema version 2 records explicit `training` or `weights` artifact identity, resolved Trainer configuration, strict integer progress, typed state collections, metadata, and one canonical random-state snapshot; malformed structure fails before model or optimizer mutation where runtime construction permits.
     3. The foundational Randomness owner and immutable Pydantic snapshot now serve seeding, checkpoints, and worker transfer identically across Python, NumPy, torch CPU, and only the active CUDA or MPS backend; the duplicate launcher state and obsolete SeedManager were removed.
-    4. Mid-epoch continuation persists loader coordinates and randomness independently, while a batch remains non-durable through optimizer mutation, progress recording, batch-end hooks, metric routing, validation cadence, and plateau scheduling; only the completed transition may be serialized.
+    4. A batch remains non-durable through optimizer, progress, hooks, metrics, validation, and step cadence; mid-epoch triggers flush afterward, while terminal-batch and validation-end triggers defer through epoch metrics and epoch schedulers to the monitoring boundary.
     5. A persisted effective configuration snapshot permits larger run ceilings while rejecting drift in accumulation, training and validation limits, cadence, clipping, determinism, sampler policy, barebones state, synchronization, reload cadence, and precision before restoration; bounded Timer runs record their actual unbounded epoch ceiling.
-    6. Direct resumable saves during incomplete batches fail; ModelCheckpoint records due batch triggers and flushes them only after Trainer confirms post-cadence durability, while weights-only output remains safe and cannot continue fit.
-    7. Strict corruption, configuration mismatch, callback isolation, unsafe-save rejection, no step-zero artifact, exact accumulated plus step- and epoch-plateau resume, stochastic replay, DDP selection, and full or sharded model-parallel continuation pass.
+    6. Direct resumable saves during incomplete batches fail; ModelCheckpoint records due batch or validation triggers and flushes at the correct batch or epoch durability boundary, while weights-only output remains safe and cannot continue fit.
+    7. Strict corruption, unsafe-save rejection, no step-zero artifact, exact accumulated, step-plateau, epoch-plateau, and validation-triggered resume, stochastic replay, DDP selection, and full or sharded model-parallel continuation pass.
 
 | Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
 

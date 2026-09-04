@@ -126,12 +126,12 @@
     3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
     4. ✅ Weighted, dataclass, ambiguity, tensor-state, TorchMetrics, CPU, MPS, remote fsspec, external DDP, spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
 
-| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
+| Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 07:02 PM | Name: Ghost |
 
     1. ✅ Schema version 2 now validates artifact identity, resolved Trainer configuration, progress coordinates, state collections, metadata, and immutable multi-backend randomness before restoration.
     2. ✅ One Randomness owner replaces SeedManager and duplicate launcher or checkpoint RNG logic, captures only active accelerator generators, and preserves exact Python, NumPy, torch CPU, CUDA, and MPS state.
-    3. ✅ Ordinary and stateful loaders retain progress and randomness, while a batch remains non-durable through optimizer, progress, hooks, metrics, validation, and plateau cadence; direct resumable saves fail and ModelCheckpoint flushes due triggers afterward.
-    4. ✅ Weights-only artifacts remain available but non-resumable, no step-zero artifact is emitted, and exact accumulated plus step- and epoch-plateau continuation joins corruption, CPU, MPS, subprocess, DDP selection, and full or sharded model-parallel evidence.
+    3. ✅ A batch remains non-durable through optimizer, progress, hooks, metrics, validation, and step cadence; ModelCheckpoint flushes mid-epoch triggers afterward and carries terminal or validation triggers through epoch schedulers to monitoring.
+    4. ✅ Weights-only artifacts remain non-resumable, no step-zero artifact is emitted, and exact accumulated, step-plateau, epoch-plateau, and explicit validation-trigger continuation joins CPU, MPS, DDP selection, and model-parallel evidence.
 
 | Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 06:59 PM | Name: Ghost |
 
