@@ -44,6 +44,7 @@ __all__: list[str] = [
     "DataLoaderSource",
     "StepArgument",
     "StepOutput",
+    "TrainingStepOutput",
     "ModelScalar",
     "ModelOutput",
     "GatherData",
@@ -144,6 +145,8 @@ type DataLoaderSource = (
 type StepArgument = Batch | int
 
 type StepOutput = dict[str, torch.Tensor | float]
+
+type TrainingStepOutput = torch.Tensor | StepOutput | None
 
 type ModelScalar = bool | int | float | str | None
 

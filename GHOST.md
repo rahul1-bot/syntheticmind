@@ -163,3 +163,21 @@
     5. Recursive floating-point conversion moved onto the concrete precision owner, eliminating the stateless converter class while preserving nested tensor, mapping, tuple, named-tuple, and list behavior across half, double, and Transformer Engine modes.
     6. Transformer Engine integration now targets the NVIDIA 2.18 API through one optional adapter, uses `autocast(enabled=True, recipe=...)`, enforces current sixteen-by-sixteen Linear replacement constraints, and accepts a strict delayed-scaling configuration or live structural recipe instead of an unvalidated mapping.
     7. Accelerator, plugin, and precision Python modules now contain no `Any`, generic `object`, ABC, abstract method, module-level function, custom `__call__`, source comment, docstring, or terminal trailing comma. CPU, MPS, unavailable CUDA, direct and spawned DDP, local model parallelism, precision contexts, layer-sync round trips, plugin conflicts, strict recipe validation, and a source-shaped Transformer Engine adapter probe pass without static analysis.
+
+| Architecture Decision | Concept-First Framework Topology | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
+
+    1. Rahul established a project-specific authority rule for SyntheticMind: machine-learning and distributed-systems concepts control module, class, and package decomposition before generic line-count or package-width guidance.
+    2. Structural budgets remain review and subtraction signals, but they cannot force one coherent training concept into pass-through modules, one-consumer classes, or implementation-oriented peer abstractions.
+    3. The current PyTorch Lightning source is the reference for recognized training vocabulary and conceptual placement, while its ABCs, free functions, broad annotations, historical compatibility layers, and oversized implementation details remain non-authoritative.
+    4. Trainer connectors are admitted only for complete composition boundaries: accelerator topology, data attachment, callback configuration, full-trajectory checkpointing, metric and logger routing, and signal lifecycle.
+    5. `Strategy` is a stateful execution-policy hierarchy rather than a behaviorless Protocol. `ParallelStrategy` is the shared distributed execution concept; DDP and model-parallel strategies inherit it and contain only algorithm-specific deltas.
+    6. This decision supersedes the Protocol-only Strategy conclusion recorded at 07:05 AM. The earlier runtime evidence remains valid, but its decomposition judgment was rejected after source-level comparison exposed duplicated concrete behavior.
+
+| Architecture Decision | Stateful Strategy Hierarchy | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
+
+    1. `Strategy` now owns universal model connection, wrapped-step dispatch, precision-mediated backward and optimizer stepping, single-process collective defaults, initialization context, and ordinary checkpoint collaboration without using an ABC.
+    2. `ParallelStrategy` now owns the cluster environment, process-group lifecycle, rank topology, process launcher, distributed collectives, sampler coordinates, and distributed tail-gradient synchronization directly.
+    3. `SingleDeviceStrategy` is a named execution policy with inherited single-device semantics; `DDPStrategy` contains only DDP wrapping, layer synchronization, and manual-optimization forward behavior; `ModelParallelStrategy` contains device-mesh, parallelization, precision restrictions, and distributed checkpoint selection.
+    4. The former `distributed_runtime.py`, `forward_redirection.py`, and `model_parallel_topology.py` modules were removed because their behavior belongs to the Strategy concepts they served rather than to independent public building blocks.
+    5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
+    6. Single-device fitting, two-rank DDP manual optimization and wrapped forwards, multi-stage distributed dataloaders, spawn and fork launch, and full and sharded model-parallel exact resume pass after the hierarchy change.

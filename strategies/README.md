@@ -1,23 +1,26 @@
-# syntheticmind.strategies: Execution Ownership
+# syntheticmind.strategies: Training Execution Policies
 
-`strategies/` owns process initialization, model placement or wrapping, backward execution, synchronization, distributed collectives, and strategy-specific checkpoint state. Accelerators resolve and bind devices; strategies decide how those devices participate in a run.
+`Strategy` is the complete policy governing how a model participates in training, validation, testing, and prediction. It owns the model connection, wrapped-model identity, accelerator and precision collaboration, optimizer stepping, step dispatch, collective defaults, initialization context, and ordinary checkpoint behavior.
 
-| Module | Ownership |
+`ParallelStrategy` is the shared distributed execution policy. It owns parallel devices, cluster ranks, process-group initialization, distributed collectives, gradient synchronization, process launch, and process-scoped cleanup. DDP and model-parallel execution inherit these semantics instead of reproducing them.
+
+```text
+Strategy
+├── SingleDeviceStrategy
+└── ParallelStrategy
+    ├── DDPStrategy
+    └── ModelParallelStrategy
+```
+
+| Module | ML ownership |
 |---|---|
-| `strategy.py` | The structural `Strategy` contract consumed by the Trainer and loops. It contains no shared state or default behavior. |
-| `parallel.py` | The smaller structural contract for cluster-backed strategies. |
-| `single_device.py` | One process and one unwrapped model on one device. |
-| `ddp.py` | One model replica per process under `DistributedDataParallel`. |
-| `model_parallel.py` | Composable tensor and fully sharded model-parallel execution without pretending to be DDP. |
-| `distributed_runtime.py` | Process-group resource ownership, rank topology, collectives, and process-scoped cleanup. |
-| `forward_redirection.py` | Wrapped step dispatch through the inherited PyTorch module call path. |
-| `checkpoint_connector.py` | The earned checkpoint contract and the local `CheckpointIO` implementation. |
-| `model_parallel_topology.py` | Device-mesh construction, data-parallel sampler coordinates, and module mesh binding. |
-| `model_parallel_checkpointing/` | Full and sharded distributed state, immutable checkpoint generations, atomic publication, recovery, and pruning. |
-| `launcher.py` and `launchers/` | Subprocess and multiprocessing launch policy plus parent-worker state reconciliation. |
+| `strategy.py` | Universal training execution semantics and private wrapped-step forwarding. |
+| `parallel.py` | Shared distributed process, rank, device, collective, and launcher semantics. |
+| `single_device.py` | The named one-process, one-device execution policy. |
+| `ddp.py` | PyTorch `DistributedDataParallel` wrapping and DDP-specific gradient behavior. |
+| `model_parallel.py` | Device-mesh construction, model parallelization, and model-parallel state semantics. |
+| `launcher.py` and `launchers/` | Internal subprocess and multiprocessing launch implementations. |
 
-## Runtime Boundaries
+Files are admitted by ML or distributed-systems concepts, not by line-count pressure. Shared behavior remains on `Strategy` or `ParallelStrategy`; concrete strategy modules contain only behavior that changes the selected execution algorithm. Internal implementation mechanisms do not become public strategy concepts merely because they are reusable.
 
-`Trainer` wires a strategy to its model, optimizers, precision plugin, cluster environment, and checkpoint implementation. Local checkpoints delegate storage to the selected `CheckpointIO`. Model-parallel checkpoints instead own PyTorch distributed state-dict capture and restoration directly.
-
-Distributed process groups survive individual fit, validation, test, and prediction stages because live DDP or DTensor state can outlive one stage. Failure handling and process exit release the process-scoped resource.
+The existing strategy-checkpoint component and model-parallel checkpointing package remain private transitional machinery. Their final ownership is the Trainer checkpoint connector for full-trajectory coordination, the selected Strategy for topology-specific state representation, and `CheckpointIO` for storage transport.

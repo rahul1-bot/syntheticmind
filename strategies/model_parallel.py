@@ -2,46 +2,31 @@ import warnings
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
-from typing import Literal, cast, override
+from typing import Literal, override
 
 import torch
 from torch import nn
 from torch.distributed.constants import default_pg_timeout
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel
 
-from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
-from syntheticmind.plugins.environments import ClusterEnvironment
 from syntheticmind.precision.precision import Precision
 from syntheticmind.strategies.checkpoint_connector import StrategyCheckpoint
-from syntheticmind.strategies.distributed_runtime import _DistributedRuntime
-from syntheticmind.strategies.forward_redirection import StepName, _ForwardRedirection
-from syntheticmind.strategies.launcher import _ProcessLauncher
 from syntheticmind.strategies.model_parallel_checkpointing.checkpoint import (
     _ModelParallelCheckpoint
 )
-from syntheticmind.strategies.model_parallel_topology import _ModelParallelTopology
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.utilities.model_initialization import _ModuleInitializer
-from syntheticmind.utilities.types import (
-    BackwardInputs,
-    Batch,
-    ModelOutput,
-    OptimizerClosure,
-    OptimizerStepOutput,
-    OptimizerStepValue,
-    StepArgument,
-    StepOutput
-)
 
 __all__: list[str] = ["ModelParallelStrategy"]
 
 
 class ModelParallelStrategy(ParallelStrategy):
+    @override
     def __init__(
         self,
         data_parallel_size: Literal["auto"] | int = "auto",
@@ -50,29 +35,18 @@ class ModelParallelStrategy(ParallelStrategy):
         process_group_backend: str | None = None,
         timeout: timedelta | None = default_pg_timeout
     ) -> None:
+        super().__init__(
+            process_group_backend=process_group_backend,
+            timeout=timeout,
+            start_method="popen"
+        )
+        self._validate_size("data_parallel_size", data_parallel_size)
+        self._validate_size("tensor_parallel_size", tensor_parallel_size)
         if type(save_distributed_checkpoint) is not bool:
             raise TypeError("`save_distributed_checkpoint` must be a bool.")
-        self.accelerator: Accelerator | None = None
-        self.parallel_devices: list[torch.device] = []
-        self.num_nodes: int = 1
-        self.is_distributed: bool = True
-        self.model: nn.Module | None = None
-        self.optimizers: list[torch.optim.Optimizer] = []
-        self.precision_plugin: Precision = Precision()
-        self.configured_precision_plugin: Precision | None = None
-        self._module: Module | None = None
-        self._forward_redirection: _ForwardRedirection = _ForwardRedirection()
-        self._runtime: _DistributedRuntime = _DistributedRuntime(
-            self,
-            None,
-            process_group_backend,
-            timeout,
-            "popen"
-        )
-        self._topology: _ModelParallelTopology = _ModelParallelTopology(
-            data_parallel_size,
-            tensor_parallel_size
-        )
+        self._data_parallel_size: Literal["auto"] | int = data_parallel_size
+        self._tensor_parallel_size: Literal["auto"] | int = tensor_parallel_size
+        self._device_mesh: DeviceMesh | None = None
         self.checkpoint: StrategyCheckpoint = _ModelParallelCheckpoint(
             "sharded" if save_distributed_checkpoint else "full",
             self.barrier,
@@ -80,35 +54,15 @@ class ModelParallelStrategy(ParallelStrategy):
         )
 
     @override
-    def configure_topology(
-        self, accelerator: Accelerator, parallel_devices: list[torch.device],
-        num_nodes: int
-    ) -> None:
-        if not parallel_devices or num_nodes < 1:
-            raise ValueError("Model-parallel topology requires devices and positive nodes.")
-        self.accelerator: Accelerator | None = accelerator
-        self.parallel_devices: list[torch.device] = list(parallel_devices)
-        self.num_nodes: int = num_nodes
-        self._runtime.configure_environment()
-
-    @override
     def connect(self, model: nn.Module) -> None:
-        if not isinstance(model, Module):
-            raise TypeError("ModelParallelStrategy requires a SyntheticMind Module.")
-        self._module: Module | None = model
-        self.model: nn.Module | None = model
-        self._topology.connect(model)
-        self.checkpoint.connect_model(model)
+        super().connect(model)
+        if self._device_mesh is not None:
+            self._require_module()._device_mesh: DeviceMesh | None = self._device_mesh
 
     @override
     def setup_environment(self) -> None:
-        self._runtime.setup_environment()
-        self._topology.setup(
-            self.world_size,
-            self.num_nodes,
-            self.num_processes,
-            self.root_device.type
-        )
+        super().setup_environment()
+        self._setup_device_mesh()
 
     @override
     def setup(self, model: nn.Module, device: torch.device) -> nn.Module:
@@ -124,7 +78,10 @@ class ModelParallelStrategy(ParallelStrategy):
             if isinstance(submodule, FullyShardedDataParallel):
                 raise TypeError("ModelParallelStrategy supports FSDP2, not FSDP1.")
         initializer: _ModuleInitializer = _ModuleInitializer(enabled=False)
-        uninitialized_modules: set[str] = initializer.materialize_distributed(model, device)
+        uninitialized_modules: set[str] = initializer.materialize_distributed(
+            model,
+            device
+        )
         if uninitialized_modules and self.is_global_zero:
             warnings.warn(
                 "Parameter initialization is incomplete for modules without "
@@ -138,84 +95,21 @@ class ModelParallelStrategy(ParallelStrategy):
         return placed_model
 
     @override
-    def training_step(self, model: nn.Module, batch: Batch, batch_idx: int) -> StepOutput:
-        return cast(StepOutput, self._execute_step(model, "training_step", batch, batch_idx))
-
-    @override
-    def validation_step(
-        self, model: nn.Module, *args: StepArgument, **kwargs: StepArgument
-    ) -> StepOutput:
-        return cast(StepOutput, self._execute_step(model, "validation_step", *args, **kwargs))
-
-    @override
-    def test_step(
-        self, model: nn.Module, *args: StepArgument, **kwargs: StepArgument
-    ) -> StepOutput:
-        return cast(StepOutput, self._execute_step(model, "test_step", *args, **kwargs))
-
-    @override
-    def predict_step(
-        self, model: nn.Module, *args: StepArgument, **kwargs: StepArgument
-    ) -> ModelOutput:
-        return cast(ModelOutput, self._execute_step(model, "predict_step", *args, **kwargs))
-
-    @override
-    def backward(
-        self, closure_loss: torch.Tensor,
-        optimizer: torch.optim.Optimizer | None = None,
-        gradient: torch.Tensor | None = None,
-        retain_graph: bool | None = None,
-        create_graph: bool = False,
-        inputs: BackwardInputs = None
-    ) -> torch.Tensor:
-        module: Module = self._require_module()
-        prepared_loss: torch.Tensor = self.precision_plugin.pre_backward(
-            closure_loss,
-            module
-        )
-        self.precision_plugin.backward(
-            prepared_loss,
-            module,
-            optimizer,
-            gradient,
-            retain_graph,
-            create_graph,
-            inputs
-        )
-        return self.precision_plugin.post_backward(prepared_loss, module)
-
-    @override
-    def optimizer_step(
-        self, optimizer: torch.optim.Optimizer,
-        closure: OptimizerClosure,
-        model: nn.Module | None = None,
-        **kwargs: OptimizerStepValue
-    ) -> OptimizerStepOutput:
-        resolved_model: nn.Module | None = model or self._module
-        if not isinstance(resolved_model, Module):
-            raise TypeError("Strategy optimizer_step requires a SyntheticMind Module.")
-        return cast(
-            OptimizerStepOutput,
-            self.precision_plugin.optimizer_step(
-                optimizer,
-                model=resolved_model,
-                closure=closure,
-                **kwargs
-            )
-        )
-
-    @override
     def teardown(self) -> None:
-        self._topology.teardown()
+        self._clear_device_mesh()
+        super().teardown()
 
     @override
     def on_exception(self, exception: BaseException) -> None:
-        self._topology.teardown()
-        self._runtime.on_exception()
+        self._clear_device_mesh()
+        super().on_exception(exception)
 
     @contextmanager
     @override
-    def tensor_init_context(self, empty_init: bool | None = None) -> Iterator[None]:
+    def tensor_init_context(
+        self,
+        empty_init: bool | None = None
+    ) -> Iterator[None]:
         if empty_init is not None and type(empty_init) is not bool:
             raise TypeError("`empty_init` must be a bool or None.")
         empty_context: AbstractContextManager[None] = (
@@ -225,32 +119,19 @@ class ModelParallelStrategy(ParallelStrategy):
             yield
 
     @override
-    def barrier(self) -> None:
-        self._runtime.barrier()
-
-    @override
-    def broadcast[T](self, value: T, source_rank: int = 0) -> T:
-        return self._runtime.broadcast(value, source_rank)
-
-    @override
-    def reduce_boolean_decision(self, decision: bool, all: bool = True) -> bool:
-        return self._runtime.reduce_boolean_decision(decision, all)
-
-    @override
-    def all_gather(
-        self, tensor: torch.Tensor,
-        group: torch.distributed.ProcessGroup | None = None,
-        sync_grads: bool = False
-    ) -> torch.Tensor:
-        return self._runtime.all_gather(tensor, group, sync_grads)
-
-    @override
     def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
         del optimizer
 
     @override
     def attach_precision_plugin(self, precision_plugin: Precision) -> None:
-        supported_precisions: tuple[str, ...] = ("32-true", "bf16-mixed", "bf16-true", "16-true")
+        if not isinstance(precision_plugin, Precision):
+            raise TypeError("precision_plugin must be a Precision instance.")
+        supported_precisions: tuple[str, ...] = (
+            "32-true",
+            "bf16-mixed",
+            "bf16-true",
+            "16-true"
+        )
         if precision_plugin.precision not in supported_precisions:
             raise MisconfigurationError(
                 f"ModelParallelStrategy does not support {precision_plugin.precision!r}. "
@@ -258,83 +139,56 @@ class ModelParallelStrategy(ParallelStrategy):
             )
         self.precision_plugin: Precision = precision_plugin
 
-    @override
-    def attach_cluster_environment(self, cluster_environment: ClusterEnvironment) -> None:
-        self._runtime.attach_cluster_environment(cluster_environment)
-
     @property
     @override
     def distributed_sampler_kwargs(self) -> dict[str, int] | None:
-        return self._topology.distributed_sampler_kwargs
-
-    @property
-    @override
-    def launcher(self) -> _ProcessLauncher | None:
-        return self._runtime.launcher
-
-    @property
-    @override
-    def num_processes(self) -> int:
-        return len(self.parallel_devices) if self.parallel_devices else 1
-
-    @property
-    @override
-    def global_rank(self) -> int:
-        return self._runtime.global_rank
-
-    @property
-    @override
-    def local_rank(self) -> int:
-        return self._runtime.local_rank
-
-    @property
-    @override
-    def node_rank(self) -> int:
-        return self._runtime.node_rank
-
-    @property
-    @override
-    def world_size(self) -> int:
-        return self._runtime.world_size
-
-    @property
-    @override
-    def is_global_zero(self) -> bool:
-        return self.global_rank == 0
-
-    @property
-    @override
-    def root_device(self) -> torch.device:
-        return self._runtime.root_device
-
-    @property
-    @override
-    def cluster_environment(self) -> ClusterEnvironment:
-        return self._runtime.cluster_environment
-
-    @property
-    @override
-    def configured_cluster_environment(self) -> ClusterEnvironment | None:
-        return self._runtime.configured_cluster_environment
+        data_parallel_mesh: DeviceMesh = self.device_mesh["data_parallel"]
+        return {
+            "num_replicas": data_parallel_mesh.size(),
+            "rank": data_parallel_mesh.get_local_rank()
+        }
 
     @property
     def device_mesh(self) -> DeviceMesh:
-        return self._topology.device_mesh
+        if self._device_mesh is None:
+            raise RuntimeError("The device mesh is unavailable before process setup.")
+        return self._device_mesh
 
-    def _execute_step(
-        self, model: nn.Module, step_name: StepName,
-        *args: StepArgument,
-        **kwargs: StepArgument
-    ) -> ModelOutput:
-        return self._forward_redirection.execute(
-            model,
-            self._require_module(),
-            step_name,
-            *args,
-            **kwargs
+    def _setup_device_mesh(self) -> None:
+        if self._data_parallel_size == "auto":
+            data_parallel_size: int = self.num_nodes
+        else:
+            data_parallel_size: int = self._data_parallel_size
+        if self._tensor_parallel_size == "auto":
+            tensor_parallel_size: int = self.num_processes
+        else:
+            tensor_parallel_size: int = self._tensor_parallel_size
+        if data_parallel_size * tensor_parallel_size != self.world_size:
+            raise RuntimeError(
+                f"data_parallel_size={data_parallel_size} and "
+                f"tensor_parallel_size={tensor_parallel_size} must multiply to "
+                f"world_size={self.world_size}."
+            )
+        self._device_mesh: DeviceMesh | None = init_device_mesh(
+            self.root_device.type,
+            (data_parallel_size, tensor_parallel_size),
+            mesh_dim_names=("data_parallel", "tensor_parallel")
         )
+        self._require_module()._device_mesh: DeviceMesh | None = self._device_mesh
 
-    def _require_module(self) -> Module:
-        if self._module is None:
-            raise RuntimeError("Strategy has no connected Module.")
-        return self._module
+    def _clear_device_mesh(self) -> None:
+        if self._module is not None:
+            self._module._device_mesh: DeviceMesh | None = None
+        self._device_mesh: DeviceMesh | None = None
+
+    def _validate_size(
+        self,
+        name: str,
+        value: Literal["auto"] | int
+    ) -> None:
+        if value == "auto":
+            return
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"`{name}` must be 'auto' or a positive integer.")
+        if value < 1:
+            raise ValueError(f"`{name}` must be greater than zero.")

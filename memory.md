@@ -194,3 +194,12 @@
     4. A recursive tensor-conversion algorithm used only by precision policies belongs on the concrete precision lifecycle. A stateless converter class adds an object and dependency edge without adding an independent boundary.
     5. Optional-library integration should isolate dynamic imports and attribute adaptation in one adapter. The owning precision policy should expose stable domain configuration rather than leaking arbitrary mappings or module-shaped Protocol collections.
     6. Current Transformer Engine uses a general `autocast` context with a `recipe` argument, and current FP8 Linear guidance requires both matrix dimensions to be divisible by sixteen. Version checks and adapter tests must encode that current boundary explicitly.
+
+| Memory | Concept Integrity Versus Mechanical Decomposition | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
+
+    1. Removing an ABC does not justify replacing a behavior-rich framework hierarchy with a Protocol. When concrete implementations repeat the same lifecycle, the repeated behavior proves that a stateful base concept exists.
+    2. Strategy is the integration boundary for model placement, precision, optimizer execution, distributed communication, and checkpoint representation; extracting each mechanism as a peer module obscures the selected training policy rather than clarifying it.
+    3. A Trainer connector is earned when it converts one user-facing configuration family into a connected runtime slice with ordering and compatibility invariants. A stateless resolver or temporary runtime-data model does not become a connector merely by being renamed.
+    4. The strongest topology test is whether an ML researcher can identify the concept, its lifecycle, and its algorithmic variants without referring to code size. DDP, FSDP, precision, dataloaders, and checkpoints pass; generic runtime, resolver, forwarding, and state-container names require stronger internal evidence.
+    5. Package width is harmless when each file is a selectable recognized implementation, as with callbacks or strategies. The same width is architectural debt when files are fragments created to satisfy numeric budgets.
+    6. Concept-first decomposition still requires directed dependencies, bounded public surface, explicit state ownership, and runtime evidence; it overrides mechanical splitting, not correctness or maintainability review.
