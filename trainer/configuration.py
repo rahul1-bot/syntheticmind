@@ -116,11 +116,12 @@ class _TrainerConfigurationSnapshot(BaseModel):
     def capture(
         cls,
         configuration: _TrainerConfiguration,
-        precision: PrecisionType
+        precision: PrecisionType,
+        max_epochs: int
     ) -> _TrainerConfigurationSnapshot:
         return cls(
             fast_dev_run=configuration.fast_dev_run,
-            max_epochs=configuration.resolved_max_epochs,
+            max_epochs=max_epochs,
             min_epochs=configuration.resolved_min_epochs,
             max_steps=configuration.resolved_max_steps,
             min_steps=configuration.min_steps,

@@ -18,6 +18,7 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpointing import Checkpoint, ModelCheckpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.callbacks.progress_bar import ProgressBarCallback
+from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hooks import DataHooks, ModelHooks
 from syntheticmind.core.module import Module
@@ -407,9 +408,10 @@ class Trainer:
         )
         self.val_check_batch: int | None = None
 
+        maximum_epochs: int = self._resolve_maximum_epochs(configuration)
         self.fit_loop: FitLoop = FitLoop(
             min_epochs=configuration.resolved_min_epochs,
-            max_epochs=configuration.resolved_max_epochs
+            max_epochs=maximum_epochs
         )
         self.fit_loop.epoch_loop: TrainingEpochLoop | None = TrainingEpochLoop(
             min_steps=configuration.min_steps,
@@ -432,6 +434,18 @@ class Trainer:
         )
 
         self._connect_loops()
+
+    def _resolve_maximum_epochs(
+        self,
+        configuration: _TrainerConfiguration
+    ) -> int:
+        if configuration.max_epochs is not None or configuration.max_steps != -1:
+            return configuration.resolved_max_epochs
+        callback: Callback
+        for callback in self.callbacks:
+            if isinstance(callback, Timer) and callback.time_remaining() is not None:
+                return -1
+        return configuration.resolved_max_epochs
 
     def _initialize_runtime_state(self) -> None:
         self.module: Module | None = None
@@ -1727,7 +1741,8 @@ class Trainer:
             current_configuration: _TrainerConfigurationSnapshot = (
                 _TrainerConfigurationSnapshot.capture(
                     self._configuration,
-                    self.precision
+                    self.precision,
+                    self.max_epochs
                 )
             )
             self._checkpoint_connector.validate_fit_configuration(
@@ -1884,7 +1899,8 @@ class Trainer:
         configuration_snapshot: _TrainerConfigurationSnapshot = (
             _TrainerConfigurationSnapshot.capture(
                 self._configuration,
-                self.precision
+                self.precision,
+                self.max_epochs
             )
         )
         checkpoint: CheckpointDict = self._checkpoint_connector.build(
@@ -2570,6 +2586,11 @@ class Trainer:
     def max_steps(self) -> int:
         assert self.fit_loop.epoch_loop is not None
         return self.fit_loop.epoch_loop.max_steps
+
+    @property
+    def accumulate_grad_batches(self) -> int:
+        assert self.fit_loop.epoch_loop is not None
+        return self.fit_loop.epoch_loop.accumulate_grad_batches
 
     @property
     def min_steps(self) -> int | None:

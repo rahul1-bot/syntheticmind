@@ -1,5 +1,6 @@
 import warnings
 from collections.abc import Iterator
+from copy import deepcopy
 from pathlib import Path
 from typing import cast
 
@@ -393,6 +394,18 @@ class _CheckpointConnector:
         if not isinstance(callback_states_value, dict):
             raise TypeError("Checkpoint `callbacks` state must be a mapping.")
         callback_states: dict[str, CheckpointValue] = callback_states_value
+        current_state_keys: set[str] = {
+            callback.state_key for callback in self._callback_connector.callbacks
+        }
+        missing_callbacks: set[str] = set(callback_states) - current_state_keys
+        if missing_callbacks and self._strategy.is_global_zero:
+            warnings.warn(
+                "Checkpoint state exists for callbacks absent from the current "
+                f"Trainer: {sorted(missing_callbacks)}. Add those callbacks to "
+                "restore their training state.",
+                UserWarning,
+                stacklevel=3
+            )
         callback: Callback
         for callback in self._callback_connector.callbacks:
             callback_state: CheckpointValue | None = callback_states.get(
@@ -405,7 +418,8 @@ class _CheckpointConnector:
                     f"Checkpoint state for callback {callback.state_key!r} must "
                     "be a mapping."
                 )
-            callback.load_state_dict(cast(StateDict, callback_state))
+            isolated_state: StateDict = deepcopy(cast(StateDict, callback_state))
+            callback.load_state_dict(isolated_state)
 
     def _restore_precision_state(
         self,

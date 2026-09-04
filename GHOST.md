@@ -124,15 +124,15 @@
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
     7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
 
-| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
+| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
 
     1. The Trainer checkpoint connector remains the sole trajectory coordinator; stage `ckpt_path` and mutable `trainer.ckpt_path` are the explicit selection controls, while the unused constructor `resume_from_checkpoint` alias and connector accessor were removed.
     2. Schema version 2 records explicit `training` or `weights` artifact identity, resolved Trainer configuration, strict integer progress, typed state collections, metadata, and one canonical random-state snapshot; malformed structure fails before model or optimizer mutation where runtime construction permits.
     3. The foundational Randomness owner and immutable Pydantic snapshot now serve seeding, checkpoints, and worker transfer identically across Python, NumPy, torch CPU, and only the active CUDA or MPS backend; the duplicate launcher state and obsolete SeedManager were removed.
     4. Mid-epoch continuation now persists completed-batch coordinates and epoch-start randomness independently of dataloader-provided state, so ordinary sized dataloaders and stateful iterables both resume the exact stochastic trajectory after post-fit saves and spawned state transfer.
-    5. A persisted resolved configuration snapshot permits larger run ceilings while rejecting drift in accumulation, training and validation limits, cadence, clipping, determinism, sampler policy, barebones state, synchronization, reload cadence, and precision before restoration.
+    5. A persisted effective configuration snapshot permits larger run ceilings while rejecting drift in accumulation, training and validation limits, cadence, clipping, determinism, sampler policy, barebones state, synchronization, reload cadence, and precision before restoration; bounded Timer runs record their actual unbounded epoch ceiling.
     6. Weights-only output omits optimizer, scheduler, callback, precision, DataModule, loop, and random state, skips callback save hooks, retains the model hook, and is rejected explicitly as a fit-continuation source.
-    7. Strict corruption probes, scheduler mismatch, pre-mutation configuration mismatch, CPU and MPS stochastic replay, ordinary and stateful loader continuation, subprocess and spawn launch, checkpoint selection, and full and sharded model-parallel resume pass.
+    7. Strict corruption, scheduler mismatch, pre-mutation configuration mismatch, absent saved-callback warnings, callback-state copy isolation, CPU and MPS stochastic replay, ordinary and stateful loader continuation, subprocess and spawn launch, checkpoint selection, and full and sharded model-parallel resume pass.
 
 | Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 
@@ -144,14 +144,14 @@
     6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; evaluation and prediction loops plus the Trainer still require separate decomposition, and existing conditional annotation imports remain unresolved until that dependency slice is reconstructed.
     7. CPU and MPS execution, automatic and multi-optimizer manual optimization, two-rank deferred accumulation, manual DDP, transfer precedence across every stage, multiple-loader DDP, exact stateful continuation, plateau cadence, and sharded model-parallel exact resume pass.
 
-| Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 06:04 PM | Name: Ghost |
+| Architecture Decision | Validated Trainer Configuration Boundary | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
 
     1. The private `_TrainerConfiguration` Pydantic model represents resolved scalar run policy at Trainer construction and is the sole owner of training-limit validation, batch-limit normalization, debugging-mode rewrites, barebones conflicts, validation cadence inputs, and execution flags.
     2. The model contains no live model, optimizer, scheduler, dataloader, logger, profiler, accelerator, Strategy, callback, plugin, device, path handle, or external resource; those remain with their runtime connectors and owners.
     3. Mutable validation-duration dictionaries become owned immutable tuples inside the frozen configuration and are reconstructed as fresh dictionaries only when handed to ValidationSchedule.
     4. Trainer remains responsible for composition and side effects, while its constructor now delegates in order to accelerator materialization, resolved policy application, connector construction, loop construction, and live-state initialization; these are private lifecycle phases rather than public builders or fabricated service classes.
     5. Checkpoint restoration now separates artifact and participant restoration from application of resumed epoch, step, loader cursor, and random-state coordinates, preserving one trajectory authority while keeping each transition within the method limit.
-    6. Defaults, invalid types and ranges, fast-development and overfit precedence, barebones policy, optimizer wiring, custom loader reconstruction, direct DDP, spawn, exact stateful continuation, checkpoint selection, and exact sharded model-parallel resume pass after decomposition.
+    6. A bounded Timer with no explicit epoch or step ceiling now makes time the governing stop condition, the presentation-only Timer retains the ordinary fallback, explicit ceilings remain authoritative, and accumulation is inspectable from Trainer; default, invalid, optimizer, loader, DDP, spawn, continuation, checkpoint, and model-parallel probes pass.
 
 | Architecture Decision | Core Module, DataModule, Metric, and Hook Surface | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
 
