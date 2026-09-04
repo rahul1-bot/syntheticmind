@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from fsspec.spec import AbstractFileSystem
 
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     dirname,
     exists,
     get_filesystem,

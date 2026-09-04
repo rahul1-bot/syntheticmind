@@ -16,7 +16,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.checkpoint_io import 
 )
 from syntheticmind.strategies.model_parallel_checkpointing.generation import CheckpointBroadcast
 from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.filesystem import is_file, normalize_path
+from syntheticmind.storage.filesystem import is_file, normalize_path
 from syntheticmind.utilities.types import (
     CheckpointDict,
     CheckpointValue,

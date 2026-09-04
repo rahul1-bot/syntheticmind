@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 
-from syntheticmind.utilities.filesystem import join_path, normalize_path
+from syntheticmind.storage.filesystem import join_path, normalize_path
 from syntheticmind.utilities.types import HyperparameterDict
 
 __all__: list[str] = ["Logger"]

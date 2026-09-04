@@ -10,7 +10,7 @@ import torch
 import yaml
 from torch import nn
 
-from syntheticmind.utilities.filesystem import basename, exists, open_binary, open_text
+from syntheticmind.storage.filesystem import basename, exists, open_binary, open_text
 from syntheticmind.utilities.types import (
     CheckpointDict,
     CheckpointValue,

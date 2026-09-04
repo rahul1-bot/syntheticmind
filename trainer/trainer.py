@@ -65,7 +65,7 @@ from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     basename,
     list_directory,
     modified_time,

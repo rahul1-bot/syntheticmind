@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import override
 
 from syntheticmind.profilers.profiler import Profiler
-from syntheticmind.utilities.filesystem import join_path, local_artifact_path
+from syntheticmind.storage.filesystem import join_path, local_artifact_path
 
 __all__: list[str] = ["AdvancedProfiler"]
 

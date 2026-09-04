@@ -13,6 +13,7 @@
 | `callbacks/` | The lifecycle callbacks: checkpointing, early stopping, exponential moving averages, monitoring, guarding, and profiling. |
 | `loggers/` | The metric-logger interface with CSV and TensorBoard implementations. |
 | `profilers/` | Runtime action measurement and trace export. |
+| `storage/` | Local and remote filesystem boundaries shared by checkpoints, loggers, profilers, and run artifacts. |
 | `utilities/` | Transitional shared infrastructure being reassigned to semantic framework owners. |
 
 ## Contracts

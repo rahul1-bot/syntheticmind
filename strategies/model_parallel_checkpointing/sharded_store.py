@@ -16,7 +16,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.generation import (
     _CheckpointGenerationPointer
 )
 from syntheticmind.utilities.exceptions import CheckpointError
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     basename, is_directory, is_file, is_local_path, join_path,
     list_directory, make_directory, normalize_path, remove_path
 )

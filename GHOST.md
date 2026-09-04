@@ -298,3 +298,8 @@
     1. `TorchCheckpointIO` now owns local atomic serialization, remote transactional upload, explicit device mapping, weights-only selection, payload validation, and missing-path diagnostics directly.
     2. Model-parallel full checkpoints and sharded metadata compose `TorchCheckpointIO` instead of importing duplicate free save and load operations. Distributed shard persistence remains owned by the sharded store and PyTorch distributed checkpoint API.
     3. The former checkpoint utility module was deleted without a façade. Canonical model hydration, asynchronous snapshot isolation, full and sharded model-parallel persistence, and injected metadata or publication failure recovery pass through the checkpoint owners.
+
+| Architecture Decision | Filesystem Storage Boundary | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
+
+    1. Filesystem protocol resolution, local and remote path semantics, resource opening, artifact staging, metadata queries, copying, and removal moved to `storage/filesystem.py` because they form an external storage boundary shared by persistence owners.
+    2. Checkpoints, loggers, profilers, callbacks, and Trainer artifacts now depend on the explicit storage package without a utility compatibility path. Local and in-memory remote checkpoint transport, model hydration, and metric lifecycle verification pass after relocation.

@@ -288,3 +288,8 @@
 
     1. ✅ Local and remote torch serialization moved onto `TorchCheckpointIO`, model-parallel metadata composes that owner, and the free checkpoint utility module was removed.
     2. ✅ Model hydration, asynchronous snapshot isolation, sharded two-rank persistence, and injected distributed failure atomicity pass after consolidation.
+
+| Progress Complete | Filesystem Storage Boundary | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
+
+    1. ✅ Filesystem and artifact operations moved from utilities to the explicit storage boundary with every production and verification import updated.
+    2. ✅ Local and remote checkpoint transport, model hydration, and metric lifecycle execution pass through the new canonical path.

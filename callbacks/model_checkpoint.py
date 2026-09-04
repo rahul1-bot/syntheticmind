@@ -17,7 +17,7 @@ from loguru import logger as log
 from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     exists,
     file_size,
     is_file,

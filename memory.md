@@ -298,3 +298,8 @@
     1. Atomic file replacement, remote transaction boundaries, map location, weights-only loading, and payload validation are checkpoint transport behavior and belong on `TorchCheckpointIO` rather than free persistence functions.
     2. Model-parallel metadata may reuse the ordinary checkpoint transport while distributed tensor shards retain their specialized store. Composition preserves the difference between metadata serialization and distributed state publication without duplicating either lifecycle.
     3. Failure injection must prove that a metadata write or active-generation publication failure cannot replace the preceding durable sharded generation.
+
+| Memory | Filesystem Is Infrastructure, Not Utility | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
+
+    1. Protocol-aware paths, binary and text resources, artifact staging, and remote transactions constitute one external storage boundary even when many framework concepts consume it.
+    2. A shared boundary belongs in a precise top-level package when no single checkpoint, logger, profiler, or Trainer consumer owns its complete lifecycle.

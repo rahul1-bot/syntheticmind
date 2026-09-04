@@ -10,7 +10,7 @@ from syntheticmind.loggers.csv_logger import CSVLogger
 from syntheticmind.loggers.logger import Logger, _NoOpLogger
 from syntheticmind.loggers.tensorboard import TensorBoardLogger
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     basename,
     is_directory,
     join_path,

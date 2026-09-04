@@ -11,7 +11,7 @@ from pathlib import Path
 
 from torch import nn
 
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     append_text,
     exists,
     is_local_path,

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import override
 
 from syntheticmind.loggers.logger import Logger
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     exists,
     file_size,
     is_local_path,

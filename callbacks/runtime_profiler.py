@@ -48,7 +48,7 @@ from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.trainer.trainer import Trainer
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     append_text,
     exists,
     join_path,

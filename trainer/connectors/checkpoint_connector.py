@@ -19,7 +19,7 @@ from syntheticmind.plugins.checkpoint_io import (
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
 from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.filesystem import (
+from syntheticmind.storage.filesystem import (
     basename,
     list_directory,
     modified_time,
