@@ -8,7 +8,7 @@
 | `model_checkpoint.py` | `ModelCheckpoint`, which writes durable checkpoints on a configured cadence with monitored-metric selection; this is the mechanism behind the study's registered checkpoint gate. |
 | `early_stopping.py` | `EarlyStopping`, which stops a run on a monitored metric with patience. |
 | `timer.py` | `TimerCallback`, which enforces wall-time budgets. |
-| `nan_inf_guard.py` | `NanInfGuard`, which halts on non-finite losses or gradients instead of training through numerical corruption. |
+| `finite_value_guard.py` | `FiniteValueGuard`, which rejects non-finite loss before backward and optional non-finite gradients before optimizer stepping. |
 | `weight_averaging.py` | `EMAWeightAveraging`, which tracks resumable exponential moving averages and evaluates under averaged parameters. |
 | `lr_monitor.py` | `LearningRateMonitor`, which records per-group learning rates. |
 | `progress_bar.py` | `ProgressBarCallback`, which reports stage progress. |

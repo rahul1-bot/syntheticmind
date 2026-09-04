@@ -290,3 +290,11 @@
     5. DTensor and sharded model state are rejected explicitly because correct distributed average persistence is not implemented; DDP and MPS are supported and verified.
     6. The cohesive 402-line module and 376-line callback exceed the generic class threshold under the concept-integrity authority; splitting one averaging algorithm into a one-consumer manager or store is rejected.
     7. CPU parameter and buffer behavior, accumulation cadence, invalid configuration, failure rollback, full and weights-only mid-swap checkpoints, exact interrupted resume, MPS placement, spawned DDP transfer, and model-parallel rejection pass.
+
+| Architecture Decision | Pre-Mutation Finite Value Guard | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |
+
+    1. The batch-end `NanInfGuard` was replaced by `FiniteValueGuard`, whose name and configuration match the values it actually inspects.
+    2. Loss tensors are rejected in `on_before_backward`, and optional dense or sparse gradient values are rejected in `on_after_backward`; both hooks execute before optimizer mutation through the shared precision and Strategy backward path.
+    3. Automatic, manual, accumulated, and distributed optimization therefore share one preventive boundary rather than inspecting detached step output after the optimizer has already run.
+    4. Configuration rejects non-boolean gradient checks, and failures report epoch, global step, and the offending parameter without introducing state or checkpoint surface.
+    5. Automatic loss, automatic gradient, manual loss, parameter immutability, and spawned DDP failure-cleanup probes pass.

@@ -109,14 +109,6 @@
     6. Trainer restoration and class reconstruction share hook and strictness meanings even though only Trainer restoration includes optimizer, scheduler, callback, datamodule, precision, loop, loader, and random state.
     7. Checkpoint-controlled import paths are executable behavior. SyntheticMind rejects external instantiators instead of inheriting a vendor CLI allowlist.
 
-| Memory | Verification and Environment Discipline | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
-
-    1. `ruff`, `mypy`, `pyright`, every other linter, and every static type checker are prohibited.
-    2. Guideline compliance is reviewed directly, while behavior is proven through focused assertions, complete stage execution, exception paths, signatures, inheritance inspection, compilation, and diff review.
-    3. CPU-only success cannot establish accelerator or distributed capability; MPS, launcher-specific, and direct process-group paths are selected according to real ownership boundaries.
-    4. Ignored verification programs under `external/` are disposable evidence and never enter the tracked project history.
-    5. A completed phase is not synchronized until the accepted commit exists on both local `dev` and `origin/dev` at the same revision.
-
 | Memory | Model-Parallel Evidence and Persistence Ownership | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
 
     1. A standalone DTensor and distributed-checkpoint probe establishes only PyTorch runtime availability; it does not establish SyntheticMind Trainer wiring, hook order, optimizer restoration, callback participation, progress continuation, or failure cleanup.
@@ -296,3 +288,11 @@
     4. Floating and complex tensors admit exponential averaging, while integer and boolean buffers must copy the latest value. Shape and key drift are hard failures rather than silent zip truncation.
     5. Evaluation swaps require exception and teardown rollback, and weights-only checkpoint hooks must still execute because suppressing callback state does not suppress checkpoint-consistency behavior.
     6. Unsupported sharded or DTensor averaging must fail explicitly until average-state representation and distributed checkpoint restoration have executable semantics.
+
+| Memory | Finite Checks Must Precede Mutation | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |
+
+    1. Checking loss or gradients at batch end is too late because the optimizer may already have consumed non-finite values and corrupted parameters or state.
+    2. Loss finiteness belongs at `on_before_backward`; gradient finiteness belongs at `on_after_backward`, which serves automatic, manual, accumulated, mixed-precision, and distributed backward paths before stepping.
+    3. Gradient inspection must examine coalesced sparse values rather than applying dense-only tensor operations to sparse storage.
+    4. A numerical guard should name what it checks and expose a strict gradient switch; checking gradients is not checking parameters.
+    5. Distributed failure evidence must establish that every worker exits and no optimizer mutation occurred, not merely that one rank printed an exception.

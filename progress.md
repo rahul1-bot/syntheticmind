@@ -237,8 +237,8 @@
 
 | Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. EarlyStopping, learning-rate monitoring, throughput monitoring, device statistics, numerical checks, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
-    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose current parameters are ignored or whose hook timing permits corrupted optimizer state.
+    1. EarlyStopping, learning-rate monitoring, throughput monitoring, device statistics, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
+    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose current parameters are ignored or whose persisted state accepts semantically invalid values.
     3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
 
 | Progress Complete | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
@@ -248,3 +248,10 @@
     3. ✅ Average state uses canonical callback persistence, checkpoints built during a swap preserve live model tensors under the sole `state_dict` key, and callback hooks now run for weights-only checkpoint consistency.
     4. ✅ CPU, MPS, accumulated optimization, evaluation, failure, full checkpoint, weights-only checkpoint, exact resume, and spawned DDP paths pass.
     5. ✅ DTensor and sharded models fail with an explicit unsupported-capability error instead of running an unverified average-state path.
+
+| Progress Complete | Pre-Mutation Finite Value Guard | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |
+
+    1. ✅ `NanInfGuard` and its post-optimizer batch-end check were replaced by `FiniteValueGuard` with strict gradient-check configuration.
+    2. ✅ Non-finite loss fails before backward, and optional dense or sparse non-finite gradients fail after backward but before optimizer stepping.
+    3. ✅ Automatic and manual optimization failures preserve the original parameter state, while finite accumulated optimization remains on the shared backward path.
+    4. ✅ Spawned two-rank DDP propagates the causal finite-value error and exits without applying an optimizer update.

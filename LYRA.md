@@ -169,3 +169,9 @@
     2. Evaluation uses reversible average-weight swaps, failures restore live tensors, and final training state becomes averaged only after a real update.
     3. Checkpoints created during an average swap preserve live training state under the canonical schema for both full and weights-only artifacts.
     4. DDP and MPS paths are verified; sharded and DTensor paths are rejected until their average-state persistence can be represented correctly.
+
+| Strategic Note | Preventive Numerical Failure Boundary | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |
+
+    1. Finite-value enforcement moved ahead of optimizer mutation: loss is checked before backward and gradients immediately after backward.
+    2. Automatic, manual, accumulated, precision-mediated, and distributed paths share the same callback boundary instead of inspecting batch output after stepping.
+    3. The renamed callback exposes only the real optional cost, gradient scanning, and reports positioned failures before state corruption.
