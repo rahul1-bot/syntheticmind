@@ -10,6 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import IO, ClassVar, Literal, Self, cast, overload, override
 
+import numpy as np
 import syntheticmind
 import torch
 import torch.distributed as dist
@@ -31,7 +32,6 @@ from syntheticmind.loggers.logger import Logger
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
-from syntheticmind.utilities.tensor_collections import transform_tensor_collection
 from syntheticmind.utilities.types import (
     Batch,
     BackwardInputs,
@@ -952,7 +952,7 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
             group=resolved_group,
             sync_grads=sync_grads
         )
-        return transform_tensor_collection(data, self.device, gather_tensor)
+        return self._transform_gather_data(data, self.device, gather_tensor)
 
     @property
     def current_epoch(self) -> int:
@@ -998,13 +998,70 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
     def _gather_tensor(
         self,
         tensor: torch.Tensor,
-        group: dist.ProcessGroup,
+        group: dist.ProcessGroup | None,
         sync_grads: bool
     ) -> torch.Tensor:
         return self.trainer.strategy.all_gather(
             tensor,
             group=group,
             sync_grads=sync_grads
+        )
+
+    def _transform_gather_data(
+        self,
+        data: GatherData,
+        device: torch.device,
+        transform: Callable[[torch.Tensor], torch.Tensor]
+    ) -> GatherResult:
+        if isinstance(data, torch.Tensor):
+            tensor: torch.Tensor = data.to(device)
+            return transform(tensor)
+        if isinstance(data, np.ndarray):
+            tensor: torch.Tensor = torch.from_numpy(data).to(device)
+            return transform(tensor)
+        if type(data) is bool:
+            tensor: torch.Tensor = torch.tensor(data, device=device, dtype=torch.uint8)
+            return transform(tensor)
+        if type(data) is int:
+            tensor: torch.Tensor = torch.tensor(data, device=device, dtype=torch.int)
+            return transform(tensor)
+        if type(data) is float:
+            tensor: torch.Tensor = torch.tensor(data, device=device, dtype=torch.float)
+            return transform(tensor)
+        if isinstance(data, dict):
+            transformed_mapping: dict[str | int, GatherResult] = {
+                key: self._transform_gather_data(value, device, transform)
+                for key, value in data.items()
+            }
+            return transformed_mapping
+        if isinstance(data, list):
+            transformed_list: list[GatherResult] = [
+                self._transform_gather_data(value, device, transform)
+                for value in data
+            ]
+            return transformed_list
+        if isinstance(data, tuple):
+            transformed_tuple: tuple[GatherResult, ...] = tuple(
+                self._transform_gather_data(value, device, transform)
+                for value in data
+            )
+            if hasattr(data, "_fields"):
+                tuple_factory: Callable[
+                    [tuple[GatherResult, ...]],
+                    tuple[GatherResult, ...]
+                ] = cast(
+                    Callable[
+                        [tuple[GatherResult, ...]],
+                        tuple[GatherResult, ...]
+                    ],
+                    getattr(type(data), "_make")
+                )
+                return tuple_factory(transformed_tuple)
+            return transformed_tuple
+        raise TypeError(
+            "all_gather data must be a tensor, NumPy array, bool, int, float, "
+            "or a nested dict, list, or tuple containing those values, got "
+            f"{type(data).__name__}."
         )
 
 

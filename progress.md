@@ -273,3 +273,8 @@
     1. ✅ Seed management and console rendering moved to Trainer, metric accumulation moved to the logger connector, and model materialization moved to Strategy ownership.
     2. ✅ The dead compile and channels-last façade module was removed with no compatibility alias because the harness had no current consumer for either duplicate operation.
     3. ✅ Local metrics, optimization, spawned distributed TorchMetrics, and model-parallel materialization pass through the canonical owner paths.
+
+| Progress Complete | Core Tensor Transfer Ownership | Date: 04 September 2026 | Time: 11:18 AM | Name: Ghost |
+
+    1. ✅ Batch placement moved to the core data-transfer boundary and the one-consumer tensor-collection utility was absorbed into `Module.all_gather` as private behavior.
+    2. ✅ Local prediction transfer, local nested gather, spawned two-rank gather, subgroup ordering, and spawned multi-stage loader execution pass without compatibility façades.

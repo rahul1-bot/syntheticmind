@@ -279,3 +279,10 @@
     3. Empty initialization, parameter materialization, and reset interception moved to `strategies/model_initialization.py` because execution topology determines when and where model parameters may be allocated and initialized.
     4. The unused compilation utility module was deleted. No current production consumer invoked either its compile or channels-last façade, so retaining it would preserve dead duplicate entrypoints over native PyTorch operations.
     5. Local metric views, optimizer execution, spawned two-rank TorchMetrics reduction, and two-rank model-parallel materialization pass after relocation, proving that the concepts remain importable and serializable under their new owners.
+
+| Architecture Decision | Core Tensor Transfer Ownership | Date: 04 September 2026 | Time: 11:18 AM | Name: Ghost |
+
+    1. Recursive batch placement moved to `core/data_transfer.py` because it implements the default data-transfer hook contract and prediction output transfer rather than a generic application utility.
+    2. The separate tensor-collection transformation module was removed because `Module.all_gather` was its only consumer. Tensor conversion, nested-structure preservation, and gather application now form one private Module operation beside the public collective entrypoint.
+    3. No wrapper class, public alias, or compatibility module was introduced. Named tuples, mappings, lists, tuples, NumPy arrays, scalar conversion, devices, process groups, and differentiable gather semantics remain preserved.
+    4. Local CPU and MPS placement, local prediction output collection, nested local gather, spawned two-rank gather, subgroup gather, and spawned multi-stage data transfer pass after the ownership change.

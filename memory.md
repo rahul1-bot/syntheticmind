@@ -281,3 +281,9 @@
     1. Randomness configuration changes with Trainer run construction, console rendering changes with Trainer lifecycle observation, metric accumulation changes with logger reduction semantics, and model materialization changes with Strategy topology. None is a generic utility concern.
     2. A one-consumer helper module should be deleted when it duplicates a native framework operation, or moved beside its natural owner when it carries reusable state or a complete mechanism used by that owner.
     3. Import relocation is incomplete until spawned workers and distributed strategies deserialize the moved class successfully. Compilation and local unit behavior alone cannot prove a process-boundary move.
+
+| Memory | Tensor Traversal Belongs With Its Operation | Date: 04 September 2026 | Time: 11:18 AM | Name: Ghost |
+
+    1. Generic recursive traversal is not automatically an independent concept. When one operation is the sole consumer, the traversal remains a private method on that operation's natural owner.
+    2. Batch device placement is shared by the data-hook contract and prediction collection, so it earns a precise core data-transfer module. Collective input conversion is used only by `Module.all_gather` and therefore does not earn a parallel module.
+    3. Nested collection preservation must be verified across local and distributed execution because named tuples, process groups, scalar tensorization, and worker serialization can fail independently.

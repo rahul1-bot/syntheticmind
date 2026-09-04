@@ -6,6 +6,7 @@
 |---|---|
 | `module.py` | `Module`, the model contract, with its live `LoggedMetric` records. |
 | `datamodule.py` | `DataModule`, the data contract, and `DatasetDataModule`. |
+| `data_transfer.py` | Recursive tensor and tensor-like batch placement used by data-transfer hooks and prediction output collection. |
 | `hooks.py` | The `ModelHooks`, `DataHooks`, and `CheckpointHooks` lifecycle contracts. |
 | `optimizer.py` | Managed optimizer access, accepted `configure_optimizers` declarations, scheduler configuration, and declaration parsing. |
 | `saving.py` | Model reconstruction from canonical SyntheticMind checkpoints and explicit hyperparameter sources. |

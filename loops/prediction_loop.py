@@ -35,7 +35,7 @@ from syntheticmind.loops.loop import Loop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
-from syntheticmind.utilities.data_transfer import move_data_to_device
+from syntheticmind.core.data_transfer import move_data_to_device
 from syntheticmind.utilities.evaluation import evaluation_context
 from syntheticmind.utilities.model_helpers import (
     ModuleMode,
