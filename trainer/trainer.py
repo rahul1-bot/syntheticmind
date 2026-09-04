@@ -72,6 +72,7 @@ from syntheticmind.storage.filesystem import (
 )
 from syntheticmind.trainer.seed import SeedManager
 from syntheticmind.types import (
+    Batch,
     CheckpointDict,
     CheckpointValue,
     ClipAlgorithm,
@@ -90,6 +91,16 @@ __all__: list[str] = ["Trainer"]
 type _TeardownFailure = tuple[str, BaseException]
 type _HookOwner = Module | DataModule | DataHooks | ModelHooks
 type _HookCallable = Callable[..., ModelOutput | DataLoaderSource | None]
+type _PrintValue = (
+    Batch
+    | ModelOutput
+    | Path
+    | BaseException
+    | torch.dtype
+    | torch.device
+    | torch.nn.Module
+    | torch.optim.Optimizer
+)
 
 
 class Trainer:
@@ -492,12 +503,22 @@ class Trainer:
                 f"`model` must be a Module, got {type(model).__qualname__}."
             )
         module: Module = model
-        if isinstance(train_dataloaders, DataModule):
-            datamodule = train_dataloaders
-            train_dataloaders = None
+        resolved_datamodule: DataModule | None = (
+            train_dataloaders
+            if isinstance(train_dataloaders, DataModule)
+            else datamodule
+        )
+        resolved_train_dataloaders: DataLoaderSource | CombinedLoader | None = (
+            None
+            if isinstance(train_dataloaders, DataModule)
+            else train_dataloaders
+        )
         if (
-            datamodule is not None
-            and (train_dataloaders is not None or val_dataloaders is not None)
+            resolved_datamodule is not None
+            and (
+                resolved_train_dataloaders is not None
+                or val_dataloaders is not None
+            )
         ):
             raise MisconfigurationError(
                 "You cannot pass `train_dataloaders` or `val_dataloaders` "
@@ -510,7 +531,9 @@ class Trainer:
             requested_checkpoint_path is None
             and not self._checkpoint_connector.user_managed
         ):
-            requested_checkpoint_path = self.resume_from_checkpoint
+            requested_checkpoint_path: str | Path | None = (
+                self.resume_from_checkpoint
+            )
         resume_path: str | Path | None = self._select_checkpoint_path(
             requested_checkpoint_path,
             stage="fit",
@@ -518,20 +541,16 @@ class Trainer:
             ckpt_path_provided=ckpt_path is not None
         )
         self._attach_model_callbacks(module, "fit")
-        launcher: _ProcessLauncher | None = (
-            self.strategy.launcher
-            if isinstance(self.strategy, ParallelStrategy)
-            else None
-        )
+        launcher: _ProcessLauncher | None = self._stage_launcher()
         if launcher is not None and launcher.should_launch:
             try:
                 launcher.launch(
                     "fit",
                     self,
                     module,
-                    datamodule,
+                    resolved_datamodule,
                     {
-                        "train_dataloaders": train_dataloaders,
+                        "train_dataloaders": resolved_train_dataloaders,
                         "val_dataloaders": val_dataloaders,
                         "ckpt_path": resume_path,
                         "weights_only": weights_only
@@ -541,16 +560,85 @@ class Trainer:
                 self._clear_model_callback_configuration("fit")
                 self.state.finish()
             return
+        self._fit_impl(
+            module,
+            resolved_train_dataloaders,
+            val_dataloaders,
+            resolved_datamodule,
+            resume_path,
+            weights_only
+        )
+
+    def _fit_impl(
+        self,
+        module: Module,
+        train_dataloaders: DataLoaderSource | CombinedLoader | None,
+        val_dataloaders: DataLoaderSource | CombinedLoader | None,
+        datamodule: DataModule | None,
+        resume_path: str | Path | None,
+        weights_only: bool | None
+    ) -> None:
+        active_module: Module = module
+        self._begin_fit_stage(
+            active_module,
+            datamodule,
+            train_dataloaders,
+            val_dataloaders
+        )
+        training_modes: dict[str, bool] = active_module._capture_training_modes()
+        fit_completed: bool = False
+        try:
+            fit_preparation: tuple[Module, CheckpointDict | None] = (
+                self._prepare_fit_stage(
+                    active_module,
+                    datamodule,
+                    resume_path,
+                    weights_only
+                )
+            )
+            active_module: Module = fit_preparation[0]
+            preloaded_checkpoint: CheckpointDict | None = fit_preparation[1]
+            self._configure_fit_optimization(active_module)
+            self._restore_fit_checkpoint(
+                active_module,
+                resume_path,
+                weights_only,
+                preloaded_checkpoint
+            )
+            self._start_fit_stage(active_module, datamodule, resume_path)
+            self._run_fit_stage(active_module)
+            fit_completed: bool = True
+        except BaseException as exception:
+            attached_module: Module | None = self.module
+            if attached_module is not None:
+                active_module: Module = attached_module
+            self._handle_exception(active_module, datamodule, exception)
+        finally:
+            self._finish_stage(
+                active_module,
+                datamodule,
+                "fit",
+                fit_completed,
+                training_modes
+            )
+
+    def _begin_fit_stage(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        train_dataloaders: DataLoaderSource | CombinedLoader | None,
+        val_dataloaders: DataLoaderSource | CombinedLoader | None
+    ) -> None:
         self.state.set_stage("fit")
-        self._active_exception = None
+        self._active_exception: BaseException | None = None
         self.state.reset_on_run()
-        self._is_mid_epoch_validation = False
+        self._is_mid_epoch_validation: bool = False
         self._logger_connector.clear_metric_views()
         module._reset_logging_state()
         self._reset_progress_bar_metrics()
         self._data_connector.reset_fit()
         self._checkpoint_connector.reset_training_continuation()
-        self.fit_loop.should_stop = False
+        self.fit_loop.should_stop: bool = False
         if self.fit_loop.epoch_loop is not None:
             self.fit_loop.epoch_loop.reset_on_run()
         self._attach_data(module, datamodule)
@@ -566,206 +654,242 @@ class Trainer:
             datamodule,
             val_dataloaders
         )
-        module._current_epoch = 0
-        module._global_step = 0
-        training_modes: dict[str, bool] = module._capture_training_modes()
-        fit_completed: bool = False
+        module._current_epoch: int = 0
+        module._global_step: int = 0
 
-        try:
-            self._signal_connector.register_signal_handlers()
-            self.strategy.setup_environment()
-            self._announce_barebones_stage("fit")
-            self._setup_profiler("fit", module)
+    def _prepare_fit_stage(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        resume_path: str | Path | None,
+        weights_only: bool | None
+    ) -> tuple[Module, CheckpointDict | None]:
+        self._signal_connector.register_signal_handlers()
+        self.strategy.setup_environment()
+        self._announce_barebones_stage("fit")
+        self._setup_profiler("fit", module)
+        self._prepare_data_and_setup(module, datamodule, "fit")
+        preloaded_checkpoint: CheckpointDict | None = self._preload_fit_checkpoint(
+            module,
+            datamodule,
+            resume_path,
+            weights_only
+        )
+        if (
+            self.limit_train_batches != 0
+            and self._hook_is_overridden("training_step", module, Module)
+        ):
+            self._request_dataloaders("train")
+        else:
+            self._data_connector.total_train_batches: int | None = 0
+        self._configure_validation_schedule(reset_time=True)
+        self._warn_about_dataloader_workers()
+        device: torch.device = self._resolve_device()
+        configured_module: Module = self._setup_model(module, device)
+        return configured_module, preloaded_checkpoint
 
-            self._prepare_data_and_setup(module, datamodule, "fit")
+    def _preload_fit_checkpoint(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        resume_path: str | Path | None,
+        weights_only: bool | None
+    ) -> CheckpointDict | None:
+        if resume_path is None:
+            return None
+        checkpoint: CheckpointDict = self._checkpoint_connector.load_metadata(
+            resume_path,
+            weights_only
+        )
+        resume_epoch: int = self._checkpoint_connector.integer_value(
+            checkpoint.get("epoch"),
+            0
+        )
+        resume_global_step: int = self._checkpoint_connector.integer_value(
+            checkpoint.get("global_step"),
+            0
+        )
+        self.state.load_state_dict(
+            {
+                "current_epoch": resume_epoch,
+                "global_step": resume_global_step
+            }
+        )
+        module._current_epoch: int = resume_epoch
+        module._global_step: int = resume_global_step
+        if datamodule is not None:
+            self._checkpoint_connector.load_datamodule_state(checkpoint, datamodule)
+        return checkpoint
 
-            preloaded_checkpoint: CheckpointDict | None = None
-            if resume_path is not None:
-                preloaded_checkpoint: CheckpointDict | None = (
-                    self._checkpoint_connector.load_metadata(
-                        resume_path,
-                        weights_only
-                    )
-                )
-                resume_epoch: int = self._checkpoint_connector.integer_value(
-                    preloaded_checkpoint.get("epoch"),
-                    0
-                )
-                resume_global_step: int = self._checkpoint_connector.integer_value(
-                    preloaded_checkpoint.get("global_step"),
-                    0
-                )
-                self.state.load_state_dict(
-                    {
-                        "current_epoch": resume_epoch,
-                        "global_step": resume_global_step
-                    }
-                )
-                module._current_epoch = resume_epoch
-                module._global_step = resume_global_step
-                if datamodule is not None:
-                    self._checkpoint_connector.load_datamodule_state(
-                        preloaded_checkpoint,
-                        datamodule
-                    )
-
+    def _warn_about_dataloader_workers(self) -> None:
+        if not self.is_global_zero:
+            return
+        combined_loader: CombinedLoader | None = (
+            self._data_connector.train_combined_loader
+        )
+        if combined_loader is None:
+            return
+        for train_dataloader in combined_loader.flattened:
             if (
-                self.limit_train_batches != 0
-                and self._hook_is_overridden("training_step", module, Module)
+                isinstance(train_dataloader, torch.utils.data.DataLoader)
+                and train_dataloader.num_workers == 0
+                and not isinstance(self.accelerator, CPUAccelerator)
             ):
-                self._request_dataloaders("train")
-            else:
-                self._data_connector.total_train_batches = 0
-            self._configure_validation_schedule(reset_time=True)
-
-            if self.is_global_zero:
-                combined_loader: CombinedLoader | None = self._data_connector.train_combined_loader
-                if combined_loader is not None:
-                    for train_dataloader in combined_loader.flattened:
-                        if (
-                            isinstance(train_dataloader, torch.utils.data.DataLoader)
-                            and train_dataloader.num_workers == 0
-                            and not isinstance(self.accelerator, CPUAccelerator)
-                        ):
-                            log.warning("num_workers=0 with GPU accelerator. Consider increasing for better throughput.")
-                            break
-
-            device: torch.device = self._resolve_device()
-            module = self._setup_model(module, device)
-
-            training_step_signature: inspect.Signature = inspect.signature(module.training_step)
-            if "optimizer_idx" in training_step_signature.parameters:
-                raise RuntimeError(
-                    "Training with multiple optimizers is only supported with manual optimization. Remove "
-                    "the optimizer_idx parameter from training_step, set automatic_optimization = False, "
-                    "and access optimizers through self.optimizers()."
+                log.warning(
+                    "num_workers=0 with GPU accelerator. Consider increasing "
+                    "for better throughput."
                 )
-            optimization_configuration: OptimizerLRScheduler = self._call_module_hook(
+                return
+
+    def _configure_fit_optimization(self, module: Module) -> None:
+        training_step_signature: inspect.Signature = inspect.signature(
+            module.training_step
+        )
+        if "optimizer_idx" in training_step_signature.parameters:
+            raise RuntimeError(
+                "Training with multiple optimizers is only supported with manual "
+                "optimization. Remove the optimizer_idx parameter from training_step, "
+                "set automatic_optimization = False, and access optimizers through "
+                "self.optimizers()."
+            )
+        optimization_configuration: OptimizerLRScheduler = self._call_module_hook(
+            module,
+            "configure_optimizers",
+            module.configure_optimizers
+        )
+        optimizer_parser: _OptimizerConfigurationParser = (
+            _OptimizerConfigurationParser(
+                module.automatic_optimization,
+                self._hook_is_overridden("lr_scheduler_step", module, Module)
+            )
+        )
+        optimizer_initialization: tuple[
+            list[torch.optim.Optimizer],
+            list[LRSchedulerConfig]
+        ] = optimizer_parser.resolve(optimization_configuration)
+        self.optimizers: list[torch.optim.Optimizer] = optimizer_initialization[0]
+        self.lr_scheduler_configs: list[LRSchedulerConfig] = (
+            optimizer_initialization[1]
+        )
+        precision_connection: tuple[
+            Module,
+            list[torch.optim.Optimizer],
+            list[LRSchedulerConfig]
+        ] = (
+            self._connect_precision_plugin(
                 module,
-                "configure_optimizers",
-                module.configure_optimizers
+                self.optimizers,
+                self.lr_scheduler_configs
             )
-            optimizer_parser: _OptimizerConfigurationParser = (
-                _OptimizerConfigurationParser(
-                    module.automatic_optimization,
-                    self._hook_is_overridden("lr_scheduler_step", module, Module)
-                )
-            )
-            optimizer_initialization: tuple[
-                list[torch.optim.Optimizer],
-                list[LRSchedulerConfig]
-            ] = optimizer_parser.resolve(optimization_configuration)
-            self.optimizers: list[torch.optim.Optimizer] = optimizer_initialization[0]
-            self.lr_scheduler_configs: list[LRSchedulerConfig] = optimizer_initialization[1]
-            module, self.optimizers, self.lr_scheduler_configs = (
-                self._connect_precision_plugin(
-                    module,
-                    self.optimizers,
-                    self.lr_scheduler_configs
-                )
-            )
-            epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
-            if epoch_loop is None:
-                raise RuntimeError("Trainer fit loop has no training epoch loop.")
-            strategy_model: torch.nn.Module | None = self.strategy.model
-            if strategy_model is None:
-                raise RuntimeError("Strategy has no model for optimizer connection.")
-            self._synthetic_optimizers: list[SyntheticOptimizer] = []
-            optimizer: torch.optim.Optimizer
-            for optimizer in self.optimizers:
-                synthetic_optimizer: SyntheticOptimizer = SyntheticOptimizer(optimizer)
-                synthetic_optimizer.connect(
-                    strategy_model,
-                    partial(epoch_loop.optimizer_step, self, module),
-                    partial(epoch_loop._automatic_optimizer_step, self, module),
-                    module.toggled_optimizer,
-                    self.strategy.defer_backward_sync
-                )
-                self._synthetic_optimizers.append(synthetic_optimizer)
+        )
+        self.optimizers: list[torch.optim.Optimizer] = precision_connection[1]
+        self.lr_scheduler_configs: list[LRSchedulerConfig] = (
+            precision_connection[2]
+        )
+        self._connect_synthetic_optimizers(module)
+        self._validate_manual_optimization(module)
+        self._cache_primary_optimization()
 
-            if not module.automatic_optimization:
-                assert self.fit_loop.epoch_loop is not None
-                if self.fit_loop.epoch_loop.accumulate_grad_batches != 1:
-                    raise MisconfigurationError(
-                        "Manual optimization does not support accumulate_grad_batches != 1. "
-                        "Set accumulate_grad_batches = 1 and manage accumulation inside training_step if needed."
-                    )
-                if self.gradient_clip_val is not None and self.gradient_clip_val > 0:
-                    raise MisconfigurationError(
-                        "Manual optimization does not support automatic gradient clipping. "
-                        "Call module.clip_gradients(...) explicitly inside training_step if needed."
-                    )
-
-            self.optimizer: torch.optim.Optimizer | None = self.optimizers[0] if self.optimizers else None
-            self.schedulers: list[_SchedulerInstance] = [
-                configuration.scheduler for configuration in self.lr_scheduler_configs
-            ]
-            self.scheduler: _SchedulerInstance | None = (
-                self.schedulers[0] if self.schedulers else None
+    def _connect_synthetic_optimizers(self, module: Module) -> None:
+        epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
+        if epoch_loop is None:
+            raise RuntimeError("Trainer fit loop has no training epoch loop.")
+        strategy_model: torch.nn.Module | None = self.strategy.model
+        if strategy_model is None:
+            raise RuntimeError("Strategy has no model for optimizer connection.")
+        self._synthetic_optimizers: list[SyntheticOptimizer] = []
+        optimizer: torch.optim.Optimizer
+        for optimizer in self.optimizers:
+            synthetic_optimizer: SyntheticOptimizer = SyntheticOptimizer(optimizer)
+            synthetic_optimizer.connect(
+                strategy_model,
+                partial(epoch_loop.optimizer_step, self, module),
+                partial(epoch_loop._automatic_optimizer_step, self, module),
+                module.toggled_optimizer,
+                self.strategy.defer_backward_sync
             )
-            self.scheduler_config: LRSchedulerConfig | None = (
-                self.lr_scheduler_configs[0] if self.lr_scheduler_configs else None
+            self._synthetic_optimizers.append(synthetic_optimizer)
+
+    def _validate_manual_optimization(self, module: Module) -> None:
+        if module.automatic_optimization:
+            return
+        epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
+        if epoch_loop is None:
+            raise RuntimeError("Trainer fit loop has no training epoch loop.")
+        if epoch_loop.accumulate_grad_batches != 1:
+            raise MisconfigurationError(
+                "Manual optimization does not support accumulate_grad_batches != 1. "
+                "Set accumulate_grad_batches = 1 and manage accumulation inside "
+                "training_step if needed."
+            )
+        if self.gradient_clip_val is not None and self.gradient_clip_val > 0:
+            raise MisconfigurationError(
+                "Manual optimization does not support automatic gradient clipping. "
+                "Call module.clip_gradients(...) explicitly inside training_step if needed."
             )
 
+    def _cache_primary_optimization(self) -> None:
+        self.optimizer: torch.optim.Optimizer | None = (
+            self.optimizers[0] if self.optimizers else None
+        )
+        self.schedulers: list[_SchedulerInstance] = [
+            configuration.scheduler for configuration in self.lr_scheduler_configs
+        ]
+        self.scheduler: _SchedulerInstance | None = (
+            self.schedulers[0] if self.schedulers else None
+        )
+        self.scheduler_config: LRSchedulerConfig | None = (
+            self.lr_scheduler_configs[0] if self.lr_scheduler_configs else None
+        )
 
-            self._resolve_checkpoint_callback_directories()
-            if resume_path is not None:
-                assert preloaded_checkpoint is not None
-                self._restore_checkpoint(
-                    resume_path,
-                    module,
-                    weights_only=weights_only,
-                    checkpoint=None,
-                    restore_datamodule_state=False
-                )
-            synthetic_optimizer: SyntheticOptimizer
-            for synthetic_optimizer in self._synthetic_optimizers:
-                synthetic_optimizer.move_state_to(device)
-
-            self._callback_connector.validate_state_keys()
-
-            self._call_callback_hooks(module, "on_fit_start")
-            self._call_module_hook(
+    def _restore_fit_checkpoint(
+        self,
+        module: Module,
+        resume_path: str | Path | None,
+        weights_only: bool | None,
+        preloaded_checkpoint: CheckpointDict | None
+    ) -> None:
+        self._resolve_checkpoint_callback_directories()
+        if resume_path is not None:
+            if preloaded_checkpoint is None:
+                raise RuntimeError("Fit checkpoint metadata was not preloaded.")
+            self._restore_checkpoint(
+                resume_path,
                 module,
-                "on_fit_start",
-                module.on_fit_start
+                weights_only=weights_only,
+                checkpoint=None,
+                restore_datamodule_state=False
             )
+        device: torch.device = self._resolve_device()
+        synthetic_optimizer: SyntheticOptimizer
+        for synthetic_optimizer in self._synthetic_optimizers:
+            synthetic_optimizer.move_state_to(device)
 
-            self._autolog_hyperparameters(module, datamodule)
+    def _start_fit_stage(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        resume_path: str | Path | None
+    ) -> None:
+        self._callback_connector.validate_state_keys()
+        self._call_callback_hooks(module, "on_fit_start")
+        self._call_module_hook(module, "on_fit_start", module.on_fit_start)
+        self._autolog_hyperparameters(module, datamodule)
+        if (
+            self.enable_validation
+            and self.num_sanity_val_steps > 0
+            and resume_path is None
+        ):
+            self._sanity_check_validation(module)
+        self.state.set_running_stage("training")
+        module._running_stage: RunningStage | None = "training"
 
-            if (
-                self.enable_validation
-                and self.num_sanity_val_steps > 0
-                and resume_path is None
-            ):
-                self._sanity_check_validation(module)
-
-            self.state.set_running_stage("training")
-            module._running_stage = "training"
-
-            with torch.autograd.set_detect_anomaly(self._detect_anomaly):
-                self.fit_loop.run()
-
-            self._call_callback_hooks(module, "on_fit_end")
-            self._call_module_hook(module, "on_fit_end", module.on_fit_end)
-            self._raise_if_sigterm()
-            fit_completed: bool = True
-        except BaseException as exception:
-            self._handle_exception(module, datamodule, exception)
-        finally:
-            if not fit_completed:
-                module._restore_training_modes(training_modes)
-            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "fit")
-            module._running_stage = None
-            module._current_fx_name = None
-            self.state.finish()
-            self._active_exception = None
-            self._is_mid_epoch_validation = False
-            self._clear_model_callback_configuration("fit")
-            if self.fit_loop.epoch_loop is not None:
-                self.fit_loop.epoch_loop.reset_on_teardown()
-            if cleanup_exception is not None:
-                raise cleanup_exception
+    def _run_fit_stage(self, module: Module) -> None:
+        with torch.autograd.set_detect_anomaly(self._detect_anomaly):
+            self.fit_loop.run()
+        self._call_callback_hooks(module, "on_fit_end")
+        self._call_module_hook(module, "on_fit_end", module.on_fit_end)
+        self._raise_if_sigterm()
 
     def validate(
         self,
@@ -776,110 +900,16 @@ class Trainer:
         datamodule: DataModule | None = None,
         weights_only: bool | None = None
     ) -> list[dict[str, float]]:
-        model_provided: bool = model is not None
-        module: Module = self._resolve_model(model, "validate")
-        if isinstance(dataloaders, DataModule):
-            datamodule = dataloaders
-            dataloaders = None
-        if dataloaders is not None and datamodule is not None:
-            raise MisconfigurationError(
-                "You cannot pass both `Trainer.validate(dataloaders=..., datamodule=...)`."
-            )
-        if type(verbose) is not bool:
-            raise TypeError("`verbose` must be a bool.")
-        if weights_only is not None and type(weights_only) is not bool:
-            raise TypeError("`weights_only` must be a bool or None.")
-        self.validate_loop.verbose = verbose
-        selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
+        return self._evaluate(
+            "validate",
+            self.validate_loop,
+            model,
+            dataloaders,
             ckpt_path,
-            stage="validate",
-            model_provided=model_provided,
-            ckpt_path_provided=ckpt_path is not None
-        )
-        self._attach_model_callbacks(module, "validate")
-        launcher: _ProcessLauncher | None = (
-            self.strategy.launcher
-            if isinstance(self.strategy, ParallelStrategy)
-            else None
-        )
-        if launcher is not None and launcher.should_launch:
-            try:
-                return cast(
-                    list[dict[str, float]],
-                    launcher.launch(
-                        "validate",
-                        self,
-                        module,
-                        datamodule,
-                        {
-                            "dataloaders": dataloaders,
-                            "ckpt_path": selected_checkpoint_path,
-                            "verbose": verbose,
-                            "weights_only": weights_only
-                        }
-                    )
-                )
-            finally:
-                self._clear_model_callback_configuration("validate")
-                self.state.finish()
-        self.state.set_stage("validate")
-        self._active_exception = None
-        self._logger_connector.clear_metric_views()
-        module._reset_logging_state()
-        self._reset_progress_bar_metrics("validating")
-        self._data_connector.reset_stage("val")
-        self._attach_data(module, datamodule)
-        self._data_connector.attach_source(
-            "val",
-            module,
+            verbose,
             datamodule,
-            dataloaders
+            weights_only
         )
-
-        training_modes: dict[str, bool] = module._capture_training_modes()
-        stage_completed: bool = False
-        metrics: list[dict[str, float]] = []
-        try:
-            self._signal_connector.register_signal_handlers()
-            self.strategy.setup_environment()
-            self._announce_barebones_stage("validate")
-            self._setup_profiler("validate", module)
-
-            self._prepare_data_and_setup(module, datamodule, "validate")
-            self._request_dataloaders("val")
-
-            device: torch.device = self._resolve_device()
-            module = self._setup_model(module, device)
-            module, _, _ = self._connect_precision_plugin(module, [], [])
-            if selected_checkpoint_path is not None:
-                self._resolve_checkpoint_callback_directories()
-                self._restore_checkpoint(
-                    selected_checkpoint_path,
-                    module,
-                    weights_only=weights_only
-                )
-
-            self._autolog_hyperparameters(module, datamodule)
-
-            metrics: list[dict[str, float]] = self.validate_loop.run()
-            stage_completed: bool = True
-        except BaseException as exception:
-            self._handle_exception(module, datamodule, exception)
-        finally:
-            if not stage_completed:
-                module._restore_training_modes(training_modes)
-            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "validate")
-            module._running_stage = None
-            module._current_fx_name = None
-            self.state.finish()
-            self._active_exception = None
-            self._clear_model_callback_configuration("validate")
-            if cleanup_exception is not None:
-                raise cleanup_exception
-
-        if verbose and self.is_global_zero:
-            ConsoleRenderer().write_metrics("validation", metrics)
-        return metrics
 
     def test(
         self,
@@ -890,43 +920,65 @@ class Trainer:
         datamodule: DataModule | None = None,
         weights_only: bool | None = None
     ) -> list[dict[str, float]]:
+        return self._evaluate(
+            "test",
+            self.test_loop,
+            model,
+            dataloaders,
+            ckpt_path,
+            verbose,
+            datamodule,
+            weights_only
+        )
+
+    def _evaluate(
+        self,
+        stage: Literal["validate", "test"],
+        loop: EvaluationLoop,
+        model: Module | None,
+        dataloaders: DataLoaderSource | CombinedLoader | None,
+        ckpt_path: str | Path | None,
+        verbose: bool,
+        datamodule: DataModule | None,
+        weights_only: bool | None
+    ) -> list[dict[str, float]]:
         model_provided: bool = model is not None
-        module: Module = self._resolve_model(model, "test")
-        if isinstance(dataloaders, DataModule):
-            datamodule = dataloaders
-            dataloaders = None
-        if dataloaders is not None and datamodule is not None:
+        module: Module = self._resolve_model(model, stage)
+        resolved_datamodule: DataModule | None = (
+            dataloaders if isinstance(dataloaders, DataModule) else datamodule
+        )
+        resolved_dataloaders: DataLoaderSource | CombinedLoader | None = (
+            None if isinstance(dataloaders, DataModule) else dataloaders
+        )
+        if resolved_dataloaders is not None and resolved_datamodule is not None:
             raise MisconfigurationError(
-                "You cannot pass both `Trainer.test(dataloaders=..., datamodule=...)`."
+                f"You cannot pass both `Trainer.{stage}(dataloaders=..., "
+                "datamodule=...)`."
             )
         if type(verbose) is not bool:
             raise TypeError("`verbose` must be a bool.")
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
-        self.test_loop.verbose = verbose
+        loop.verbose: bool = verbose
         selected_checkpoint_path: str | Path | None = self._select_checkpoint_path(
             ckpt_path,
-            stage="test",
+            stage=stage,
             model_provided=model_provided,
             ckpt_path_provided=ckpt_path is not None
         )
-        self._attach_model_callbacks(module, "test")
-        launcher: _ProcessLauncher | None = (
-            self.strategy.launcher
-            if isinstance(self.strategy, ParallelStrategy)
-            else None
-        )
+        self._attach_model_callbacks(module, stage)
+        launcher: _ProcessLauncher | None = self._stage_launcher()
         if launcher is not None and launcher.should_launch:
             try:
                 return cast(
                     list[dict[str, float]],
                     launcher.launch(
-                        "test",
+                        stage,
                         self,
                         module,
-                        datamodule,
+                        resolved_datamodule,
                         {
-                            "dataloaders": dataloaders,
+                            "dataloaders": resolved_dataloaders,
                             "ckpt_path": selected_checkpoint_path,
                             "verbose": verbose,
                             "weights_only": weights_only
@@ -934,67 +986,136 @@ class Trainer:
                     )
                 )
             finally:
-                self._clear_model_callback_configuration("test")
+                self._clear_model_callback_configuration(stage)
                 self.state.finish()
-        self.state.set_stage("test")
-        self._active_exception = None
+        metrics: list[dict[str, float]] = self._evaluation_impl(
+            stage,
+            loop,
+            module,
+            resolved_dataloaders,
+            resolved_datamodule,
+            selected_checkpoint_path,
+            weights_only
+        )
+        if verbose and self.is_global_zero:
+            display_stage: str = "validation" if stage == "validate" else "test"
+            ConsoleRenderer().write_metrics(display_stage, metrics)
+        return metrics
+
+    def _evaluation_impl(
+        self,
+        stage: Literal["validate", "test"],
+        loop: EvaluationLoop,
+        module: Module,
+        dataloaders: DataLoaderSource | CombinedLoader | None,
+        datamodule: DataModule | None,
+        checkpoint_path: str | Path | None,
+        weights_only: bool | None
+    ) -> list[dict[str, float]]:
+        active_module: Module = module
+        data_stage: Literal["val", "test"] = (
+            "val" if stage == "validate" else "test"
+        )
+        running_stage: Literal["validating", "testing"] = (
+            "validating" if stage == "validate" else "testing"
+        )
+        self._begin_inference_stage(
+            active_module,
+            datamodule,
+            dataloaders,
+            stage,
+            data_stage,
+            running_stage
+        )
+        training_modes: dict[str, bool] = active_module._capture_training_modes()
+        stage_completed: bool = False
+        metrics: list[dict[str, float]] = []
+        try:
+            active_module: Module = self._prepare_inference_stage(
+                active_module,
+                datamodule,
+                stage,
+                data_stage,
+                checkpoint_path,
+                weights_only
+            )
+            metrics: list[dict[str, float]] = loop.run()
+            stage_completed: bool = True
+        except BaseException as exception:
+            attached_module: Module | None = self.module
+            if attached_module is not None:
+                active_module: Module = attached_module
+            self._handle_exception(active_module, datamodule, exception)
+        finally:
+            self._finish_stage(
+                active_module,
+                datamodule,
+                stage,
+                stage_completed,
+                training_modes
+            )
+        return metrics
+
+    def _begin_inference_stage(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        dataloaders: DataLoaderSource | CombinedLoader | None,
+        stage: Literal["validate", "test", "predict"],
+        data_stage: Literal["val", "test", "predict"],
+        running_stage: Literal["validating", "testing", "predicting"]
+    ) -> None:
+        self.state.set_stage(stage)
+        self._active_exception: BaseException | None = None
         self._logger_connector.clear_metric_views()
         module._reset_logging_state()
-        self._reset_progress_bar_metrics("testing")
-        self._data_connector.total_test_batches: list[int | None] | None = None
-        self._data_connector.reset_stage("test")
+        self._reset_progress_bar_metrics(running_stage)
+        self._data_connector.reset_stage(data_stage)
         self._attach_data(module, datamodule)
         self._data_connector.attach_source(
-            "test",
+            data_stage,
             module,
             datamodule,
             dataloaders
         )
 
-        training_modes: dict[str, bool] = module._capture_training_modes()
-        stage_completed: bool = False
-        metrics: list[dict[str, float]] = []
-        try:
-            self._signal_connector.register_signal_handlers()
-            self.strategy.setup_environment()
-            self._announce_barebones_stage("test")
-            self._setup_profiler("test", module)
-
-            self._prepare_data_and_setup(module, datamodule, "test")
-            self._request_dataloaders("test")
-
-            device: torch.device = self._resolve_device()
-            module = self._setup_model(module, device)
-            module, _, _ = self._connect_precision_plugin(module, [], [])
-            if selected_checkpoint_path is not None:
-                self._resolve_checkpoint_callback_directories()
-                self._restore_checkpoint(
-                    selected_checkpoint_path,
-                    module,
-                    weights_only=weights_only
-                )
-
-            self._autolog_hyperparameters(module, datamodule)
-
-            metrics: list[dict[str, float]] = self.test_loop.run()
-            stage_completed: bool = True
-        except BaseException as exception:
-            self._handle_exception(module, datamodule, exception)
-        finally:
-            if not stage_completed:
-                module._restore_training_modes(training_modes)
-            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "test")
-            module._running_stage = None
-            module._current_fx_name = None
-            self.state.finish()
-            self._active_exception = None
-            self._clear_model_callback_configuration("test")
-            if cleanup_exception is not None:
-                raise cleanup_exception
-
-        if verbose and self.is_global_zero:
-            ConsoleRenderer().write_metrics("test", metrics)
-        return metrics
+    def _prepare_inference_stage(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        stage: Literal["validate", "test", "predict"],
+        data_stage: Literal["val", "test", "predict"],
+        checkpoint_path: str | Path | None,
+        weights_only: bool | None
+    ) -> Module:
+        self._signal_connector.register_signal_handlers()
+        self.strategy.setup_environment()
+        self._announce_barebones_stage(stage)
+        self._setup_profiler(stage, module)
+        self._prepare_data_and_setup(module, datamodule, stage)
+        self._request_dataloaders(data_stage)
+        device: torch.device = self._resolve_device()
+        configured_module: Module = self._setup_model(module, device)
+        empty_schedulers: list[_SchedulerInstance] = []
+        precision_connection: tuple[
+            Module,
+            list[torch.optim.Optimizer],
+            list[_SchedulerInstance]
+        ] = self._connect_precision_plugin(
+            configured_module,
+            [],
+            empty_schedulers
+        )
+        configured_module: Module = precision_connection[0]
+        if checkpoint_path is not None:
+            self._resolve_checkpoint_callback_directories()
+            self._restore_checkpoint(
+                checkpoint_path,
+                configured_module,
+                weights_only=weights_only
+            )
+        self._autolog_hyperparameters(configured_module, datamodule)
+        return configured_module
 
     def predict(
         self,
@@ -1007,10 +1128,13 @@ class Trainer:
     ) -> list[ModelOutput] | list[list[ModelOutput]] | None:
         model_provided: bool = model is not None
         module: Module = self._resolve_model(model, "predict")
-        if isinstance(dataloaders, DataModule):
-            datamodule = dataloaders
-            dataloaders = None
-        if dataloaders is not None and datamodule is not None:
+        resolved_datamodule: DataModule | None = (
+            dataloaders if isinstance(dataloaders, DataModule) else datamodule
+        )
+        resolved_dataloaders: DataLoaderSource | CombinedLoader | None = (
+            None if isinstance(dataloaders, DataModule) else dataloaders
+        )
+        if resolved_dataloaders is not None and resolved_datamodule is not None:
             raise MisconfigurationError(
                 "You cannot pass both `Trainer.predict(dataloaders=..., datamodule=...)`."
             )
@@ -1025,11 +1149,7 @@ class Trainer:
             ckpt_path_provided=ckpt_path is not None
         )
         self._attach_model_callbacks(module, "predict")
-        launcher: _ProcessLauncher | None = (
-            self.strategy.launcher
-            if isinstance(self.strategy, ParallelStrategy)
-            else None
-        )
+        launcher: _ProcessLauncher | None = self._stage_launcher()
         if launcher is not None and launcher.should_launch:
             try:
                 return cast(
@@ -1038,9 +1158,9 @@ class Trainer:
                         "predict",
                         self,
                         module,
-                        datamodule,
+                        resolved_datamodule,
                         {
-                            "dataloaders": dataloaders,
+                            "dataloaders": resolved_dataloaders,
                             "return_predictions": return_predictions,
                             "ckpt_path": selected_checkpoint_path,
                             "weights_only": weights_only
@@ -1050,67 +1170,105 @@ class Trainer:
             finally:
                 self._clear_model_callback_configuration("predict")
                 self.state.finish()
-        self.state.set_stage("predict")
-        self._active_exception = None
-        self._logger_connector.clear_metric_views()
-        module._reset_logging_state()
-        self._reset_progress_bar_metrics("predicting")
-        self._data_connector.reset_stage("predict")
-        self._attach_data(module, datamodule)
-        self._data_connector.attach_source(
-            "predict",
+        return self._predict_impl(
             module,
-            datamodule,
-            dataloaders
+            resolved_datamodule,
+            resolved_dataloaders,
+            selected_checkpoint_path,
+            weights_only,
+            return_predictions,
+            launcher
         )
 
-        training_modes: dict[str, bool] = module._capture_training_modes()
+    def _predict_impl(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        dataloaders: DataLoaderSource | CombinedLoader | None,
+        checkpoint_path: str | Path | None,
+        weights_only: bool | None,
+        return_predictions: bool | None,
+        launcher: _ProcessLauncher | None
+    ) -> list[ModelOutput] | list[list[ModelOutput]] | None:
+        active_module: Module = module
+        self._begin_inference_stage(
+            active_module,
+            datamodule,
+            dataloaders,
+            "predict",
+            "predict",
+            "predicting"
+        )
+        training_modes: dict[str, bool] = active_module._capture_training_modes()
         stage_completed: bool = False
         predictions: list[ModelOutput] | list[list[ModelOutput]] | None = None
         try:
-            self._signal_connector.register_signal_handlers()
-            self.strategy.setup_environment()
-            self._announce_barebones_stage("predict")
-            self._setup_profiler("predict", module)
-
-            self._prepare_data_and_setup(module, datamodule, "predict")
-            self._request_dataloaders("predict")
-
-            device: torch.device = self._resolve_device()
-            module = self._setup_model(module, device)
-            module, _, _ = self._connect_precision_plugin(module, [], [])
-            if selected_checkpoint_path is not None:
-                self._resolve_checkpoint_callback_directories()
-                self._restore_checkpoint(
-                    selected_checkpoint_path,
-                    module,
-                    weights_only=weights_only
-                )
-
-            self._autolog_hyperparameters(module, datamodule)
-
-            self.predict_loop.return_predictions = (
+            active_module: Module = self._prepare_inference_stage(
+                active_module,
+                datamodule,
+                "predict",
+                "predict",
+                checkpoint_path,
+                weights_only
+            )
+            self.predict_loop.return_predictions: bool = (
                 launcher is None or launcher.start_method == "popen"
                 if return_predictions is None
                 else return_predictions
             )
-            predictions = self.predict_loop.run()
+            predictions: list[ModelOutput] | list[list[ModelOutput]] | None = (
+                self.predict_loop.run()
+            )
             stage_completed: bool = True
         except BaseException as exception:
-            self._handle_exception(module, datamodule, exception)
+            attached_module: Module | None = self.module
+            if attached_module is not None:
+                active_module: Module = attached_module
+            self._handle_exception(active_module, datamodule, exception)
         finally:
-            if not stage_completed:
-                module._restore_training_modes(training_modes)
-            cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "predict")
-            module._running_stage = None
-            module._current_fx_name = None
-            self.state.finish()
-            self._active_exception = None
-            self._clear_model_callback_configuration("predict")
-            if cleanup_exception is not None:
-                raise cleanup_exception
-
+            self._finish_stage(
+                active_module,
+                datamodule,
+                "predict",
+                stage_completed,
+                training_modes
+            )
         return predictions
+
+    def _stage_launcher(self) -> _ProcessLauncher | None:
+        return (
+            self.strategy.launcher
+            if isinstance(self.strategy, ParallelStrategy)
+            else None
+        )
+
+    def _finish_stage(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        stage: TrainerStage,
+        completed: bool,
+        training_modes: dict[str, bool]
+    ) -> None:
+        modes_to_restore: dict[str, bool] | None = (
+            None if completed else training_modes
+        )
+        cleanup_exception: BaseException | None = self._teardown_stage(
+            module,
+            datamodule,
+            stage,
+            modes_to_restore
+        )
+        module._running_stage: RunningStage | None = None
+        module._current_fx_name: str | None = None
+        self.state.finish()
+        self._active_exception: BaseException | None = None
+        self._is_mid_epoch_validation: bool = False
+        self._clear_model_callback_configuration(stage)
+        if stage == "fit" and self.fit_loop.epoch_loop is not None:
+            self.fit_loop.epoch_loop.reset_on_teardown()
+        if cleanup_exception is not None:
+            raise cleanup_exception
 
     @contextmanager
     def init_module(
@@ -1474,14 +1632,14 @@ class Trainer:
         finally:
             self._profiler_is_setup: bool = False
 
-    def _call_callback_hook[ReturnT](
+    def _call_callback_hook[**Parameters, ReturnT](
         self,
         callback: Callback,
         module: Module,
         hook_name: str,
         hook: Callable[..., ReturnT],
-        *args: object,
-        **kwargs: object
+        *args: Parameters.args,
+        **kwargs: Parameters.kwargs
     ) -> ReturnT:
         action_name: str = f"[Callback]{callback.state_key}.{hook_name}"
         if not self._profiler_is_setup:
@@ -1490,13 +1648,13 @@ class Trainer:
         with module._hook_context(hook_name), self.profiler.profile(action_name):
             return hook(self, module, *args, **kwargs)
 
-    def _call_callback_hooks(
+    def _call_callback_hooks[**Parameters](
         self,
         module: Module,
         hook_name: str,
-        *args: object,
+        *args: Parameters.args,
         callback_group: Iterable[Callback] | None = None,
-        **kwargs: object
+        **kwargs: Parameters.kwargs
     ) -> None:
         callbacks: Iterable[Callback] = (
             self.callbacks if callback_group is None else callback_group
@@ -1661,8 +1819,7 @@ class Trainer:
             return instance_callable is not parent_callable
         return instance_code is not parent_code
 
-    @staticmethod
-    def _unwrap_hook(hook: _HookCallable) -> _HookCallable:
+    def _unwrap_hook(self, hook: _HookCallable) -> _HookCallable:
         unwrapped_hook: _HookCallable = hook
         while True:
             wrapped_hook: _HookCallable | None = cast(
@@ -1916,7 +2073,9 @@ class Trainer:
                 self.fit_loop.epoch_loop._total_batches_processed = total_batch_idx + 1
             if epoch_rng_state is not None and not loader_state_restored:
                 self.fit_loop.epoch_loop._resume_rng_state = epoch_rng_state
-            checkpoint_rng_state: object | None = loaded_checkpoint.get("rng_state")
+            checkpoint_rng_state: CheckpointValue | None = loaded_checkpoint.get(
+                "rng_state"
+            )
             if (
                 (completed_batches > 0 or loader_state_restored)
                 and isinstance(checkpoint_rng_state, dict)
@@ -2162,12 +2321,31 @@ class Trainer:
         self,
         module: Module,
         datamodule: DataModule | None,
-        stage: TrainerStage
+        stage: TrainerStage,
+        training_modes: dict[str, bool] | None = None
     ) -> BaseException | None:
-        from syntheticmind.callbacks.progress_bar import ProgressBarCallback
-
         failures: list[_TeardownFailure] = []
-        progress_callbacks: list[tuple[int, ProgressBarCallback]] = []
+        if training_modes is not None:
+            self._attempt_teardown(
+                "module.restore_training_modes",
+                module._restore_training_modes,
+                failures,
+                training_modes
+            )
+        self._teardown_framework_resources(failures)
+        self._teardown_stage_dataloaders(stage, failures)
+        self._teardown_stage_hooks(module, datamodule, stage, failures)
+        self._attempt_teardown(
+            "profiler.describe",
+            self._teardown_profiler,
+            failures
+        )
+        return self._resolve_teardown_failure(module, datamodule, failures)
+
+    def _teardown_framework_resources(
+        self,
+        failures: list[_TeardownFailure]
+    ) -> None:
         self._attempt_teardown(
             "signal_connector.teardown",
             self._signal_connector.teardown,
@@ -2195,6 +2373,12 @@ class Trainer:
                 self.strategy.cluster_environment.teardown,
                 failures
             )
+
+    def _teardown_stage_dataloaders(
+        self,
+        stage: TrainerStage,
+        failures: list[_TeardownFailure]
+    ) -> None:
         combined_loaders: list[tuple[str, CombinedLoader | None]] = (
             [
                 ("train", self._data_connector.train_combined_loader),
@@ -2219,34 +2403,43 @@ class Trainer:
                     combined_loader.reset,
                     failures
                 )
+
+    def _teardown_stage_hooks(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        stage: TrainerStage,
+        failures: list[_TeardownFailure]
+    ) -> None:
         if datamodule is not None:
             self._attempt_teardown(
                 "datamodule.teardown",
-                lambda: self._call_datamodule_hook(
-                    datamodule,
-                    "teardown",
-                    datamodule.teardown,
-                    stage
-                ),
-                failures
+                self._call_datamodule_hook,
+                failures,
+                datamodule,
+                "teardown",
+                datamodule.teardown,
+                stage
             )
+        progress_callbacks: list[tuple[int, ProgressBarCallback]] = []
         for index, callback in enumerate(self.callbacks):
             if isinstance(callback, ProgressBarCallback):
                 progress_callbacks.append((index, callback))
                 continue
             self._attempt_teardown(
                 f"callback[{index}].teardown",
-                lambda callback=callback: self._call_callback_teardown(
-                    callback,
-                    module,
-                    stage
-                ),
-                failures
+                self._call_callback_teardown,
+                failures,
+                callback,
+                module,
+                stage
             )
         self._attempt_teardown(
             "module.teardown",
-            lambda: self._call_module_teardown(module, stage),
-            failures
+            self._call_module_teardown,
+            failures,
+            module,
+            stage
         )
         for index, configured_logger in enumerate(self.loggers):
             self._attempt_teardown(
@@ -2257,19 +2450,19 @@ class Trainer:
         for index, callback in progress_callbacks:
             self._attempt_teardown(
                 f"callback[{index}].teardown",
-                lambda callback=callback: self._call_callback_teardown(
-                    callback,
-                    module,
-                    stage
-                ),
-                failures
+                self._call_callback_teardown,
+                failures,
+                callback,
+                module,
+                stage
             )
-        self._attempt_teardown(
-            "profiler.describe",
-            self._teardown_profiler,
-            failures
-        )
 
+    def _resolve_teardown_failure(
+        self,
+        module: Module,
+        datamodule: DataModule | None,
+        failures: list[_TeardownFailure]
+    ) -> BaseException | None:
         exception_notified: bool = False
         if failures and self._active_exception is None:
             self._notify_exception(module, datamodule, failures[0][1])
@@ -2308,14 +2501,16 @@ class Trainer:
         self.strategy.model = reverted_model
         self._layer_sync_model = None
 
-    def _attempt_teardown(
+    def _attempt_teardown[**Parameters](
         self,
         label: str,
-        action: Callable[[], None],
-        failures: list[_TeardownFailure]
+        action: Callable[Parameters, None],
+        failures: list[_TeardownFailure],
+        *args: Parameters.args,
+        **kwargs: Parameters.kwargs
     ) -> None:
         try:
-            action()
+            action(*args, **kwargs)
         except BaseException as exception:
             failures.append((label, exception))
 
@@ -2550,7 +2745,7 @@ class Trainer:
 
     def print(
         self,
-        *values: object,
+        *values: _PrintValue,
         sep: str | None = " ",
         end: str | None = "\n",
         file: IO[str] | None = None,
@@ -2709,28 +2904,40 @@ class Trainer:
         return self._validation_schedule.enabled
 
     @property
-    def train_dataloader(self) -> object | None:
+    def train_dataloader(self) -> DataLoaderSource | None:
         if self._data_connector.train_combined_loader is None:
             return None
-        return self._data_connector.train_combined_loader.iterables
+        return cast(
+            DataLoaderSource,
+            self._data_connector.train_combined_loader.iterables
+        )
 
     @property
-    def val_dataloaders(self) -> object | None:
+    def val_dataloaders(self) -> DataLoaderSource | None:
         if self._data_connector.val_combined_loader is None:
             return None
-        return self._data_connector.val_combined_loader.iterables
+        return cast(
+            DataLoaderSource,
+            self._data_connector.val_combined_loader.iterables
+        )
 
     @property
-    def test_dataloaders(self) -> object | None:
+    def test_dataloaders(self) -> DataLoaderSource | None:
         if self._data_connector.test_combined_loader is None:
             return None
-        return self._data_connector.test_combined_loader.iterables
+        return cast(
+            DataLoaderSource,
+            self._data_connector.test_combined_loader.iterables
+        )
 
     @property
-    def predict_dataloaders(self) -> object | None:
+    def predict_dataloaders(self) -> DataLoaderSource | None:
         if self._data_connector.predict_combined_loader is None:
             return None
-        return self._data_connector.predict_combined_loader.iterables
+        return cast(
+            DataLoaderSource,
+            self._data_connector.predict_combined_loader.iterables
+        )
 
     @property
     def num_training_batches(self) -> int | float:

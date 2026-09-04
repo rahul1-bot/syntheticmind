@@ -207,14 +207,14 @@
     4. ✅ `utilities/distributed.py`, its classmethod namespace, and all free aliases were deleted; no old production or ignored verification import remains.
     5. ✅ Local validation, direct two-rank Strategy reduction, standard distributed scalar reductions, TorchMetrics, graph state, callback artifacts, progress rendering, checkpoint selection, spawned metric views, and sharded model parallelism pass.
 
-| Progress Complete | Evaluation and Prediction Lifecycle Reconstruction | Date: 04 September 2026 | Time: 03:23 PM | Name: Ghost |
+| Progress Complete | Trainer and Loop Lifecycle Reconstruction | Date: 04 September 2026 | Time: 03:43 PM | Name: Ghost |
 
-    1. ✅ Fit, evaluation, and prediction god methods were decomposed into named lifecycle transitions without new classes, Protocols, modules, or public entrypoints.
-    2. ✅ Evaluation preserves validation and test hook order, metric reduction, monitoring callbacks, multiple-loader signatures, and exact mode restoration; prediction preserves output retention, result shape, and CPU materialization.
-    3. ✅ Recursive transfer moved onto DataHooks and the free data-transfer module was deleted; Trainer remains the one DataModule-over-Module dispatcher shared by every stage.
-    4. ✅ Conditional annotation imports, generic objects, source prose, static utilities, unannotated assignments, and terminal trailing commas are absent from every loop implementation.
-    5. ✅ ValidationSchedule owns strict duration parsing and cross-epoch cadence, while one-element step arguments retain precise tuple semantics without punctuation-style exceptions.
-    6. ✅ CPU, MPS, DDP, multi-loader, callback, metric, early-stop, checkpoint, stateful continuation, prediction materialization, and sharded model-parallel resume paths pass.
+    1. ✅ Trainer fit, validation, test, and prediction entrypoints now resolve inputs and launcher dispatch before entering bounded private stage transactions; no new class, Protocol, module, public method, export, or schema field was added.
+    2. ✅ Fit preparation, optimization construction, managed-optimizer connection, checkpoint continuation, sanity validation, execution, and finalization are explicit transitions rather than one 288-line method.
+    3. ✅ Validation and test reuse one typed local evaluation transaction, while prediction preserves separate retention and result-shape semantics; all three share exact environment, data, model, precision, checkpoint, and teardown preparation.
+    4. ✅ Teardown collects mode-restoration and framework, loader, user-hook, logger, progress, and profiler failures without skipping later cleanup or replacing a primary stage exception.
+    5. ✅ Trainer callback variadics and dataloader properties no longer use generic `object`, the static hook-unwrapping utility is now owner-bound, and the reconstructed stage surface contains no nested function, lambda, conditional type import, future annotation import, or source prose.
+    6. ✅ CPU, MPS, DDP, spawned exact continuation, multi-loader evaluation, checkpoint selection, early stopping, rank-zero logging, profiler reports, causal failure cleanup, and sharded model-parallel exact resume pass.
 
 | Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 

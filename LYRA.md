@@ -237,13 +237,13 @@
     4. Managed optimizers select explicit automatic or manual step operations and request deferred synchronization through Strategy instead of carrying a boolean execution flag or inspecting DDP.
     5. Exact local, accelerator, distributed, resumable-data, and model-parallel trajectories establish the decomposition without relying on static-analysis claims.
 
-| Strategic Note | Evaluation and Prediction Transition Map | Date: 04 September 2026 | Time: 03:23 PM | Name: Ghost |
+| Strategic Note | Trainer Stage Transaction Map | Date: 04 September 2026 | Time: 03:43 PM | Name: Ghost |
 
-    1. Validation and test share one evaluation lifecycle because both consume step outputs into stage metrics without optimization, while prediction owns output retention and materialization separately.
-    2. Stage preparation, batch argument adaptation, lifecycle hooks, strategy steps, metric publication, monitoring order, and mode restoration are explicit transitions rather than one procedural method.
-    3. Recursive device movement belongs to DataHooks and is reused for prediction output materialization; no free utility or fake transfer class remains.
-    4. Trainer remains the sole shared hook dispatcher, Module owns signature and mode state, and loops own only the ordering of their stage concepts.
-    5. Local, MPS, distributed, multi-loader, stateful, checkpoint-monitoring, and model-parallel paths verify the reconstructed execution semantics.
+    1. Trainer owns the outer fit, validation, test, and prediction transaction; loops own iterative machine-learning execution, while connectors retain their data, checkpoint, logger, signal, and accelerator boundaries.
+    2. Public entrypoints resolve input semantics and distributed launcher dispatch, then bounded private transitions perform stage beginning, preparation, execution, restoration, and finalization without a parallel runner abstraction.
+    3. Validation and test share evaluation execution because their metric contracts align, while prediction remains separate because retained outputs and CPU materialization have a distinct lifecycle.
+    4. Teardown continues across all cleanup failures, preserves the original stage exception, and records secondary failures as causal notes; the currently attached Module is used after strategy or precision replacement.
+    5. Local, MPS, direct DDP, spawn, multi-loader, observability, callback, checkpoint, failure, and model-parallel paths verify the transaction boundaries.
 
 | Strategic Note | Batch-Limit Configuration Ownership | Date: 04 September 2026 | Time: 03:28 PM | Name: Ghost |
 

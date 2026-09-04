@@ -197,15 +197,15 @@
     4. The former `DistributedUtils` namespace and its seven duplicate free-function entrypoints were deleted without a replacement utility module. Process-group teardown remains exclusively owned by `ParallelStrategy`.
     5. Local reduction validation, two-rank sum and mean, standard distributed mean, sum, minimum and maximum metrics, TorchMetrics, tensor graph state, progress rendering, checkpoint selection, callback artifacts, spawned metric views, and sharded model parallelism pass through Strategy ownership.
 
-| Architecture Decision | Evaluation, Prediction, and Hook-State Ownership | Date: 04 September 2026 | Time: 03:23 PM | Name: Ghost |
+| Architecture Decision | Trainer Stage Transaction and Loop Ownership | Date: 04 September 2026 | Time: 03:43 PM | Name: Ghost |
 
-    1. Fit, validation, test, and prediction now execute through bounded stage preparation, lifecycle hooks, batch advancement, step dispatch, result or metric completion, and mode-restoration transitions rather than monolithic loop methods.
-    2. Validation and test remain one EvaluationLoop because they share no-gradient execution, step-output and metric reduction semantics, while stage-specific hook order and monitoring callback order remain explicit branches.
-    3. Prediction remains a separate loop because it owns optional output retention and CPU materialization without loss or metric aggregation; its multiple-loader result shape and hook argument adaptation remain exact.
-    4. Exact recursive device movement moved from a free-function module onto DataHooks, whose default transfer hook and prediction-output materialization are its two natural consumers; the former `core/data_transfer.py` surface was deleted.
-    5. Module retains recursive training-mode capture and restoration plus step-signature knowledge, Trainer retains inherited-hook discovery and shared transfer dispatch, and loops retain stage ordering without another helper class or Protocol.
-    6. Every loop module now contains no conditional type import, future-annotation import, generic `object`, source comment, unannotated assignment, custom static utility, or terminal trailing comma; ValidationSchedule owns its duration parser and strict clock-field validation.
-    7. CPU and MPS metric views, tensor graph state, callback composition, early stopping, checkpoint monitoring, multi-loader DDP, direct DDP prediction, MPS-to-CPU nested outputs, exact stateful continuation, and sharded model-parallel exact resume pass.
+    1. Trainer remains the canonical owner of fit, validation, test, and prediction orchestration because it alone composes strategy, connectors, loops, hooks, checkpoint restoration, and teardown; the public entrypoints now delegate to bounded private transitions instead of containing monolithic workflows.
+    2. Validation and test continue through one EvaluationLoop because their no-gradient execution, step-output, and metric-reduction contracts align, while prediction retains its separate output-retention and CPU-materialization lifecycle.
+    3. Stage beginning now owns state reset, metric reset, data attachment, and source attachment; stage preparation owns environment, profiler, data setup, model setup, precision, and checkpoint restoration; loops own only iterative machine-learning execution.
+    4. Fit optimization configuration, managed-optimizer connection, manual-optimization validation, primary optimizer aliases, checkpoint continuation, sanity validation, and fit hooks are explicit private transitions on Trainer without a new runner, manager, Protocol, module, or public API.
+    5. Stage teardown now treats model-mode restoration and every framework, loader, data-module, callback, module, logger, progress, and profiler cleanup as one failure-collecting transaction; a primary stage exception remains authoritative and receives causal notes from secondary cleanup failures.
+    6. Exact recursive device movement remains on DataHooks, Trainer retains inherited-hook discovery and shared DataModule-over-Module transfer dispatch, and callback invocation retains typed variadic forwarding without generic `object` annotations or a callable wrapper class.
+    7. CPU, MPS, true two-rank DDP, spawned continuation, multi-loader evaluation, checkpoint selection, early stopping, logger rank ownership, profiler reports, failure composition, and full and sharded model-parallel resume pass; the independently reproduced macOS multi-Trainer spawn shutdown defect remains an environment boundary rather than a stage-semantic failure.
 
 | Architecture Decision | Model Summary Capability Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 
