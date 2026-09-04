@@ -17,7 +17,7 @@ from torch.utils.hooks import RemovableHandle
 
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.model_helpers import ModuleMode
-from syntheticmind.utilities.types import Batch
+from syntheticmind.types import Batch
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer

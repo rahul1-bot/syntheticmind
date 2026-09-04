@@ -64,7 +64,7 @@ from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
 from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
+from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.storage.filesystem import (
     basename,
     list_directory,
@@ -73,7 +73,7 @@ from syntheticmind.storage.filesystem import (
 )
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.trainer.seed import SeedManager
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
     ClipAlgorithm,

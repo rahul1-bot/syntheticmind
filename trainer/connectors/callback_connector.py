@@ -9,9 +9,9 @@ from syntheticmind.callbacks.model_summary import ModelSummary
 from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_overridden
-from syntheticmind.utilities.types import TrainerStage
+from syntheticmind.types import TrainerStage
 
 __all__: list[str] = []
 

@@ -9,7 +9,7 @@ from uuid import uuid7
 from fsspec.spec import AbstractFileSystem
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
-from syntheticmind.utilities.exceptions import CheckpointError
+from syntheticmind.exceptions import CheckpointError
 from syntheticmind.storage.filesystem import get_filesystem, is_file, is_local_path
 from syntheticmind.storage.filesystem import join_path, normalize_path
 

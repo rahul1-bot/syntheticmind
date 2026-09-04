@@ -3,8 +3,8 @@ from typing import ClassVar
 import torch
 
 from syntheticmind.core.data_transfer import move_data_to_device
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import (
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import (
     Batch,
     CheckpointDict,
     DataLoaderSource,

@@ -56,7 +56,7 @@ from syntheticmind.storage.filesystem import (
     read_text,
     write_text
 )
-from syntheticmind.utilities.types import Batch, ModelOutput, RunningStage, StepOutput, TrainerStage
+from syntheticmind.types import Batch, ModelOutput, RunningStage, StepOutput, TrainerStage
 
 __all__: list[str] = ["RuntimeProfiler"]
 
@@ -138,7 +138,7 @@ class RuntimeProfiler(Callback):
         # summaries, and the CPU-utilization baseline counters.
         super().__init__()
         if profile_every_n_steps < 1:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
+            from syntheticmind.exceptions import MisconfigurationError
             raise MisconfigurationError("profile_every_n_steps must be >= 1")
         self._profile_every_n_steps: int = profile_every_n_steps
         self._include_cpu_metrics: bool = include_cpu_metrics

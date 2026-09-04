@@ -20,7 +20,7 @@ from syntheticmind.storage.filesystem import (
     open_binary,
     remove_path
 )
-from syntheticmind.utilities.types import CheckpointDict, CheckpointValue, MapLocation
+from syntheticmind.types import CheckpointDict, CheckpointValue, MapLocation
 
 __all__: list[str] = [
     "AsyncCheckpointIO",

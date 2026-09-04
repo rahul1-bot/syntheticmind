@@ -11,7 +11,7 @@ import yaml
 from torch import nn
 
 from syntheticmind.storage.filesystem import basename, exists, open_binary, open_text
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
     HyperparameterDict,

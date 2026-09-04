@@ -33,7 +33,7 @@ from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
 from syntheticmind.trainer.console import ConsoleRenderer
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     Batch,
     ModelOutput,
     RunningStage,

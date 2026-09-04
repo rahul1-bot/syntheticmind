@@ -14,7 +14,7 @@ from torch.profiler import ProfilerAction, ProfilerActivity, record_function
 from torch.utils.hooks import RemovableHandle
 
 from syntheticmind.profilers.profiler import Profiler
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.storage.filesystem import join_path, local_artifact_path
 
 __all__: list[str] = ["PyTorchProfiler", "RegisterRecordFunction"]

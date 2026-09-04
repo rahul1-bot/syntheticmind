@@ -1,6 +1,6 @@
 from typing import Literal
 
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 
 __all__: list[str] = [
     "normalize_batch_limit",

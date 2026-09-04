@@ -22,8 +22,8 @@ from syntheticmind.loops.batch_limits import resolve_batch_limit
 from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import Batch, DataLoaderSource, TrainerStage
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import Batch, DataLoaderSource, TrainerStage
 
 __all__: list[str] = []
 

@@ -1,4 +1,4 @@
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 
 __all__: list[str] = ["DeviceInput"]
 

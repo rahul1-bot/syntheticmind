@@ -18,7 +18,7 @@ from syntheticmind.strategies.model_parallel_checkpointing.checkpoint import (
     _ModelParallelCheckpoint
 )
 from syntheticmind.strategies.parallel import ParallelStrategy
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.strategies.model_initialization import _ModuleInitializer
 

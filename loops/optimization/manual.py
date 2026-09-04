@@ -2,8 +2,8 @@ from collections.abc import Callable, Mapping
 
 import torch
 
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import StepOutput, TrainingStepOutput
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import StepOutput, TrainingStepOutput
 
 __all__: list[str] = []
 

@@ -12,7 +12,7 @@ from syntheticmind.strategies.launchers.contracts import (
     _GlobalState,
     _WorkerOutput
 )
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     DataLoaderState,
     RunningStage,
     StateDict,

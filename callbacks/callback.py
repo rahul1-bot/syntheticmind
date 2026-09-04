@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     Batch,
     CheckpointDict,
     ModelOutput,

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Protocol, override
 
 from syntheticmind.loggers.logger import Logger
-from syntheticmind.utilities.types import HyperparameterDict
+from syntheticmind.types import HyperparameterDict
 
 __all__: list[str] = ["TensorBoardLogger"]
 

@@ -4,7 +4,7 @@ from syntheticmind.profilers.profiler import Profiler
 from syntheticmind.profilers.pytorch import PyTorchProfiler, RegisterRecordFunction
 from syntheticmind.profilers.simple import SimpleProfiler
 from syntheticmind.profilers.xla import XLAProfiler
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 
 __all__: list[str] = [
     "AdvancedProfiler",

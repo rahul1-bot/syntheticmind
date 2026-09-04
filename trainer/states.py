@@ -1,6 +1,6 @@
 from typing import Literal, override
 
-from syntheticmind.utilities.types import RunningStage, TrainerStage, TrainerStateDict
+from syntheticmind.types import RunningStage, TrainerStage, TrainerStateDict
 
 __all__: list[str] = ["TrainerState"]
 

@@ -29,7 +29,7 @@ import torch
 import torch.distributed as dist
 
 from syntheticmind.utilities.distributed import DistributedUtils
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 
 __all__: list[str] = ["MetricAccumulator"]
 

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from pydantic import BaseModel, ConfigDict
 
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     DataLoaderState,
     DataLoaderSource,
     ModelOutput,

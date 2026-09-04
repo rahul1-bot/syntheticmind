@@ -18,14 +18,14 @@ from syntheticmind.plugins.checkpoint_io import (
 )
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.storage.filesystem import (
     basename,
     list_directory,
     modified_time,
     normalize_path
 )
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     CheckpointDict,
     CheckpointValue,
     DataLoaderState,

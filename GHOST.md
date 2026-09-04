@@ -89,43 +89,6 @@
     4. `on_gpu` now preserves the established CUDA-specific meaning; MPS and CPU placement correctly return false.
     5. Focused CPU, MPS, parameter-state, detached, attached, direct Gloo, subprocess, spawn, fork, compilation, signature, and diff verification passes without static-analysis tools.
 
-| Architecture Decision | Standard TorchScript Export | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
-
-    1. ✅ `Module.to_torchscript(file_path=None, method="script", example_inputs=None, **kwargs)` now preserves the standard inherited public name, parameter order, defaults, scripting and tracing meanings, and framework-neutral ownership.
-    2. Script and trace execution use evaluation mode without permanently changing any root or nested module mode, including when compilation, tracing, input hooks, or validation fail.
-    3. Trace inputs use explicit values before `example_input_array`, pass through the established batch-transfer hook chain, move to the model device, support positional tuples and documented keyword dictionaries, and forward trace options including prepared check inputs.
-    4. Exported artifacts save through the existing local and remote filesystem boundary and reload through `torch.jit.load`; nested SyntheticMind modules exclude runtime-only Trainer, logger, metric, device, and hyperparameter properties from scripting.
-    5. CPU, MPS, attached and detached models, nested scripting, positional and keyword tracing, hook precedence, local and remote reload, exception restoration, compilation, signatures, inheritance, source, and diff checks pass without a linter or static type checker.
-
-| Architecture Decision | Standard ONNX Export | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
-
-    1. ✅ `Module.to_onnx(file_path=None, input_sample=None, **kwargs)` now preserves the standard inherited public signature and returns the installed PyTorch exporter's `ONNXProgram` or `None` without vendor branding.
-    2. The modern dynamo path follows the installed PyTorch default, supports in-memory programs and exporter verification, while the legacy path requires a destination and retains its `None` return contract.
-    3. Explicit input samples precede `example_input_array`; positional tuples, named dictionaries, mixed positional and keyword calls, and explicit exporter keyword inputs pass through the established model-or-datamodule transfer ownership.
-    4. Exact nested model modes restore after modern, legacy, hook, serialization, and forward failures; inference export defaults to evaluation while explicit PyTorch training-mode controls retain their meanings.
-    5. Local paths, `Path`, `BytesIO`, remote filesystems, and external-data sidecars use one artifact boundary, with parent creation and remote sibling preservation handled independently of ONNX graph conversion.
-    6. ONNX model checking and real ONNX Runtime inference pass for modern, legacy, dynamic-shape, dynamic-axis, positional, keyword, CPU, and MPS exports; compilation, signatures, inheritance, imports, source, diff, TorchScript, and checkpoint regressions also pass without static-analysis tools.
-
-| Architecture Decision | Standard TensorRT Compilation Surface | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
-
-    1. ✅ `Module.to_tensorrt(file_path=None, input_sample=None, ir="default", output_format="exported_program", retrace=False, default_device="cuda", **compile_kwargs)` now preserves the pinned public name, parameter order, defaults, accepted IR choices, persistence controls, and framework-neutral ownership.
-    2. Explicit input samples precede `example_input_array`, are copied before transfer, follow model-or-datamodule transfer ownership, and retain positional, named, and mixed forward-call meanings supported by the selected Torch-TensorRT IR.
-    3. Compilation requires the real `torch_tensorrt` package and a CUDA target; configuration, duplicate input ownership, unsupported output formats, missing samples, and unavailable CUDA fail before engine construction with explicit diagnostics.
-    4. Exact nested model modes and original device placement restore after input preparation, compilation, and failure; TorchScript compilation also restores the recursive scripting guard.
-    5. TorchScript artifacts use PyTorch serialization, while Dynamo and default IR artifacts use Torch-TensorRT serialization with input, output-format, and retrace state preserved across local, byte-buffer, and remote destinations.
-    6. The local Apple-silicon host cannot execute a real TensorRT engine build because Torch-TensorRT supports CUDA platforms and the installed PyTorch runtime has no CUDA. Dependency, validation, transfer, restoration, dispatch, and persistence orchestration pass against a source-grounded test double, but CUDA engine compilation and reload remain explicitly unverified.
-    7. The contract was compared with the pinned Lightning source and current Torch-TensorRT source revision `da868ec8fcc6ec56fbb63fd3dba944ca7f072304`; current upstream tests also exclude TorchScript IR on PyTorch 2.9 because that combination can crash.
-    8. TensorRT, TorchScript, ONNX Runtime, runtime-state, checkpoint, compilation, signature, inheritance, source, and diff regressions pass without invoking any linter or static type checker.
-
-| Active Hold | Model-Parallel Work and Recursive Execution | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
-
-    1. Rahul stopped the recursive hardening run after the model-parallel phase expanded into broad cross-cutting changes without an accepted narrow design checkpoint.
-    2. The current `dev` snapshot contains interrupted model-parallel work across Module, Trainer, Strategy, checkpoint state, DDP timeout handling, package exports, and three new strategy modules.
-    3. This snapshot is unverified, unaccepted, and not a completed capability. Its commit preserves the exact review state only and must not be interpreted as architectural approval.
-    4. The current additions, including the new future-annotations import, vague helper boundaries, and expanded generic Strategy surface, require line-by-line review against `code-guidelines.md` before any continuation.
-    5. Future implementation must proceed through Rahul-aligned, narrowly bounded slices with the relevant existing files and runtime path reviewed before mutation.
-    6. The recursive goal is stopped. No further code changes, verification expansion, or parity work may continue until Rahul explicitly selects the next bounded action.
-
 | Architecture Decision | Model-Parallel Baseline Recovery | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
 
     1. Rahul explicitly resumed complete SyntheticMind hardening and established the current root workspace `code-guidelines.md` as the governing Python standard; the repository-local historical guideline copy is reference evidence only and has no current authority.
@@ -303,3 +266,11 @@
 
     1. Filesystem protocol resolution, local and remote path semantics, resource opening, artifact staging, metadata queries, copying, and removal moved to `storage/filesystem.py` because they form an external storage boundary shared by persistence owners.
     2. Checkpoints, loggers, profilers, callbacks, and Trainer artifacts now depend on the explicit storage package without a utility compatibility path. Local and in-memory remote checkpoint transport, model hydration, and metric lifecycle verification pass after relocation.
+
+| Architecture Decision | Cross-Subsystem Contract Placement | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
+
+    1. The framework exception vocabulary and recursive domain type contracts moved from `utilities/` to `syntheticmind.exceptions` and `syntheticmind.types` because they define dependency direction across every semantic subsystem rather than executable helper behavior.
+    2. All production and ignored verification imports now use the canonical package-root contract paths; no compatibility module or legacy import surface remains.
+    3. The relocation changes ownership only. Exception identities, serialized state domains, batch shapes, optimizer declarations, precision inputs, checkpoint maps, and public Trainer stage values remain unchanged.
+    4. Package compilation, local model checkpoint hydration, optimizer execution, metric-view isolation, two-rank DDP execution, and two-rank TorchMetrics reduction pass through the relocated contracts.
+    5. Obsolete exporter and interrupted-hold ledger entries were pruned during mandatory ledger consolidation because deployment exporters were later removed from the active training-harness scope and Git retains their exact chronology.

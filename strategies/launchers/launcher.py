@@ -15,8 +15,8 @@ from syntheticmind.strategies.launchers.multiprocessing import _MultiprocessingL
 from syntheticmind.strategies.launchers.state_transfer import _StageInvoker
 from syntheticmind.strategies.launchers.subprocess import _SubprocessLauncher
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import TrainerStage
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import TrainerStage
 
 if TYPE_CHECKING:
     from syntheticmind.core.datamodule import DataModule

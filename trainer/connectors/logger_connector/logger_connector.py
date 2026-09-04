@@ -16,7 +16,7 @@ from syntheticmind.storage.filesystem import (
     join_path,
     list_directory
 )
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     HyperparameterDict,
     HyperparameterValue,
     RunningStage

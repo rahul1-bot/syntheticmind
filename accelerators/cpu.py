@@ -4,7 +4,7 @@ import torch
 
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.accelerators.device_parser import DeviceInput
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 
 __all__: list[str] = ["CPUAccelerator"]
 

@@ -13,7 +13,7 @@ from syntheticmind.plugins.precision.transformer_engine_contracts import (
     DelayedScalingConfiguration,
     DelayedScalingRecipe
 )
-from syntheticmind.utilities.types import Batch, PrecisionType
+from syntheticmind.types import Batch, PrecisionType
 
 __all__: list[str] = [
     "DelayedScalingConfiguration",

@@ -29,7 +29,7 @@ from syntheticmind.storage.filesystem import (
     same_path,
     write_text
 )
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     Batch,
     CheckpointDict,
     StateDict,
@@ -70,7 +70,7 @@ class ModelCheckpoint(Checkpoint):
         enable_version_counter: bool = True
     ) -> None:
         super().__init__()
-        from syntheticmind.utilities.exceptions import MisconfigurationError
+        from syntheticmind.exceptions import MisconfigurationError
 
         if dirpath is not None and not isinstance(dirpath, str | Path):
             raise TypeError("`dirpath` must be a string, Path, or None.")
@@ -578,14 +578,14 @@ class ModelCheckpoint(Checkpoint):
             return
         current: torch.Tensor | None = monitor_candidates.get(self.monitor)
         if current is None:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
+            from syntheticmind.exceptions import MisconfigurationError
 
             raise MisconfigurationError(
                 f"`ModelCheckpoint(monitor={self.monitor!r})` could not find the "
                 f"monitored key in metrics: {list(monitor_candidates)}."
             )
         if current.numel() != 1:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
+            from syntheticmind.exceptions import MisconfigurationError
 
             raise MisconfigurationError(
                 f"`ModelCheckpoint(monitor={self.monitor!r})` requires a scalar metric."

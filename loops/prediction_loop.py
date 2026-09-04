@@ -41,7 +41,7 @@ from syntheticmind.utilities.model_helpers import (
     is_overridden,
     is_parameter_in_hook_signature
 )
-from syntheticmind.utilities.types import Batch, ModelOutput
+from syntheticmind.types import Batch, ModelOutput
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer

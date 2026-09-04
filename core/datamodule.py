@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset
 from syntheticmind.core.hooks import DataHooks
 from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.utilities.combined_loader import CombinedLoader
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import (
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import (
     Batch,
     DataLoaderSource,
     DatasetSource,

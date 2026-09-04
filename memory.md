@@ -125,40 +125,6 @@
     4. `on_gpu` is a historical CUDA-specific convenience and intentionally remains false for MPS despite both being accelerators.
     5. Direct process-group and every Trainer launcher path are required to distinguish detached neutrality from attached rank truth.
 
-| Memory | TorchScript Export Boundaries | Date: 19 August 2026 | Time: 11:47 PM | Name: Ghost |
-
-    1. TorchScript introspection evaluates Python properties even when they are later excluded, so detached Trainer access requires a narrowly scoped scripting state that is restored under every outcome.
-    2. Export mode restoration must capture every named submodule rather than only the root training flag; restoring through `train(root_mode)` destroys deliberately mixed child modes.
-    3. A dictionary registered as `example_input_array` represents named forward arguments, while a positional dictionary remains available by wrapping the mapping in a one-element tuple.
-    4. Representative and check inputs must follow the same model-or-datamodule batch-transfer ownership used during execution so accelerator exports do not trace host tensors against device-resident parameters.
-    5. Export serialization belongs to the shared filesystem boundary, while TorchScript compilation and tracing remain PyTorch-owned operations with their original keyword controls and diagnostics.
-
-| Memory | ONNX Export Boundaries | Date: 19 August 2026 | Time: 11:55 PM | Name: Ghost |
-
-    1. PyTorch 2.9 defaults ONNX export to the dynamo engine, which returns an `ONNXProgram`; the legacy TorchScript engine returns `None` and cannot export without a destination.
-    2. ONNX positional samples are tuples, dictionaries represent named forward inputs, and a trailing dictionary within a positional tuple carries mixed keyword inputs under PyTorch's compatibility contract.
-    3. Exporters can mutate model training flags, especially on legacy failures. Exact named-submodule capture and unconditional restoration are therefore required around conversion and serialization.
-    4. Modern ONNX external-data output may create sibling artifacts even for a single requested path; remote persistence must transfer the complete generated sibling set rather than only the primary protobuf.
-    5. A parseable ONNX file is insufficient evidence. Model checking, ONNX Runtime execution, numerical comparison, dynamic-shape execution, accelerator-origin export, and failure restoration establish usable capability.
-
-| Memory | TensorRT Compilation Boundaries | Date: 20 August 2026 | Time: 12:06 AM | Name: Ghost |
-
-    1. TensorRT compilation is a CUDA engine capability rather than a generic accelerator export path; MPS placement cannot establish engine compatibility and must fail before compilation when no CUDA target exists.
-    2. Torch-TensorRT owns engine lowering and format serialization, while SyntheticMind owns optional-dependency diagnostics, input precedence, transfer hooks, exact model restoration, destination handling, and public method compatibility.
-    3. Positional, named, and mixed inputs require distinct `inputs` and `kwarg_inputs` routing. TorchScript IR does not accept named sample inputs through this surface and uses `torch.jit.save` rather than the Dynamo persistence path.
-    4. A source-grounded test double can prove wrapper control flow, argument forwarding, exception restoration, and artifact routing, but it cannot prove TensorRT engine construction, numerical correctness, performance, or reload on a CUDA runtime.
-    5. Current upstream source and platform support must be separated from the pinned Lightning contract. The current Torch-TensorRT source supports CUDA platforms but not Darwin, while its PyTorch 2.9 tests exclude TorchScript IR because that path may crash.
-    6. Optional accelerator capability remains incomplete until its actual hardware and vendor runtime execute successfully; the environmental boundary must remain visible in progress state rather than converted into a false completion claim.
-
-| Memory | Scope Control and Guideline Enforcement | Date: 20 August 2026 | Time: 12:35 AM | Name: Ghost |
-
-    1. A recursive objective does not authorize uninterrupted broad mutation. Every implementation phase still requires a small accepted boundary, direct review of the affected existing code, and an explicit reason for each new abstraction or public contract.
-    2. PyTorch Lightning is capability and terminology evidence only. Its decomposition, compatibility imports, helper layout, and internal state boundaries must never enter SyntheticMind without independent justification under `code-guidelines.md`.
-    3. Generic helper names and wide base-class expansion hide ownership rather than clarify it when their exact invariant and caller set have not been agreed first.
-    4. Fast progress is measured by accepted, verified capability slices rather than elapsed autonomous activity or the volume of changed files.
-    5. Interrupted work must be labeled unverified and preserved as a review snapshot, never promoted into the verified architecture state merely because it compiles or resembles the reference.
-    6. Rahul-directed checkpoints are now mandatory before resuming the model-parallel diff or opening another capability phase.
-
 | Memory | Model-Parallel Evidence and Persistence Ownership | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
 
     1. A standalone DTensor and distributed-checkpoint probe establishes only PyTorch runtime availability; it does not establish SyntheticMind Trainer wiring, hook order, optimizer restoration, callback participation, progress continuation, or failure cleanup.
@@ -303,3 +269,10 @@
 
     1. Protocol-aware paths, binary and text resources, artifact staging, and remote transactions constitute one external storage boundary even when many framework concepts consume it.
     2. A shared boundary belongs in a precise top-level package when no single checkpoint, logger, profiler, or Trainer consumer owns its complete lifecycle.
+
+| Memory | Dependency-Neutral Framework Contracts | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
+
+    1. Shared type aliases and framework exception classes are contracts, not utilities: they constrain values and failure categories crossing subsystem boundaries without executing a lifecycle of their own.
+    2. Placing these contracts at the package root prevents core, Trainer, loops, strategies, plugins, callbacks, loggers, and profilers from depending on a generic utility layer or on one another merely to name shared domains.
+    3. A contract relocation requires multiprocessing and distributed execution evidence because imported module paths participate in worker reconstruction even when local imports compile.
+    4. Historical capability notes that describe code deliberately removed from the current scope should be pruned from active ledgers; Git history remains the chronology while ledgers retain current durable knowledge.

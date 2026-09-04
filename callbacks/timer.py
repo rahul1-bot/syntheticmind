@@ -26,8 +26,8 @@ from loguru import logger as log
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import Batch, StateDict, StepOutput, TrainerStage
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import Batch, StateDict, StepOutput, TrainerStage
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer

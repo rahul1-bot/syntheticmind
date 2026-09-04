@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from syntheticmind.plugins.environments import ClusterEnvironment
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 
 if TYPE_CHECKING:
     from syntheticmind.strategies.ddp import DDPStrategy

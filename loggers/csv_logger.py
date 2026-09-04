@@ -35,7 +35,7 @@ from syntheticmind.storage.filesystem import (
     read_text,
     write_text
 )
-from syntheticmind.utilities.types import HyperparameterDict
+from syntheticmind.types import HyperparameterDict
 
 __all__: list[str] = ["CSVLogger"]
 

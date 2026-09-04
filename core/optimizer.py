@@ -20,8 +20,8 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import LRScheduler, OneCycleLR, ReduceLROnPlateau
 
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import (
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import (
     OptimizerClosure,
     OptimizerParameterGroup,
     OptimizerState,

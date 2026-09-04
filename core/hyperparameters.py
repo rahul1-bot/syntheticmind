@@ -10,7 +10,7 @@ from typing import ClassVar, cast, override
 
 from torch import nn
 
-from syntheticmind.utilities.types import HyperparameterDict, HyperparameterValue
+from syntheticmind.types import HyperparameterDict, HyperparameterValue
 
 __all__: list[str] = ["HyperparametersMixin"]
 

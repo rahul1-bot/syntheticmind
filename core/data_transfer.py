@@ -23,7 +23,7 @@ from typing import cast
 
 import torch
 
-from syntheticmind.utilities.types import Batch, DeviceTransferable
+from syntheticmind.types import Batch, DeviceTransferable
 
 __all__: list[str] = ["move_data_to_device"]
 

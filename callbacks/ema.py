@@ -38,7 +38,7 @@ from torch import nn
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.types import Batch, CheckpointDict, CheckpointValue, StepOutput, TrainerStage
+from syntheticmind.types import Batch, CheckpointDict, CheckpointValue, StepOutput, TrainerStage
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer

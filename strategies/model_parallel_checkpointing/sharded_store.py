@@ -15,12 +15,12 @@ from syntheticmind.strategies.model_parallel_checkpointing.generation import (
     _CheckpointGenerationIndex,
     _CheckpointGenerationPointer
 )
-from syntheticmind.utilities.exceptions import CheckpointError
+from syntheticmind.exceptions import CheckpointError
 from syntheticmind.storage.filesystem import (
     basename, is_directory, is_file, is_local_path, join_path,
     list_directory, make_directory, normalize_path, remove_path
 )
-from syntheticmind.utilities.types import CheckpointDict, DistributedCheckpointState
+from syntheticmind.types import CheckpointDict, DistributedCheckpointState
 
 __all__: list[str] = []
 

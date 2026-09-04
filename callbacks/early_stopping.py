@@ -31,8 +31,8 @@ from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import StateDict
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import StateDict
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer

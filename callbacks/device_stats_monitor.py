@@ -21,7 +21,7 @@ import torch
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.types import Batch, StepOutput
+from syntheticmind.types import Batch, StepOutput
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer

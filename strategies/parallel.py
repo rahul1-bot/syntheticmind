@@ -14,8 +14,8 @@ from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.strategies.launchers.launcher import ProcessStartMethod, _ProcessLauncher
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import OptimizerStateValue
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import OptimizerStateValue
 
 __all__: list[str] = ["ParallelStrategy"]
 

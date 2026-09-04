@@ -23,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from syntheticmind.storage.filesystem import join_path, normalize_path
-from syntheticmind.utilities.types import HyperparameterDict
+from syntheticmind.types import HyperparameterDict
 
 __all__: list[str] = ["Logger"]
 

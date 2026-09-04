@@ -120,3 +120,10 @@
     4. Transformer Engine is isolated as an optional external adapter and follows the current NVIDIA `autocast` and delayed-scaling contract instead of the historical `fp8_autocast` call shape.
     5. Runtime evidence covers the local Apple MPS device, CPU true and mixed precision, distributed CPU execution, cluster launch reconstruction, reversible synchronized batch normalization, and the unavailable optional dependency boundary.
     6. The next phase is optimizer and training-closure ownership, where historical module functions, callable objects, opaque closure returns, and dynamically mutated optimizer classes still violate the governing architecture.
+
+| Strategic Note | Shared Contract Direction | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
+
+    1. Framework-wide type and exception contracts now live at the SyntheticMind package root rather than inside the transitional utility package.
+    2. This placement lets every training subsystem name shared data and failure domains without introducing a dependency on an implementation graveyard or another lifecycle owner.
+    3. The remaining utility modules must be reassigned by machine-learning concept: nested loader composition to the training-data lifecycle, model inspection to callback ownership, and distributed operations to Strategy or their actual consumers.
+    4. Each reassignment remains bounded by executable process, checkpoint, and lifecycle evidence; moving filenames without correcting ownership is not progress.

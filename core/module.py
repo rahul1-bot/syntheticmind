@@ -30,9 +30,9 @@ from syntheticmind.core.optimizer import (
 from syntheticmind.core.saving import _CheckpointLoader
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.utilities.distributed import DistributedUtils
-from syntheticmind.utilities.exceptions import MisconfigurationError
+from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
-from syntheticmind.utilities.types import (
+from syntheticmind.types import (
     Batch,
     BackwardInputs,
     GatherData,

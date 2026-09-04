@@ -21,8 +21,8 @@ from syntheticmind.strategies.launchers.environment import _DistributedEnvironme
 from syntheticmind.strategies.launchers.process_observer import _ChildProcessObserver
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.launchers.state_transfer import _StageInvoker
-from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
-from syntheticmind.utilities.types import TrainerStage
+from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
+from syntheticmind.types import TrainerStage
 
 if TYPE_CHECKING:
     from syntheticmind.core.datamodule import DataModule

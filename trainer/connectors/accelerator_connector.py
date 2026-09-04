@@ -21,8 +21,8 @@ from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.strategies.single_device import SingleDeviceStrategy
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import PrecisionInput, PrecisionType
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import PrecisionInput, PrecisionType
 
 __all__: list[str] = []
 

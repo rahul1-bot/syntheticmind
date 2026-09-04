@@ -28,8 +28,8 @@ from syntheticmind.strategies.launchers.state_transfer import (
     _StageInvoker,
     _WorkerStateTransfer
 )
-from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
-from syntheticmind.utilities.types import TrainerStage
+from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
+from syntheticmind.types import TrainerStage
 
 if TYPE_CHECKING:
     from syntheticmind.core.datamodule import DataModule
