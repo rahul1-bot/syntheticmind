@@ -46,10 +46,12 @@ class ConsoleRenderer:
 
     @property
     def interactive(self) -> bool:
+        # Reports whether the current process stderr supports live rewriting.
         return self._interactive
 
     @property
     def enabled(self) -> bool:
+        # Reports whether stream output remains healthy after prior writes.
         return self._enabled
 
     def reset(self) -> None:
@@ -68,6 +70,7 @@ class ConsoleRenderer:
         return {"refresh_interval": self.refresh_interval}
 
     def __setstate__(self, state: dict[str, float]) -> None:
+        # Reconstructs stream-dependent state inside the receiving worker.
         self.__init__(state["refresh_interval"])
 
     def next_spinner(self) -> str:
@@ -216,13 +219,19 @@ class ConsoleRenderer:
             self._enabled: bool = False
 
     def _fit_terminal(self, line: str) -> str:
+        # Truncates interactive output to current terminal width with one visible
+        # overflow marker while leaving redirected records complete.
         width: int = self._terminal_width()
         if len(line) <= width:
             return line
         return f"{line[:width - 1]}…"
 
     def _metric_sort_key(self, metric: tuple[str, float]) -> str:
+        # Orders multi-loader metrics by their public base identity rather than
+        # internal dataloader suffix.
         return metric[0].split("/dataloader_idx_", 1)[0]
 
     def _terminal_width(self) -> int:
+        # Enforces a readable minimum when terminal metadata is unavailable or
+        # implausibly narrow.
         return max(20, shutil.get_terminal_size(fallback=(100, 24)).columns)

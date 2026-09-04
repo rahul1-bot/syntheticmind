@@ -322,6 +322,8 @@ class MetricAccumulator:
         cls,
         state: StateDict
     ) -> _MetricAccumulatorCheckpoint:
+        # Applies strict schema validation before any live accumulator field is
+        # replaced.
         del cls
         try:
             return _MetricAccumulatorCheckpoint.model_validate(state, strict=True)
@@ -365,6 +367,8 @@ class MetricAccumulator:
             raise ValueError("A scalar epoch accumulator cannot be empty.")
 
     def _checkpoint_tensor(self, value: torch.Tensor | None) -> torch.Tensor | None:
+        # Produces a detached CPU scalar clone suitable for cross-process and
+        # cross-device checkpoint transport.
         if value is None:
             return None
         return value.detach().cpu().clone()
@@ -374,6 +378,8 @@ class MetricAccumulator:
         value: torch.Tensor | None,
         device: torch.device
     ) -> torch.Tensor | None:
+        # Validates scalar shape and creates an independent clone on the active
+        # accumulation device.
         if value is None:
             return None
         if value.numel() != 1:
@@ -382,10 +388,12 @@ class MetricAccumulator:
 
     @property
     def reduction(self) -> Reduction:
+        # Returns the immutable scalar reduction owned by this window.
         return self._reduction
 
     @property
     def count(self) -> int:
+        # Returns the number of scalar observations accumulated in this window.
         return self._count
 
     def _infer_batch_size(self, batch: Batch) -> int:

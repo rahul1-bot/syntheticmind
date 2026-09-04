@@ -31,8 +31,10 @@ __all__: list[str] = ["LayerSync", "TorchSyncBatchNorm"]
 @runtime_checkable
 class LayerSync(Protocol):
     # Structural reversible transformation supplied through Trainer plugins.
+    # Applies the distributed-only transformation before Strategy wrapping.
     def apply(self, model: nn.Module) -> nn.Module: ...
 
+    # Reconstructs the ordinary client model after distributed execution.
     def revert(self, model: nn.Module) -> nn.Module: ...
 
 
@@ -81,4 +83,6 @@ class _BatchNormXd(nn.modules.batchnorm._BatchNorm):
     # Dimension-agnostic ordinary BatchNorm used only for reversible conversion.
     @override
     def _check_input_dim(self, input: torch.Tensor) -> None:
+        # Accepts any rank because SyncBatchNorm does not preserve which concrete
+        # BatchNorm dimensional subclass produced it.
         del input

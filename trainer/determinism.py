@@ -67,22 +67,27 @@ class _Determinism:
 
     @property
     def mode(self) -> _DeterminismMode:
+        # Returns the client-requested deterministic algorithm policy.
         return self._mode
 
     @property
     def algorithms_enabled(self) -> bool:
+        # Reads live PyTorch algorithm state for launcher transfer.
         return torch.are_deterministic_algorithms_enabled()
 
     @property
     def warn_only_enabled(self) -> bool:
+        # Reads whether nondeterministic operations warn instead of failing.
         return torch.is_deterministic_algorithms_warn_only_enabled()
 
     @property
     def benchmark_enabled(self) -> bool:
+        # Reads live cuDNN benchmark selection for launcher transfer.
         return torch.backends.cudnn.benchmark
 
     @property
     def cudnn_deterministic_enabled(self) -> bool:
+        # Reads live cuDNN deterministic-kernel selection for launcher transfer.
         return torch.backends.cudnn.deterministic
 
     def restore(

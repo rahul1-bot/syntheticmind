@@ -962,6 +962,7 @@ class TrainingEpochLoop(Loop):
         )
 
     def _empty_closure(self) -> None:
+        # Supplies the native optimizer contract when no client closure exists.
         return None
 
     def _optimizer_zero_grad(
@@ -1027,6 +1028,7 @@ class TrainingEpochLoop(Loop):
         module._running_stage: RunningStage | None = "training"
 
     def _max_steps_reached(self, state: TrainerState) -> bool:
+        # Compares only completed managed optimizer mutations with the hard limit.
         return self.max_steps != -1 and state.global_step >= self.max_steps
 
     @property

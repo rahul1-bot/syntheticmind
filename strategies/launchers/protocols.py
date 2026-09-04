@@ -24,11 +24,14 @@ class LaunchStrategy(Protocol):
     # Structural topology view implemented by ParallelStrategy.
     num_nodes: int
 
+    # Topology and rendezvous provider consumed during environment construction.
     @property
     def cluster_environment(self) -> ClusterEnvironment: ...
 
+    # Number of worker processes created on the current node.
     @property
     def num_processes(self) -> int: ...
 
+    # Process-local device assigned after rank specialization.
     @property
     def root_device(self) -> torch.device: ...

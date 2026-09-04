@@ -37,6 +37,8 @@ class MisconfigurationError(FrameworkError):
     # incompatible with the selected runtime components.
     @override
     def __init__(self, message: str) -> None:
+        # Applies one stable category prefix while preserving the corrective
+        # detail supplied by the owning validation boundary.
         super().__init__(f"Misconfiguration: {message}")
 
 
@@ -45,6 +47,7 @@ class CheckpointError(FrameworkError):
     # atomic-publication contract.
     @override
     def __init__(self, message: str) -> None:
+        # Applies one stable persistence-category prefix to the causal detail.
         super().__init__(f"Checkpoint error: {message}")
 
 
@@ -54,4 +57,5 @@ class SIGTERMException(SystemExit):
     # error recovery must allow the SystemExit semantics to propagate.
     @override
     def __init__(self) -> None:
+        # Encodes SIGTERM using the standard shell status of 128 plus signal.
         super().__init__(128 + signal.SIGTERM)

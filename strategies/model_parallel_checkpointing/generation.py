@@ -73,9 +73,11 @@ class _CheckpointGenerationPointer(BaseModel):
 class _CheckpointGenerationIndex:
     # Publication-index owner for one checkpoint root.
     def __init__(self) -> None:
+        # Fixes the sole pointer identity shared by local and remote backends.
         self._pointer_filename: str = "active_generation"
 
     def exists(self, checkpoint_path: str | Path) -> bool:
+        # Tests for the publication marker rather than guessing from shard files.
         return StoragePath(self._pointer_path(checkpoint_path)).is_file()
 
     def create_generation_id(
@@ -134,6 +136,7 @@ class _CheckpointGenerationIndex:
         return pointer
 
     def _pointer_path(self, checkpoint_path: str | Path) -> str:
+        # Resolves the pointer beneath the checkpoint root through StoragePath.
         return StoragePath(checkpoint_path).join(self._pointer_filename)
 
     def _write(

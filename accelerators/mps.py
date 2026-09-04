@@ -29,6 +29,7 @@ class MPSAccelerator(Accelerator):
     # Apple Silicon execution backend used for local macOS training and
     # evaluation when selected explicitly or through automatic resolution.
     def __init__(self) -> None:
+        # Establishes the host's single logical MPS placement.
         self._device: torch.device = torch.device("mps")
 
     @override
@@ -40,6 +41,7 @@ class MPSAccelerator(Accelerator):
 
     @override
     def get_device(self) -> torch.device:
+        # Returns the process-local MPS placement selected during setup.
         return self._device
 
     @override
@@ -84,17 +86,20 @@ class MPSAccelerator(Accelerator):
     @classmethod
     @override
     def auto_device_count(cls) -> int:
+        # Models Apple's one logical torch MPS accelerator.
         del cls
         return 1
 
     @classmethod
     @override
     def is_available(cls) -> bool:
+        # Requires a built and host-available MPS backend.
         del cls
         return torch.backends.mps.is_available()
 
     @classmethod
     @override
     def name(cls) -> str:
+        # Returns the canonical Trainer configuration identity.
         del cls
         return "mps"

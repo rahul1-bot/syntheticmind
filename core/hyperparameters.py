@@ -47,6 +47,8 @@ class _AttributeDict(dict[str, HyperparameterValue]):
     # attribute access for client inspection. Missing keys preserve AttributeError
     # semantics expected by Python tooling and interactive use.
     def __getattr__(self, name: str) -> HyperparameterValue:
+        # Resolves missing ordinary attributes from mapping keys while preserving
+        # AttributeError for introspection and client typo handling.
         try:
             return self[name]
         except KeyError as exception:
@@ -54,10 +56,13 @@ class _AttributeDict(dict[str, HyperparameterValue]):
 
     @override
     def __setattr__(self, name: str, value: HyperparameterValue) -> None:
+        # Routes attribute assignment into the mutable live hyperparameter view.
         self[name] = value
 
     @override
     def __delattr__(self, name: str) -> None:
+        # Routes attribute deletion into the mapping and preserves normal missing
+        # attribute semantics.
         try:
             del self[name]
         except KeyError as exception:

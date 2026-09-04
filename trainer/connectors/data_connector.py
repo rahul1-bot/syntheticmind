@@ -314,6 +314,7 @@ class _DataConnector:
 
     @property
     def reload_interval(self) -> int:
+        # Exposes the completed-epoch cadence used to invalidate fit loaders.
         return self._reload_interval
 
     def _source(self, stage: _DataStage) -> _DataSource | None:

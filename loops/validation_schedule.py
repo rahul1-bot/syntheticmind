@@ -165,6 +165,8 @@ class ValidationSchedule:
 
     @property
     def enabled(self) -> bool:
+        # Reports whether model capability, data availability, and batch limits
+        # permit validation in the current fit plan.
         return self._validation_enabled
 
     @property

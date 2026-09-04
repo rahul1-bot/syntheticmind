@@ -29,6 +29,8 @@ class TrainerState:
     # Mutable runtime state shared by Trainer, loops, callbacks, checkpointing,
     # and multiprocessing reconciliation.
     def __init__(self) -> None:
+        # Initializes a detached Trainer before any public stage claims runtime
+        # identity or restored trajectory coordinates.
         self._status: TrainerStatus = "initializing"
         self._stage: TrainerStage | None = None
         self._running_stage: RunningStage | None = None
@@ -38,30 +40,39 @@ class TrainerState:
 
     @property
     def status(self) -> TrainerStatus:
+        # Returns initialization, execution, completion, or interruption state.
         return self._status
 
     @property
     def stage(self) -> TrainerStage | None:
+        # Returns the active public fit, validate, test, or predict transaction.
         return self._stage
 
     @property
     def running_stage(self) -> RunningStage | None:
+        # Returns the active inner training, evaluation, prediction, or sanity
+        # phase within the public transaction.
         return self._running_stage
 
     @property
     def current_epoch(self) -> int:
+        # Returns the count of completed training-loader epochs or the restored
+        # partial epoch coordinate.
         return self._current_epoch
 
     @property
     def global_step(self) -> int:
+        # Returns the count of completed managed optimizer mutations.
         return self._global_step
 
     @property
     def should_stop(self) -> bool:
+        # Returns the cooperative stop request shared by callbacks and loops.
         return self._should_stop
 
     @should_stop.setter
     def should_stop(self, value: bool) -> None:
+        # Applies already validated Trainer-level cooperative control state.
         self._should_stop: bool = value
 
     def set_stage(self, stage: TrainerStage) -> None:
@@ -121,6 +132,8 @@ class TrainerState:
 
     @override
     def __repr__(self) -> str:
+        # Reports observable lifecycle and trajectory coordinates without live
+        # component references.
         return (
             f"TrainerState("
             f"status={self._status!r}, "

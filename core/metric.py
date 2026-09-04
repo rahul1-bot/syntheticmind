@@ -283,6 +283,8 @@ class LoggedMetric:
         device: torch.device,
         reduce_tensor: TensorReducer
     ) -> torch.Tensor:
+        # Resolves an immediate scalar observation first and falls back to the
+        # registered stateful Metric when no scalar step cache exists.
         value: torch.Tensor | None = self.compute_step(device, reduce_tensor)
         if value is not None:
             return value
@@ -306,6 +308,8 @@ class LoggedMetric:
         device: torch.device,
         reduce_tensor: TensorReducer
     ) -> torch.Tensor:
+        # Reuses the scalar accumulator's epoch result or delegates the complete
+        # stateful window to Metric.compute without mixing the two state models.
         if not self.is_metric:
             value: torch.Tensor | None = self.compute_step(device, reduce_tensor)
             if value is None:

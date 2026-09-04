@@ -1705,9 +1705,13 @@ class Trainer:
         running_stage: RunningStage,
         metrics: dict[str, float]
     ) -> None:
+        # Publishes one stage-qualified scalar presentation view through the sole
+        # logger connector owner.
         self._logger_connector.update_progress_bar_metrics(running_stage, metrics)
 
     def _update_logged_metrics(self, metrics: dict[str, torch.Tensor]) -> None:
+        # Publishes finalized logger-facing tensors without bypassing connector
+        # view ownership.
         self._logger_connector.update_logged_metrics(metrics)
 
     def _preview_logged_metrics(
@@ -1724,6 +1728,7 @@ class Trainer:
         )
 
     def _get_progress_bar_metrics(self, running_stage: RunningStage) -> dict[str, float]:
+        # Returns a defensive stage view for progress and terminal presentation.
         return self._logger_connector.progress_bar_metrics(running_stage)
 
     def _connect_loops(self) -> None:
@@ -2789,6 +2794,7 @@ class Trainer:
         exception.add_note(f"{label} raised while handling the stage failure: {description}")
 
     def _metric_to_float(self, value: torch.Tensor | float) -> float:
+        # Delegates scalar conversion to the logger connector's validated boundary.
         return self._logger_connector.metric_to_float(value)
 
     def _log_metrics(
@@ -2796,9 +2802,12 @@ class Trainer:
         metrics: Mapping[str, torch.Tensor | float],
         step: int
     ) -> None:
+        # Routes callback- or trainer-produced metrics through rank policy and
+        # configured backend fan-out.
         self._logger_connector.log_metrics(metrics, step)
 
     def _log_hyperparams(self, params: HyperparameterDict) -> None:
+        # Routes one explicit portable configuration mapping to logger fan-out.
         self._logger_connector.log_hyperparams(params)
 
     def _autolog_hyperparameters(
@@ -2806,6 +2815,8 @@ class Trainer:
         module: Module,
         datamodule: DataModule | None
     ) -> None:
+        # Delegates one-time Module and DataModule configuration merging and
+        # emission to the logger connector.
         self._logger_connector.autolog_hyperparameters(module, datamodule)
 
     @property
@@ -2816,6 +2827,8 @@ class Trainer:
 
     @callbacks.setter
     def callbacks(self, callbacks: list[Callback]) -> None:
+        # Replaces the live callback set through connector type, identity, and
+        # ordering validation.
         self._callback_connector.callbacks: list[Callback] = callbacks
 
     @property
@@ -2867,6 +2880,8 @@ class Trainer:
 
     @ckpt_path.setter
     def ckpt_path(self, ckpt_path: str | Path | None) -> None:
+        # Installs the mutable default selector used when a stage call provides no
+        # explicit checkpoint path.
         self._checkpoint_connector.path: str | Path | None = ckpt_path
 
     @property
@@ -2876,6 +2891,7 @@ class Trainer:
 
     @logger.setter
     def logger(self, logger: Logger | None) -> None:
+        # Replaces configured fan-out with zero or one logger backend.
         self._logger_connector.logger: Logger | None = logger
 
     @property
@@ -2885,6 +2901,7 @@ class Trainer:
 
     @loggers.setter
     def loggers(self, loggers: list[Logger] | None) -> None:
+        # Replaces the complete logger fan-out through connector validation.
         self._logger_connector.loggers: list[Logger] | None = loggers
 
     @property
@@ -3090,10 +3107,12 @@ class Trainer:
 
     @property
     def training(self) -> bool:
+        # Reports whether fit currently owns the training inner phase.
         return self.state.running_stage == "training"
 
     @training.setter
     def training(self, value: bool) -> None:
+        # Enters or clears training identity without changing the outer fit stage.
         if type(value) is not bool:
             raise TypeError("`training` must be a bool.")
         if value:
@@ -3103,10 +3122,12 @@ class Trainer:
 
     @property
     def validating(self) -> bool:
+        # Reports whether validation is the active inner phase.
         return self.state.running_stage == "validating"
 
     @validating.setter
     def validating(self, value: bool) -> None:
+        # Enters or clears validation identity while preserving outer stage state.
         if type(value) is not bool:
             raise TypeError("`validating` must be a bool.")
         if value:
@@ -3116,10 +3137,12 @@ class Trainer:
 
     @property
     def testing(self) -> bool:
+        # Reports whether standalone testing is the active inner phase.
         return self.state.running_stage == "testing"
 
     @testing.setter
     def testing(self, value: bool) -> None:
+        # Enters or clears testing identity while preserving outer stage state.
         if type(value) is not bool:
             raise TypeError("`testing` must be a bool.")
         if value:
@@ -3129,10 +3152,12 @@ class Trainer:
 
     @property
     def predicting(self) -> bool:
+        # Reports whether prediction is the active inner phase.
         return self.state.running_stage == "predicting"
 
     @predicting.setter
     def predicting(self, value: bool) -> None:
+        # Enters or clears prediction identity while preserving outer stage state.
         if type(value) is not bool:
             raise TypeError("`predicting` must be a bool.")
         if value:
@@ -3147,10 +3172,12 @@ class Trainer:
 
     @property
     def sanity_checking(self) -> bool:
+        # Reports whether the bounded pre-fit validation probe is active.
         return self.state.running_stage == "sanity_checking"
 
     @sanity_checking.setter
     def sanity_checking(self, value: bool) -> None:
+        # Enters or clears sanity identity without losing the enclosing fit stage.
         if type(value) is not bool:
             raise TypeError("`sanity_checking` must be a bool.")
         if value:
@@ -3165,6 +3192,7 @@ class Trainer:
 
     @should_stop.setter
     def should_stop(self, value: bool) -> None:
+        # Delegates cooperative control state to the canonical TrainerState owner.
         self.state.should_stop: bool = value
 
     @property

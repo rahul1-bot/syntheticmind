@@ -346,16 +346,20 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     @property
     @override
     def launcher(self) -> _ProcessLauncher:
+        # Returns the process policy configured with this distributed Strategy.
         return self._launcher
 
     @property
     @override
     def num_processes(self) -> int:
+        # Derives local worker count from resolved parallel devices.
         return len(self.parallel_devices) if self.parallel_devices else 1
 
     @property
     @override
     def global_rank(self) -> int:
+        # Prefers live process-group truth after initialization and environment
+        # topology before it.
         if dist.is_initialized():
             return dist.get_rank()
         return self._cluster_environment.global_rank()
@@ -363,16 +367,20 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     @property
     @override
     def local_rank(self) -> int:
+        # Returns the process-local device coordinate specialized during setup.
         return self._local_rank
 
     @property
     @override
     def node_rank(self) -> int:
+        # Delegates node identity to the configured cluster environment.
         return self._cluster_environment.node_rank()
 
     @property
     @override
     def world_size(self) -> int:
+        # Prefers live process-group cardinality after initialization and
+        # environment topology before it.
         if dist.is_initialized():
             return dist.get_world_size()
         return self._cluster_environment.world_size()
@@ -380,6 +388,8 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     @property
     @override
     def data_parallel_size(self) -> int:
+        # Ordinary parallel execution treats every process as one sample replica;
+        # model parallelism overrides this with its mesh axis.
         return self.world_size
 
     @property
@@ -393,10 +403,12 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     @property
     @override
     def cluster_environment(self) -> ClusterEnvironment:
+        # Returns the live topology and rendezvous provider.
         return self._cluster_environment
 
     @property
     def configured_cluster_environment(self) -> ClusterEnvironment | None:
+        # Returns only the client-supplied identity for connector conflict checks.
         return self._configured_cluster_environment
 
     def _configure_environment(self) -> None:

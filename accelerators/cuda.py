@@ -29,6 +29,7 @@ class CUDAAccelerator(Accelerator):
     # NVIDIA execution backend selected by Trainer when CUDA is requested or
     # available under automatic accelerator resolution.
     def __init__(self) -> None:
+        # Defers process-local device binding until Strategy resolves local rank.
         self._device: torch.device | None = None
 
     @override
@@ -110,17 +111,20 @@ class CUDAAccelerator(Accelerator):
     @classmethod
     @override
     def auto_device_count(cls) -> int:
+        # Reports the visible CUDA device count used by automatic parsing.
         del cls
         return torch.cuda.device_count()
 
     @classmethod
     @override
     def is_available(cls) -> bool:
+        # Requires the installed torch build and host runtime to expose CUDA.
         del cls
         return torch.cuda.is_available()
 
     @classmethod
     @override
     def name(cls) -> str:
+        # Returns the canonical Trainer configuration identity.
         del cls
         return "cuda"

@@ -33,6 +33,7 @@ class CPUAccelerator(Accelerator):
     # Trainer(accelerator="cpu"); custom code may also construct and pass the
     # instance directly.
     def __init__(self) -> None:
+        # Establishes the immutable host placement used before and after setup.
         self._device: torch.device = torch.device("cpu")
 
     @override
@@ -44,6 +45,7 @@ class CPUAccelerator(Accelerator):
 
     @override
     def get_device(self) -> torch.device:
+        # Returns the process-local host placement selected during setup.
         return self._device
 
     @override
@@ -93,17 +95,21 @@ class CPUAccelerator(Accelerator):
     @classmethod
     @override
     def auto_device_count(cls) -> int:
+        # Uses one process by default instead of interpreting host core count as
+        # an automatic distributed-training request.
         del cls
         return 1
 
     @classmethod
     @override
     def is_available(cls) -> bool:
+        # CPU remains the guaranteed backend for every supported host.
         del cls
         return True
 
     @classmethod
     @override
     def name(cls) -> str:
+        # Returns the canonical Trainer configuration identity.
         del cls
         return "cpu"

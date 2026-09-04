@@ -61,11 +61,15 @@ class _ModelParallelCheckpointIO:
     # Internal format owner over PyTorch distributed state-dict APIs, ordinary
     # TorchCheckpointIO, and atomic sharded generations.
     def __init__(self, checkpoint_format: ModelParallelCheckpointFormat) -> None:
+        # Binds one output format while retaining format detection for loading
+        # existing full or sharded artifacts.
         self._checkpoint_format: ModelParallelCheckpointFormat = checkpoint_format
         self._checkpoint_io: TorchCheckpointIO = TorchCheckpointIO()
         self._sharded_store: _ShardedCheckpointStore = _ShardedCheckpointStore()
 
     def is_checkpoint(self, path: str | Path) -> bool:
+        # Recognizes ordinary full files or complete pointer-backed and legacy
+        # sharded layouts.
         return StoragePath(path).is_file() or self._sharded_store.is_checkpoint(path)
 
     def load_metadata(
@@ -159,6 +163,7 @@ class _ModelParallelCheckpointIO:
         )
 
     def remove(self, path: str | Path) -> None:
+        # Removes the complete full file or sharded root selected by retention.
         StoragePath(path).remove(recursive=True)
 
     def _save_sharded(

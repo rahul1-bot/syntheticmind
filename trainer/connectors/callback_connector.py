@@ -160,6 +160,8 @@ class _CallbackConnector:
 
     @property
     def callbacks(self) -> list[Callback]:
+        # Returns the live ordered callback collection used by HookDispatcher;
+        # assignment remains the validated replacement boundary.
         return self._callbacks
 
     @callbacks.setter

@@ -40,6 +40,8 @@ type _ModuleConstructor = Callable[..., nn.Module]
 class _TransformerEngineAdapter:
     # Optional dependency boundary constructed only after availability succeeds.
     def __init__(self) -> None:
+        # Imports the exact recipe and PyTorch namespaces consumed by the
+        # precision policy after availability and version validation.
         self._recipe_module: ModuleType = importlib.import_module(
             "transformer_engine.common.recipe"
         )
@@ -117,6 +119,8 @@ class _TransformerEngineAdapter:
 
     @property
     def linear_constructor(self) -> _ModuleConstructor:
+        # Narrows the optional package's Linear class to the shared constructor
+        # contract used by patching and recursive replacement.
         return cast(
             _ModuleConstructor,
             getattr(self._pytorch_module, "Linear")
@@ -124,6 +128,8 @@ class _TransformerEngineAdapter:
 
     @property
     def layer_norm_constructor(self) -> _ModuleConstructor:
+        # Narrows the optional package's LayerNorm class to the shared constructor
+        # contract used by patching and recursive replacement.
         return cast(
             _ModuleConstructor,
             getattr(self._pytorch_module, "LayerNorm")

@@ -98,10 +98,13 @@ class StatefulScheduler(Protocol):
     # may require Module.lr_scheduler_step to define nonstandard stepping.
     optimizer: torch.optim.Optimizer
 
+    # Advances scheduler policy with an optional monitored scalar.
     def step(self, metric: _SchedulerMetric = None) -> None: ...
 
+    # Captures scheduler-owned continuation state.
     def state_dict(self) -> StateDict: ...
 
+    # Restores the corresponding scheduler-owned continuation state.
     def load_state_dict(self, state_dict: StateDict) -> None: ...
 
 
@@ -428,23 +431,30 @@ class _NoOpOptimizer(torch.optim.Optimizer):
     # state mutation remain absent.
     @override
     def __init__(self) -> None:
+        # Supplies one inert parameter only to satisfy torch Optimizer's
+        # constructor invariant; it never participates in model state.
         super().__init__([torch.zeros(1)], {})
 
     @override
     def add_param_group(self, param_group: OptimizerParameterGroup) -> None:
+        # Rejects mutation semantically by discarding groups on the disabled path.
         del param_group
 
     @override
     def load_state_dict(self, state_dict: OptimizerState) -> None:
+        # Accepts no resumable algorithm state because this policy never mutates.
         del state_dict
 
     @override
     def state_dict(self) -> OptimizerState:
+        # Returns the stable empty checkpoint representation.
         return {}
 
+    # A step without a closure returns no optimizer output.
     @overload
     def step(self, closure: None = None) -> None: ...
 
+    # A supplied closure retains its normalized training-step result.
     @overload
     def step(self, closure: OptimizerClosure) -> OptimizerStepOutput: ...
 
@@ -453,16 +463,20 @@ class _NoOpOptimizer(torch.optim.Optimizer):
         self,
         closure: OptimizerClosure | None = None
     ) -> OptimizerStepOutput:
+        # Preserves closure-driven training_step execution while performing no
+        # parameter or optimizer-state mutation.
         if closure is None:
             return None
         return closure()
 
     @override
     def zero_grad(self, set_to_none: bool = True) -> None:
+        # Performs no work because the inert parameter never receives gradients.
         del set_to_none
 
     @override
     def __repr__(self) -> str:
+        # Makes the disabled optimization policy explicit in diagnostics.
         return "No Optimizer"
 
 

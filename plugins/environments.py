@@ -76,12 +76,15 @@ class LocalEnvironment(ClusterEnvironment):
     # execution. Mutable defaults support parent-side topology before worker
     # environment variables exist.
     def __init__(self) -> None:
+        # Initializes parent-side single-process defaults and defers rendezvous
+        # port allocation until distributed setup actually requests it.
         self._main_port: int | None = None
         self._global_rank: int = 0
         self._world_size: int = 1
 
     @override
     def world_size(self) -> int:
+        # Prefers externally exported topology over the parent-side default.
         return int(os.environ.get("WORLD_SIZE", str(self._world_size)))
 
     @override
@@ -93,6 +96,7 @@ class LocalEnvironment(ClusterEnvironment):
 
     @override
     def global_rank(self) -> int:
+        # Prefers the externally exported process rank over local launch state.
         return int(os.environ.get("RANK", str(self._global_rank)))
 
     @override
@@ -104,10 +108,13 @@ class LocalEnvironment(ClusterEnvironment):
 
     @override
     def local_rank(self) -> int:
+        # Returns the node-local worker coordinate exported by the launcher.
         return int(os.environ.get("LOCAL_RANK", "0"))
 
     @override
     def node_rank(self) -> int:
+        # Uses explicit node identity first and torchrun group rank as the
+        # compatible fallback.
         group_rank: str = os.environ.get("GROUP_RANK", "0")
         return int(os.environ.get("NODE_RANK", group_rank))
 
@@ -123,11 +130,14 @@ class LocalEnvironment(ClusterEnvironment):
 
     @override
     def teardown(self) -> None:
+        # Owns no persistent resource; Strategy tears down process groups.
         pass
 
     @classmethod
     @override
     def detect(cls) -> bool:
+        # Serves as the universal environment fallback after specialized
+        # environments have had an opportunity to detect themselves.
         del cls
         return True
 
@@ -141,6 +151,7 @@ class LocalEnvironment(ClusterEnvironment):
     @property
     @override
     def main_address(self) -> str:
+        # Uses the exported rendezvous host or the local loopback default.
         return os.environ.get("MASTER_ADDR", "127.0.0.1")
 
     @property

@@ -1078,18 +1078,21 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         finally:
             self.untoggle_optimizer(optimizer)
 
+    # Narrows the default managed-optimizer request for client type inference.
     @overload
     def optimizers(
         self,
         use_synthetic_optimizer: Literal[True] = True
     ) -> SyntheticOptimizer | list[SyntheticOptimizer]: ...
 
+    # Narrows an explicit raw-optimizer request for algorithm-level client access.
     @overload
     def optimizers(
         self,
         use_synthetic_optimizer: Literal[False]
     ) -> torch.optim.Optimizer | list[torch.optim.Optimizer]: ...
 
+    # Preserves the complete result union when the selection is dynamic.
     @overload
     def optimizers(
         self,

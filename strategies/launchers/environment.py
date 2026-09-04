@@ -42,6 +42,7 @@ class _DistributedEnvironment:
     )
 
     def __init__(self, strategy: LaunchStrategy) -> None:
+        # Binds the structural topology without mutating the parent environment.
         self._strategy: LaunchStrategy = strategy
 
     def local_values(self) -> dict[str, str]:
@@ -123,4 +124,5 @@ class _DistributedEnvironment:
 
     @property
     def creates_processes_externally(self) -> bool:
+        # Forwards external process ownership from the selected cluster provider.
         return self._strategy.cluster_environment.creates_processes_externally

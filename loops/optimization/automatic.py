@@ -34,6 +34,7 @@ __all__: list[str] = []
 class _AutomaticOptimization:
     # One automatic closure execution with normalized reporting output.
     def __init__(self, accumulation_factor: int) -> None:
+        # Binds the positive loss-scaling factor and starts with no batch output.
         if accumulation_factor < 1:
             raise ValueError("accumulation_factor must be positive.")
         self._accumulation_factor: int = accumulation_factor

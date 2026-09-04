@@ -94,9 +94,12 @@ class _LoggerConnector:
         self.logged_metrics.clear()
 
     def update_callback_metrics(self, metrics: Mapping[str, torch.Tensor]) -> None:
+        # Merges finalized monitoring tensors without changing logger or progress
+        # routing.
         self.callback_metrics.update(metrics)
 
     def update_logged_metrics(self, metrics: Mapping[str, torch.Tensor]) -> None:
+        # Merges finalized logger-facing tensors into the current inspection view.
         self.logged_metrics.update(metrics)
 
     def update_progress_bar_metrics(
@@ -104,6 +107,8 @@ class _LoggerConnector:
         running_stage: RunningStage,
         metrics: Mapping[str, float]
     ) -> None:
+        # Updates one running-stage presentation view and records it as the latest
+        # visible stage only when values exist.
         if not metrics:
             return
         self.progress_bar_metrics_by_stage[running_stage].update(metrics)
@@ -245,10 +250,13 @@ class _LoggerConnector:
 
     @property
     def logger(self) -> Logger | None:
+        # Returns the primary logger used for the canonical run directory.
         return self._loggers[0] if self._loggers else None
 
     @logger.setter
     def logger(self, logger: Logger | None) -> None:
+        # Replaces fan-out with zero or one validated backend and reopens
+        # hyperparameter emission for the new destination.
         if logger is not None and not isinstance(logger, Logger):
             raise TypeError("logger must be a Logger or None.")
         self._loggers: list[Logger] = [] if logger is None else [logger]
@@ -256,10 +264,12 @@ class _LoggerConnector:
 
     @property
     def loggers(self) -> list[Logger]:
+        # Returns a defensive ordered backend collection for client inspection.
         return list(self._loggers)
 
     @loggers.setter
     def loggers(self, loggers: list[Logger] | None) -> None:
+        # Replaces fan-out after validating types and unique backend identities.
         resolved_loggers: list[Logger] = [] if loggers is None else list(loggers)
         if not all(isinstance(logger, Logger) for logger in resolved_loggers):
             raise TypeError("loggers must contain only Logger instances.")
@@ -270,10 +280,13 @@ class _LoggerConnector:
 
     @property
     def hyperparameters_logged(self) -> bool:
+        # Reports whether the current backend collection has received its one
+        # merged configuration record.
         return self._hyperparameters_logged
 
     @hyperparameters_logged.setter
     def hyperparameters_logged(self, value: bool) -> None:
+        # Preserves exact boolean process-transfer state for one-time emission.
         if type(value) is not bool:
             raise TypeError("hyperparameters_logged must be a bool.")
         self._hyperparameters_logged: bool = value

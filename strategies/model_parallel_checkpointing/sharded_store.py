@@ -67,6 +67,8 @@ class _ShardedCheckpointStore:
         path: str | Path,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Loads Trainer trajectory metadata only from the resolved published or
+        # complete legacy generation.
         generation_path: str = self._active_generation_path(path)
         return self._checkpoint_io.load_checkpoint(
             StoragePath(generation_path).join(self._metadata_filename),
@@ -142,6 +144,7 @@ class _ShardedCheckpointStore:
         distributed_checkpoint.load(state, storage_reader=reader)
 
     def remove(self, path: str | Path) -> None:
+        # Removes the complete checkpoint root selected by higher-level retention.
         StoragePath(path).remove(recursive=True)
 
     def _prepare_generation(
@@ -232,6 +235,7 @@ class _ShardedCheckpointStore:
         checkpoint_path: str | Path,
         generation_name: str
     ) -> str:
+        # Resolves one immutable generation beneath the owned generations root.
         return StoragePath(checkpoint_path).join(
             self._generations_directory_name,
             generation_name
@@ -281,12 +285,15 @@ class _ShardedCheckpointStore:
             )
 
     def _storage_writer(self, path: str | Path) -> StorageWriter:
+        # Selects PyTorch's local or fsspec writer without changing generation
+        # transaction ownership.
         storage_path: StoragePath = StoragePath(path)
         if storage_path.is_local:
             return FileSystemWriter(storage_path.normalized)
         return FsspecWriter(path)
 
     def _storage_reader(self, path: str | Path) -> StorageReader:
+        # Selects the reader matching the resolved generation filesystem.
         storage_path: StoragePath = StoragePath(path)
         if storage_path.is_local:
             return FileSystemReader(storage_path.normalized)

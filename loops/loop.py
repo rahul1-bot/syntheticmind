@@ -26,6 +26,7 @@ __all__: list[str] = ["Loop"]
 class Loop:
     # Shared stateful attachment for Trainer-owned iterative lifecycles.
     def __init__(self) -> None:
+        # Initializes detached reusable loop state before Trainer composition.
         self._trainer: syntheticmind.Trainer | None = None
         self._should_stop: bool = False
 
@@ -38,6 +39,7 @@ class Loop:
 
     @trainer.setter
     def trainer(self, trainer: syntheticmind.Trainer) -> None:
+        # Connects the sole orchestration authority consumed during execution.
         self._trainer: syntheticmind.Trainer | None = trainer
 
     @property
@@ -47,6 +49,8 @@ class Loop:
 
     @should_stop.setter
     def should_stop(self, value: bool) -> None:
+        # Validates cooperative control state instead of accepting truthy values
+        # whose meaning could change across process transfer.
         if type(value) is not bool:
             raise TypeError("Loop should_stop must be a bool.")
         self._should_stop: bool = value
@@ -69,4 +73,5 @@ class Loop:
 
     @override
     def __repr__(self) -> str:
+        # Reports the concrete loop concept without dumping live Trainer state.
         return f"{type(self).__name__}()"

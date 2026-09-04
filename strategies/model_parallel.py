@@ -188,6 +188,8 @@ class ModelParallelStrategy(ParallelStrategy):
 
     @override
     def sync_gradients(self, optimizer: torch.optim.Optimizer) -> None:
+        # Performs no explicit tail all-reduce because DTensor and composable
+        # sharding own gradient placement and synchronization semantics.
         del optimizer
 
     @override

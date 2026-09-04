@@ -110,10 +110,13 @@ class DDPStrategy(ParallelStrategy):
 
     @property
     def layer_sync(self) -> LayerSync | None:
+        # Returns the live reversible layer policy attached for this run.
         return self._layer_sync
 
     @property
     def configured_layer_sync(self) -> LayerSync | None:
+        # Returns the client-configured identity used for connector conflict
+        # detection independently from later attachment.
         return self._configured_layer_sync
 
 

@@ -83,8 +83,10 @@ class _StatefulIterable(Protocol):
     # Structural checkpoint contract implemented by stateful dataloaders. A
     # client loader participates by exposing this pair; inheritance from a
     # SyntheticMind class is not required.
+    # Captures the loader-owned cursor or sampler continuation mapping.
     def state_dict(self) -> DataLoaderState: ...
 
+    # Restores the matching loader-owned state before iteration resumes.
     def load_state_dict(self, state_dict: DataLoaderState) -> None: ...
 
 
@@ -98,6 +100,8 @@ class _ModeIterator(Iterator[_IteratorOutput]):
         limits: list[int | None],
         length: int | None
     ) -> None:
+        # Stores flattened leaves and resolved traversal bounds without opening
+        # client iterators before iteration begins.
         self.iterables: list[Iterable[Batch]] = iterables
         self.limits: list[int | None] = limits
         self.length: int | None = length
@@ -158,6 +162,8 @@ class _MinSize(_ModeIterator):
     # returned batch contains exactly one value from every loader.
     @override
     def __next__(self) -> _IteratorOutput:
+        # Pulls one batch from every leaf atomically; the first exhausted leaf
+        # terminates the combined horizon.
         if self._is_complete():
             raise StopIteration
         values: list[Batch] = []
@@ -174,6 +180,8 @@ class _MaxSize(_ModeIterator):
     # that ended earlier, preserving the complete longest-loader horizon.
     @override
     def __next__(self) -> _IteratorOutput:
+        # Pulls each still-active leaf and terminates only when a complete round
+        # produces no value.
         if self._is_complete():
             raise StopIteration
         values: list[Batch] = [None] * len(self.iterators)
@@ -202,11 +210,13 @@ class _MaxSizeCycle(_ModeIterator):
         limits: list[int | None],
         length: int | None
     ) -> None:
+        # Extends shared traversal with one completion marker per loader cycle.
         super().__init__(iterables, limits, length)
         self.completed: list[bool] = []
 
     @override
     def __iter__(self) -> _MaxSizeCycle:
+        # Opens every leaf through shared traversal and resets cycle completion.
         super().__iter__()
         self.completed: list[bool] = [False] * len(self.iterables)
         return self
@@ -237,6 +247,7 @@ class _MaxSizeCycle(_ModeIterator):
 
     @override
     def reset(self) -> None:
+        # Releases cycle-completion state together with shared iterators.
         super().reset()
         self.completed: list[bool] = []
 
@@ -252,12 +263,15 @@ class _Sequential(_ModeIterator):
         limits: list[int | None],
         length: int | None
     ) -> None:
+        # Extends shared traversal with active-loader and loader-local batch
+        # coordinates.
         super().__init__(iterables, limits, length)
         self.iterator_idx: int = 0
         self.batch_idx: int = 0
 
     @override
     def __iter__(self) -> _Sequential:
+        # Opens only the first loader and resets global and loader-local progress.
         self.iterator_idx: int = 0
         self.batch_idx: int = 0
         self.yielded: int = 0
@@ -297,6 +311,8 @@ class _Sequential(_ModeIterator):
         return value
 
     def _load_iterator(self) -> None:
+        # Holds exactly one live leaf iterator, releasing the previous loader at
+        # every sequential boundary.
         self.iterators: list[Iterator[Batch]] = (
             [iter(self.iterables[self.iterator_idx])]
             if self.iterator_idx < len(self.iterables)
@@ -305,6 +321,7 @@ class _Sequential(_ModeIterator):
 
     @override
     def reset(self) -> None:
+        # Releases the active leaf and restores initial sequential coordinates.
         super().reset()
         self.iterator_idx: int = 0
         self.batch_idx: int = 0

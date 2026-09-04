@@ -337,30 +337,37 @@ class Strategy:
 
     @property
     def launcher(self) -> _ProcessLauncher | None:
+        # Local execution creates no worker-launch boundary.
         return None
 
     @property
     def num_processes(self) -> int:
+        # Local execution owns exactly one process.
         return 1
 
     @property
     def global_rank(self) -> int:
+        # Local execution is the sole global rank.
         return 0
 
     @property
     def local_rank(self) -> int:
+        # Local execution is the sole rank on its host.
         return 0
 
     @property
     def node_rank(self) -> int:
+        # Local execution is the sole node coordinate.
         return 0
 
     @property
     def world_size(self) -> int:
+        # Local collective identity contains one participant.
         return 1
 
     @property
     def data_parallel_size(self) -> int:
+        # One local process owns one sample-processing replica.
         return 1
 
     @property
@@ -474,7 +481,9 @@ class _ForwardRedirection:
         return output
 
     def _after_inner_forward(self, wrapper: nn.Module, module: Module) -> None:
+        # Default wrappers require no mutation after the redirected client step.
         del wrapper, module
 
     def _after_outer_forward(self, wrapper: nn.Module, module: Module) -> None:
+        # Default wrappers require no mutation after their outer call completes.
         del wrapper, module

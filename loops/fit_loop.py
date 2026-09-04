@@ -250,9 +250,12 @@ class FitLoop(Loop):
         trainer._raise_if_sigterm()
 
     def _max_epochs_reached(self, state: TrainerState) -> bool:
+        # Applies the completed-loader-epoch ceiling; partial epochs never
+        # advance the coordinate evaluated here.
         return self.max_epochs != -1 and state.current_epoch >= self.max_epochs
 
     def _max_steps_reached(self, state: TrainerState) -> bool:
+        # Applies the managed optimizer-mutation ceiling owned by the epoch loop.
         assert self.epoch_loop is not None
         return self.epoch_loop.max_steps != -1 and state.global_step >= self.epoch_loop.max_steps
 

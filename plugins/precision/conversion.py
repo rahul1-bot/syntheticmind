@@ -21,6 +21,7 @@ __all__: list[str] = []
 class _DtypeContext:
     # Reversible process-global torch default-dtype transition.
     def __init__(self, dtype: torch.dtype) -> None:
+        # Stores the target dtype and starts outside a context transaction.
         self._dtype: torch.dtype = dtype
         self._original_dtype: torch.dtype | None = None
 

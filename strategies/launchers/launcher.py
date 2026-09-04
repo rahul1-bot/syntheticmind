@@ -129,6 +129,7 @@ class _ProcessLauncher:
 
     @property
     def start_method(self) -> ProcessStartMethod:
+        # Exposes the configured process-creation model for Trainer policy.
         return self._start_method
 
     @property
@@ -139,14 +140,17 @@ class _ProcessLauncher:
 
     @property
     def creates_processes_externally(self) -> bool:
+        # Reports whether the cluster environment already created this worker.
         return self._environment.creates_processes_externally
 
     @property
     def should_launch(self) -> bool:
+        # Prevents recursive local launch inside torchrun or scheduler workers.
         return not self.creates_processes_externally
 
     @property
     def active_process_count(self) -> int:
+        # Counts currently owned workers for teardown and signal verification.
         return (
             len(self._subprocess_launcher.processes)
             + len(self._multiprocessing_launcher.processes)

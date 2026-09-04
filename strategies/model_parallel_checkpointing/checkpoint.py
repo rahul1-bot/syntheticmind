@@ -73,12 +73,14 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
 
     @override
     def connect_model(self, model: nn.Module) -> None:
+        # Validates and binds the distributed model used by later state-dict APIs.
         if not isinstance(model, nn.Module):
             raise TypeError("Checkpoint model must be a torch.nn.Module.")
         self._model: nn.Module | None = model
 
     @override
     def connect_optimizers(self, optimizers: list[torch.optim.Optimizer]) -> None:
+        # Validates and copies the ordered distributed optimizer participants.
         if not isinstance(optimizers, list):
             raise TypeError("Checkpoint optimizers must be a list.")
         optimizer: torch.optim.Optimizer
@@ -154,10 +156,12 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
 
     @override
     def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool:
+        # Recognizes complete full files or published sharded checkpoint roots.
         return self._checkpoint_io.is_checkpoint(checkpoint_path)
 
     @override
     def model_state_dict(self) -> ModelState:
+        # Extracts model state using the configured full or sharded representation.
         return self._checkpoint_io.model_state(self._require_model())
 
     @override
@@ -165,6 +169,7 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         self,
         optimizer: torch.optim.Optimizer
     ) -> OptimizerState:
+        # Extracts model-aware distributed optimizer state for one participant.
         return self._checkpoint_io.optimizer_state(
             self._require_model(),
             optimizer
@@ -199,12 +204,16 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
 
     @override
     def remove(self, filepath: CheckpointPath, global_rank: int) -> None:
+        # Synchronizes artifact identity across ranks and applies deletion on
+        # global zero after caller-owned retention policy selects it.
         path: str = self._synchronize_path(filepath)
         if global_rank == 0:
             self._checkpoint_io.remove(path)
 
     @override
     def teardown(self) -> None:
+        # Releases every preloaded and deferred restore reference while leaving
+        # immutable published artifacts untouched.
         self._preloaded_path: str | None = None
         self._preloaded_checkpoint: CheckpointDict | None = None
         self._pending_path: str | None = None
@@ -223,6 +232,8 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
     @property
     @override
     def configured_checkpoint_io(self) -> CheckpointIO | None:
+        # Reports no external transport because this Strategy owns collective
+        # representation and publication end to end.
         return None
 
     def _synchronize_path(self, checkpoint_path: CheckpointPath) -> str:
@@ -237,6 +248,7 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
         return path
 
     def _require_model(self) -> nn.Module:
+        # Prevents distributed state extraction before Strategy model connection.
         if self._model is None:
             raise RuntimeError("Checkpoint state requires a connected model.")
         return self._model

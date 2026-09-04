@@ -111,6 +111,7 @@ class TransformerEnginePrecision(Precision):
 
     @override
     def tensor_init_context(self) -> AbstractContextManager[None]:
+        # Applies the selected true weight dtype to client tensor construction.
         return _DtypeContext(self.weights_dtype)
 
     @contextmanager
@@ -144,10 +145,13 @@ class TransformerEnginePrecision(Precision):
 
     @override
     def convert_input(self, data: Batch) -> Batch:
+        # Converts floating client inputs to the selected Transformer Engine
+        # weight dtype while preserving non-floating leaves.
         return self._convert_floating_point(data, self.weights_dtype)
 
     @override
     def convert_output(self, data: Batch) -> Batch:
+        # Returns floating outputs to the caller's ambient default dtype.
         return self._convert_floating_point(data, torch.get_default_dtype())
 
     def _replace_layers(self, module: nn.Module) -> None:

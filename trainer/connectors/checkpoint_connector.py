@@ -365,6 +365,7 @@ class _CheckpointConnector:
         self._strategy.checkpoint.remove(filepath, self._strategy.global_rank)
 
     def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool:
+        # Delegates format recognition to the active Strategy representation.
         return self._strategy.checkpoint.is_checkpoint_path(checkpoint_path)
 
     def model_state_dict(self) -> CheckpointValue:

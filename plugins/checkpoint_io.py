@@ -234,6 +234,7 @@ class _WrappingCheckpointIO(CheckpointIO):
         path: CheckpointPath,
         storage_options: CheckpointStorageOptions = None
     ) -> None:
+        # Forwards one complete snapshot to the resolved concrete transport.
         self._require_checkpoint_io().save_checkpoint(
             checkpoint,
             path,
@@ -247,6 +248,8 @@ class _WrappingCheckpointIO(CheckpointIO):
         map_location: MapLocation = None,
         weights_only: bool | None = None
     ) -> CheckpointDict:
+        # Wait-free delegation for wrappers whose concrete subclasses do not add
+        # ordering semantics.
         return self._require_checkpoint_io().load_checkpoint(
             path,
             map_location,
@@ -255,15 +258,18 @@ class _WrappingCheckpointIO(CheckpointIO):
 
     @override
     def remove_checkpoint(self, path: CheckpointPath) -> None:
+        # Delegates removal without acquiring retention ownership.
         self._require_checkpoint_io().remove_checkpoint(path)
 
     @override
     def teardown(self) -> None:
+        # Releases the resolved base exactly once when one was attached.
         if self._checkpoint_io is not None:
             self._checkpoint_io.teardown()
 
     @property
     def checkpoint_io(self) -> CheckpointIO | None:
+        # Exposes the resolved transport for connector composition inspection.
         return self._checkpoint_io
 
     @checkpoint_io.setter
@@ -296,6 +302,8 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
     # explicit base transport was provided.
     @override
     def __init__(self, checkpoint_io: CheckpointIO | None = None) -> None:
+        # Starts detached from any worker; the executor is acquired only by the
+        # first submitted save and preserves one stored causal failure.
         super().__init__(checkpoint_io)
         self._executor: ThreadPoolExecutor | None = None
         self._error: BaseException | None = None
@@ -378,6 +386,8 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
         return self._executor
 
     def _raise_error(self) -> None:
+        # Propagates the original background failure at the next synchronous
+        # public boundary without wrapping away its type or traceback.
         if self._error is not None:
             raise self._error
 

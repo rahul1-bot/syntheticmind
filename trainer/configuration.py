@@ -378,10 +378,13 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def fast_dev_run_enabled(self) -> bool:
+        # Normalizes the validated boolean-or-count development policy for later
+        # resolved fields.
         return bool(self.fast_dev_run)
 
     @property
     def overfit_batches_enabled(self) -> bool:
+        # Reports whether stable training-subset reuse overrides fit limits.
         return self.overfit_batches > 0
 
     @property
@@ -396,12 +399,16 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_min_epochs(self) -> int:
+        # Uses the explicit minimum or requires one completed epoch only when a
+        # minimum-step contract exists.
         if self.min_epochs is not None:
             return self.min_epochs
         return 1 if self.min_steps is not None else 0
 
     @property
     def resolved_max_steps(self) -> int:
+        # Replaces the ordinary ceiling with the exact fast-development batch
+        # count when that mode is active.
         return int(self.fast_dev_run) if self.fast_dev_run_enabled else self.max_steps
 
     @property
@@ -415,6 +422,7 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_limit_val_batches(self) -> int | float:
+        # Applies overfit and development precedence to validation limits.
         if self.overfit_batches_enabled:
             return self.overfit_batches
         if self.fast_dev_run_enabled:
@@ -423,12 +431,14 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_limit_test_batches(self) -> int | float:
+        # Applies the development bound before the standalone test limit.
         if self.fast_dev_run_enabled:
             return int(self.fast_dev_run)
         return self._resolve_batch_limit(self.limit_test_batches)
 
     @property
     def resolved_limit_predict_batches(self) -> int | float:
+        # Applies the development bound before the prediction limit.
         if self.fast_dev_run_enabled:
             return int(self.fast_dev_run)
         return self._resolve_batch_limit(self.limit_predict_batches)
@@ -437,6 +447,8 @@ class _TrainerConfiguration(BaseModel):
     def resolved_val_check_interval(
         self
     ) -> int | float | str | timedelta | dict[str, int] | None:
+        # Forces end-of-development-batch validation and reconstructs immutable
+        # duration mappings for the runtime schedule owner.
         if self.fast_dev_run_enabled:
             return 1.0
         if isinstance(self.val_check_interval, tuple):
@@ -445,6 +457,7 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_check_val_every_n_epoch(self) -> int | None:
+        # Forces every-epoch eligibility in fast development.
         return 1 if self.fast_dev_run_enabled else self.check_val_every_n_epoch
 
     @property
@@ -463,27 +476,36 @@ class _TrainerConfiguration(BaseModel):
 
     @property
     def resolved_log_every_n_steps(self) -> int:
+        # Disables persistence in barebones mode and otherwise applies the
+        # standard fifty-step default.
         if self.barebones:
             return 0
         return 50 if self.log_every_n_steps is None else self.log_every_n_steps
 
     @property
     def resolved_enable_checkpointing(self) -> bool:
+        # Disables checkpoint policy in barebones mode and otherwise resolves the
+        # default to enabled.
         if self.barebones:
             return False
         return True if self.enable_checkpointing is None else self.enable_checkpointing
 
     @property
     def resolved_enable_progress_bar(self) -> bool:
+        # Disables progress presentation in barebones mode and otherwise resolves
+        # the default to enabled.
         if self.barebones:
             return False
         return True if self.enable_progress_bar is None else self.enable_progress_bar
 
     @property
     def resolved_enable_model_summary(self) -> bool:
+        # Disables model inspection in barebones mode and otherwise resolves the
+        # default to enabled.
         if self.barebones:
             return False
         return True if self.enable_model_summary is None else self.enable_model_summary
 
     def _resolve_batch_limit(self, value: int | float | None) -> int | float:
+        # Converts an unspecified limit to the complete sized-loader fraction.
         return 1.0 if value is None else value

@@ -110,6 +110,7 @@ class StrategyCheckpoint(Protocol):
     # Attaches the resolved storage transport where the format permits it.
     def attach_checkpoint_io(self, checkpoint_io: CheckpointIO) -> None: ...
 
+    # Returns only explicitly configured transport identity for conflict checks.
     @property
     def configured_checkpoint_io(self) -> CheckpointIO | None: ...
 
@@ -199,10 +200,12 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
 
     @override
     def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool:
+        # Recognizes only complete file artifacts for the single-file format.
         return StoragePath(checkpoint_path).is_file()
 
     @override
     def model_state_dict(self) -> ModelState:
+        # Extracts native state from the connected local or DDP-visible model.
         return cast(ModelState, self._require_model().state_dict())
 
     @override
@@ -210,6 +213,7 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         self,
         optimizer: torch.optim.Optimizer
     ) -> OptimizerState:
+        # Extracts native state from the requested configured optimizer.
         return cast(OptimizerState, optimizer.state_dict())
 
     @override
@@ -240,6 +244,7 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
 
     @override
     def remove(self, filepath: CheckpointPath, global_rank: int) -> None:
+        # Applies the format's rank-zero mutation policy to retention requests.
         if global_rank == 0:
             self._resolve_checkpoint_io().remove_checkpoint(filepath)
 
@@ -261,6 +266,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
     @property
     @override
     def configured_checkpoint_io(self) -> CheckpointIO | None:
+        # Returns only the client-configured transport identity used for connector
+        # conflict detection, not a lazily created default.
         return self._configured_checkpoint_io
 
     def _read(
@@ -268,6 +275,8 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         checkpoint_path: CheckpointPath,
         weights_only: bool | None
     ) -> CheckpointDict:
+        # Loads through the resolved transport while preserving torch's explicit
+        # weights-only deserialization policy.
         return self._resolve_checkpoint_io().load_checkpoint(
             checkpoint_path,
             weights_only=weights_only
@@ -300,6 +309,7 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
             raise KeyError("Checkpoint is missing resumable optimizer state.")
 
     def _require_model(self) -> nn.Module:
+        # Prevents state extraction or restoration before Strategy connection.
         if self._model is None:
             raise RuntimeError("Checkpoint state requires a connected model.")
         return self._model
@@ -314,6 +324,7 @@ class _SingleFileCheckpoint(StrategyCheckpoint):
         return self._checkpoint_io
 
     def _validate_checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
+        # Enforces the structural transport contract at composition time.
         if not isinstance(checkpoint_io, CheckpointIO):
             raise TypeError("checkpoint_io must be a CheckpointIO instance.")
 

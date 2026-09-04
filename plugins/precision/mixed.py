@@ -54,10 +54,13 @@ class _AutocastCacheContext:
         context_manager: AbstractContextManager[None],
         clear_cache: bool
     ) -> None:
+        # Wraps one concrete no-gradient context and records whether its exit
+        # must invalidate cached autocast conversions.
         self._context_manager: AbstractContextManager[None] = context_manager
         self._clear_cache: bool = clear_cache
 
     def __enter__(self) -> None:
+        # Delegates entry without replacing the enclosed context's return value.
         return self._context_manager.__enter__()
 
     def __exit__(
@@ -66,6 +69,8 @@ class _AutocastCacheContext:
         exception: BaseException | None,
         traceback: TracebackType | None
     ) -> bool | None:
+        # Preserves the wrapped context's exception policy and clears cached casts
+        # only after that context has completed its own exit behavior.
         output: bool | None = self._context_manager.__exit__(
             exception_type,
             exception,
