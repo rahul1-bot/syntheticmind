@@ -275,10 +275,6 @@ class Callback:
     def state_key(self) -> str:
         return type(self).__qualname__
 
-    @property
-    def _legacy_state_key(self) -> type[Callback]:
-        return type(self)
-
     def state_dict(self) -> StateDict:
         state_dict: StateDict = {}
         return state_dict

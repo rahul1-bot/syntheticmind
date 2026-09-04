@@ -2385,41 +2385,6 @@ class Trainer:
             description: str = f"{description}: {detail}"
         exception.add_note(f"{label} raised while handling the stage failure: {description}")
 
-    def _resolve_total_scheduler_steps(
-        self,
-        scheduler_definitions: list[LRSchedulerConfig]
-    ) -> int:
-        config_schedulers: list[LRSchedulerConfig] = list(scheduler_definitions)
-        if not config_schedulers:
-            raise MisconfigurationError(
-                "Expected at least one scheduler configuration when resolving scheduler steps."
-            )
-        if any(scheduler_config.interval == "step" for scheduler_config in config_schedulers):
-            assert self.fit_loop.epoch_loop is not None
-            limited_batches: int | None = self._data_connector.total_train_batches
-            if limited_batches is None:
-                raise MisconfigurationError(
-                    "Cannot determine total training steps for the learning rate scheduler. "
-                    "With iterable datasets, set limit_train_batches to an integer value."
-                )
-            accum: int = self.fit_loop.epoch_loop.accumulate_grad_batches
-            stepping_per_epoch: int = max(1, math.ceil(limited_batches / accum))
-            if self.max_epochs == -1:
-                if self.max_steps == -1:
-                    raise MisconfigurationError(
-                        "Cannot determine total training steps without an epoch or step limit."
-                    )
-                return self.max_steps
-            total_steps: int = stepping_per_epoch * self.max_epochs
-            return min(total_steps, self.max_steps) if self.max_steps != -1 else total_steps
-        if self.max_epochs == -1:
-            if self.max_steps == -1:
-                raise MisconfigurationError(
-                    "Cannot determine an epoch scheduler horizon without an epoch or step limit."
-                )
-            return self.max_steps
-        return self.max_epochs
-
     def _metric_to_float(self, value: torch.Tensor | float) -> float:
         return self._logger_connector.metric_to_float(value)
 

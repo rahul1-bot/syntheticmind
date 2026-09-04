@@ -139,7 +139,7 @@
 
     1. Callback vocabulary, callback configuration, hook timing, and hook invocation are separate concepts: Callback defines signatures, the connector owns selection and identity, loops and Trainer choose transitions, and HookDispatcher owns profiled calls.
     2. Python 3.14 lazy annotations can reference `syntheticmind.Trainer` and `syntheticmind.Module` through the package during circular construction without a future import, `TYPE_CHECKING`, quoted annotation, or weakened host Protocol.
-    3. Monitoring callbacks remain separate only when each names a real ML observation or control concept; a concrete callback must not call `super().__init__()` when its callback parent declares no initializer, while real validation, synchronization, state, and emission remain on the owning instance.
+    3. Monitoring callbacks remain separate only when each names a real ML observation or control concept; concrete callbacks must not call an absent parent initializer or retain unused legacy state identities, while real validation, synchronization, state, and emission remain on the owning instance.
     4. Early-stop decisions require rank consensus, finite checks precede mutation, learning rates follow optimizer use, throughput follows the data-parallel sample axis, and device statistics come from the selected Accelerator.
 
 | Memory | Data Composition, Reconstruction, and Run Policy | Date: 04 September 2026 | Time: 06:04 PM | Name: Ghost |
@@ -171,14 +171,14 @@
     6. Effective run configuration is provenance and a compatibility boundary; bounded time makes epochs unbounded unless the user supplies another ceiling, while a higher ceiling may continue a run and trajectory-defining accumulation, data, validation, precision, and synchronization settings must not drift silently.
     7. Stateful participant restoration must warn when saved callback identities are absent and isolate each callback from the checkpoint mapping; weights-only, full, sharded, remote, asynchronous, mid-epoch, linked, distributed, and failure-atomic paths require separate evidence.
 
-| Memory | Optimizer, Epoch, and Topology Semantics | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
+| Memory | Optimizer, Epoch, and Topology Semantics | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
     1. An optimizer is a model-facing PyTorch object and declaration contract; optimization is the loop lifecycle that invokes forward, loss extraction, zeroing, backward, accumulation, clipping, stepping, and scheduler cadence.
     2. A training epoch is not one indivisible method: resume, fetch, transfer, batch hooks, optimization, metrics, validation, scheduler, and continuation are named transitions that remain cohesive under one epoch owner.
     3. Shared batch-transfer precedence belongs beside Trainer hook dispatch; repeating it inside each stage loop creates several authorities that can drift independently.
     4. Gradient synchronization belongs to Strategy because the selected wrapper and topology determine how accumulation or manual toggling suppresses communication.
     5. Managed optimizers require distinct automatic and manual step operations; passing a boolean mode through an otherwise identical callable hides progress semantics and invites double step counting.
-    6. Standard scheduler cadence and monitor-dependent plateau cadence are separate operations, while `Module.lr_scheduler_step` remains the explicit extension hook for scheduler-specific behavior.
+    6. Standard cadence and monitor-dependent plateau cadence are separate operations, `Module.lr_scheduler_step` remains the scheduler-specific extension hook, and one public stepping estimate must not coexist with an unused private horizon formula.
 
 | Memory | Hook Contracts Are Machine-Learning Concepts | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
 

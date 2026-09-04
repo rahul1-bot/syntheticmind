@@ -88,13 +88,13 @@
     5. Precision construction covers CPU float16 fallback, model-parallel restrictions, recursive conversion, and the NVIDIA Transformer Engine 2.18 autocast and strict delayed-scaling boundary.
     6. Trainer remains the sole public composition surface. Neither invalid overrides nor ABC inheritance remain, dtype context rollback passes under failure, CPU float64 and bfloat16 plus live MPS float16 true and mixed training pass, and unavailable CUDA, layer synchronization, DDP, model parallelism, and Transformer Engine boundaries remain explicit.
 
-| Architecture Decision | Callback Contract, Monitoring, and Connector Ownership | Date: 04 September 2026 | Time: 06:32 PM | Name: Ghost |
+| Architecture Decision | Callback Contract, Monitoring, and Connector Ownership | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
     1. Callback defines the complete established setup, fit, training, validation, test, prediction, optimization, exception, checkpoint, and state hook vocabulary; all forty-three call signatures remain unchanged and concrete implementations mark every actual override.
     2. Model-provided callbacks are configured once per stage, replace compatible Trainer callbacks through the established inheritance rule, and remain ordered before checkpoint callbacks.
     3. The connector accepts a bound configuration operation rather than a concrete Trainer reference, preserving module hook context and profiler ownership without introducing a circular import or synthetic Trainer-host Protocol.
     4. Trainer and loops own hook timing, HookDispatcher owns profiler-aware invocation, and the connector owns only callback composition and configuration state; the base contract now uses Python 3.14 lazy package annotations without a future import, conditional type import, source prose, or circular dependency workaround.
-    5. Early stopping, finite-value protection, learning-rate telemetry, data-axis throughput, and accelerator statistics retain separate ML meanings; obsolete imports, static pseudo-utilities, and nine concrete-callback `super().__init__()` calls terminating at `object` were removed while real overrides remain explicit.
+    5. Early stopping, finite-value protection, learning-rate telemetry, data-axis throughput, and accelerator statistics retain separate ML meanings; obsolete imports, the unused legacy state-key property, static pseudo-utilities, and nine callback initializers terminating at `object` were removed while real overrides remain explicit.
     6. Fit, validation, test, prediction, invalid configuration, non-finite failure, optimizer telemetry, distributed sample accounting, filtered device statistics, checkpoint participation, serialization, DDP, spawn, and fork verification pass.
 
 | Architecture Decision | Signal Connector Placement | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
@@ -134,13 +134,13 @@
     6. Weights-only output omits optimizer, scheduler, callback, precision, DataModule, loop, and random state, skips callback save hooks, retains the model hook, and is rejected explicitly as a fit-continuation source.
     7. Strict corruption, scheduler mismatch, pre-mutation configuration mismatch, absent saved-callback warnings, callback-state copy isolation, CPU and MPS stochastic replay, ordinary and stateful loader continuation, subprocess and spawn launch, checkpoint selection, and full and sharded model-parallel resume pass.
 
-| Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
+| Architecture Decision | Training Epoch and Optimization Boundaries | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
     1. `TrainingEpochLoop.run` now composes explicit epoch start, resumable data iteration, batch advancement, tail optimization, continuation persistence, and epoch-metric completion transitions rather than embedding the complete lifecycle in one 368-line method.
     2. Fetch, transfer, batch hooks, automatic or manual optimization, metric dispatch, scheduled validation, scheduler cadence, and loader continuation remain private transitions on the one epoch owner; no batch-manager, state-container, helper class, or new public API was introduced.
     3. Trainer now owns one DataModule-over-Module batch-transfer hook transaction used by training, validation, testing, and prediction, deleting three duplicated stage implementations while preserving exact hook dispatch and profiling.
     4. Strategy owns deferred backward synchronization. DDP supplies `no_sync`, while loops and `SyntheticOptimizer` request the policy without importing or inspecting the wrapper; explicit automatic and manual step operations replace the former boolean step contract.
-    5. Standard and plateau scheduler updates now have distinct canonical operations, manual clipping no longer mutates loop configuration temporarily, and dead loop precision and scaler fields were removed.
+    5. Standard and plateau scheduler updates have distinct canonical operations, `estimated_stepping_batches` is the sole horizon calculation, manual clipping no longer mutates loop configuration temporarily, and the unused duplicate scheduler-step resolver plus dead precision and scaler fields were removed.
     6. TrainingEpochLoop remains a large cohesive ML lifecycle under the concept-integrity authority; evaluation and prediction loops plus the Trainer still require separate decomposition, and existing conditional annotation imports remain unresolved until that dependency slice is reconstructed.
     7. CPU and MPS execution, automatic and multi-optimizer manual optimization, two-rank deferred accumulation, manual DDP, transfer precedence across every stage, multiple-loader DDP, exact stateful continuation, plateau cadence, and sharded model-parallel exact resume pass.
 

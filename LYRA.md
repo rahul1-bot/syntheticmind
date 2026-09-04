@@ -141,12 +141,12 @@
     3. The generic utility package has been eliminated completely; every surviving behavior now belongs to an ML lifecycle, execution policy, core contract, callback, or infrastructure boundary.
     4. Callback, report, and optional Rich rendering operations are owner-bound without future imports, static pseudo-utilities, broad annotations, or nested hook functions; local and two-rank evidence passes.
 
-| Strategic Note | Callback Contract, Monitoring, and Capability Subtraction | Date: 04 September 2026 | Time: 06:32 PM | Name: Ghost |
+| Strategic Note | Callback Contract, Monitoring, and Capability Subtraction | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
     1. Three callback surfaces were removed because their names overstated their executable semantics or duplicated the canonical profiler subsystem.
     2. Deleting the runtime callback also removed its private timing state from Trainer and loops, leaving profiler action contexts as the sole timing authority.
     3. Callback preserves the complete established hook surface and every call signature through lazy package annotations; concrete callbacks explicitly declare their overrides and no conditional import or stale source commentary remains in the base contract.
-    4. Early stopping, finite checks, learning-rate telemetry, throughput, device statistics, timer, weight averaging, and model inspection remain independent concepts with owner-bound operations; concrete callback constructors no longer invoke a nonexistent parent initialization contract.
+    4. Early stopping, finite checks, learning-rate telemetry, throughput, device statistics, timer, weight averaging, and model inspection remain independent concepts; callback constructors no longer invoke an absent parent initializer or retain an unused legacy checkpoint identity.
 
 | Strategic Note | EMA Weight Averaging Contract | Date: 04 September 2026 | Time: 04:54 PM | Name: Ghost |
 
@@ -215,12 +215,12 @@
     4. Hyperparameters cross the logger boundary only after deterministic portable normalization and remain a one-time run record across worker replacement.
     5. Nested batch inference belongs to MetricAccumulator, rejects ambiguous leading dimensions, and preserves direct explicit weighting without a free function or utility class; CPU, MPS, TorchMetrics, and DDP evidence passes.
 
-| Strategic Note | Training Epoch Transition Map | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
+| Strategic Note | Training Epoch Transition Map | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
     1. A training epoch is one lifecycle composed from resume coordinates, batch fetching, transfer hooks, optimization, metric cadence, validation, scheduling, and continuation state.
     2. These transitions remain private methods on TrainingEpochLoop because extracting one-use manager classes would hide rather than clarify the ML concept.
     3. Batch transfer is shared Trainer hook orchestration, while gradient synchronization is selected Strategy behavior; neither belongs to a stage-specific loop implementation.
-    4. Managed optimizers select explicit automatic or manual step operations and request deferred synchronization through Strategy instead of carrying a boolean execution flag or inspecting DDP.
+    4. Managed optimizers select explicit automatic or manual steps and request deferred synchronization through Strategy; scheduler cadence remains on the epoch loop and Trainer exposes one stepping estimate without a dead parallel horizon resolver.
     5. Exact local, accelerator, distributed, resumable-data, and model-parallel trajectories establish the decomposition without relying on static-analysis claims.
 
 | Strategic Note | Trainer Stage and Hook Transaction Map | Date: 04 September 2026 | Time: 06:40 PM | Name: Ghost |

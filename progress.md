@@ -99,11 +99,11 @@
     3. ✅ Duplicate plugin categories, conflicting Trainer and Strategy configuration, invalid synchronized-layer combinations, unavailable accelerators, unsupported distributed MPS execution, and invalid precision combinations fail at construction.
     4. ✅ CPU, MPS, DDP subprocess, spawn, fork, checkpoint-plugin injection, precision fallback, and full and sharded model-parallel execution pass with production-package compilation and source review.
 
-| Progress Complete | Callback Contract, Monitoring, and Connector Reconstruction | Date: 04 September 2026 | Time: 06:32 PM | Name: Ghost |
+| Progress Complete | Callback Contract, Monitoring, and Connector Reconstruction | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
     1. ✅ Callback resolution, default checkpointing, timers, progress display, model summaries, ordering, model callback replacement, and state-key validation now belong to one internal callback connector.
     2. ✅ Callback preserves all forty-three established call signatures through Python 3.14 lazy package annotations, while HookDispatcher owns invocation and the connector uses a bound configuration operation without a circular import or host Protocol.
-    3. ✅ Early stopping, finite checks, learning-rate monitoring, throughput, and device statistics retain separate callback files and contain no obsolete future import, broad annotation, static pseudo-utility, source prose, unannotated owner transition, or constructor call to a parent without an initialization contract.
+    3. ✅ Early stopping, finite checks, learning-rate monitoring, throughput, and device statistics retain separate callback files and contain no obsolete import, legacy state-key property, broad annotation, static pseudo-utility, source prose, unannotated transition, or call to an absent parent initializer.
     4. ✅ Model callback stages, non-finite rejection, telemetry, distributed sample accounting, filtered device statistics, checkpoint state, invalid configuration, DDP, spawn, and fork paths pass without changing public callback APIs.
 
 | Progress Complete | Signal Connector Relocation | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
@@ -133,11 +133,11 @@
     3. ✅ Ordinary stateless and stateful loaders retain mid-epoch progress and epoch-start randomness through post-fit saves and spawned worker transfer; scheduler and stochastic model trajectories resume exactly.
     4. ✅ Weights-only artifacts are non-resumable, configuration drift fails before model mutation, absent saved callbacks warn, callback state loads from an isolated copy, and corruption, CPU, MPS, subprocess, spawn, DDP, full model-parallel, and sharded model-parallel probes pass.
 
-| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
+| Progress Complete | Training Epoch Execution Reconstruction | Date: 04 September 2026 | Time: 06:44 PM | Name: Ghost |
 
     1. ✅ TrainingEpochLoop now composes bounded resume, iteration, batch, optimization, cadence, continuation, and completion transitions; the public run path and inner iterator meet method hard limits without new classes or APIs.
     2. ✅ One Trainer transfer transaction serves every stage, Strategy owns deferred gradient synchronization, and SyntheticOptimizer uses distinct automatic and manual step operations without direct DDP inspection or a boolean step mode.
-    3. ✅ Standard and plateau scheduler operations are explicit, manual clipping avoids configuration mutation, dead precision and scaler state is gone, and every modified assignment is locally typed.
+    3. ✅ Standard and plateau scheduler operations are explicit, `estimated_stepping_batches` is the sole horizon calculation, manual clipping avoids configuration mutation, dead precision, scaler, and duplicate scheduler-resolution state is gone, and every modified assignment is locally typed.
     4. ✅ CPU, MPS, automatic, manual, multiple optimizer, accumulated DDP, multi-loader DDP, transfer precedence, stateful continuation, plateau scheduling, and sharded model-parallel resume paths pass.
 
 | Progress Complete | Trainer Configuration Reconstruction | Date: 04 September 2026 | Time: 06:18 PM | Name: Ghost |
