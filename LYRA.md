@@ -30,12 +30,12 @@
     4. ✅ Metric logging, reduction, inspection, TorchMetrics, graph state, monitoring, progress, result, logger, and multiprocessing boundaries are coherent.
     5. ✅ Model callback configuration, logger access, rank-safe printing, nested gathering, and class checkpoint reconstruction now extend the standard model inheritance surface.
 
-| Strategic Note | Console Experience Boundary | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Strategic Note | Console Experience Boundary | Date: 04 September 2026 | Time: 04:44 PM | Name: Ghost |
 
-    1. The terminal remains a minimal presentation subscriber rather than a telemetry warehouse or duplicate experiment logger.
+    1. The terminal remains a minimal presentation subscriber rather than a telemetry warehouse or duplicate experiment logger; one callback owns stage presentation state and ConsoleRenderer owns terminal mechanics.
     2. One active interactive line, one completed-epoch line, and one final stage line expose stage, progress, at most two selected metrics, and honest estimated time when available.
     3. Independent stage timing, sanity exclusion, training pauses around validation, stage-isolated metrics, and truthful unknown horizons prevent polished misinformation.
-    4. Redirected and non-interactive execution remains stable plain text, and distributed rendering remains rank-zero-owned.
+    4. Redirected and non-interactive execution remains stable plain text, distributed rendering remains rank-zero-owned, and enable or disable transitions clear live output without corrupting stage state.
     5. Detailed device, throughput, dataloader, optimizer, profiler, and metric telemetry belongs in structured programmatic and logger outputs.
 
 | Strategic Note | Checkpoint Reconstruction Contract | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |

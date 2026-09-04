@@ -6,11 +6,11 @@
     4. Surface comparison cannot establish capability. A parameter that is accepted but ignored, a hook that is defined but never dispatched, or a property backed by stale state is a defect rather than partial parity.
     5. Divergence from an established concept requires genuinely different semantics and explicit runtime enforcement; renaming a familiar concept only creates translation debt.
 
-| Memory | Lifecycle and Failure Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Memory | Lifecycle, Presentation, and Failure Ownership | Date: 04 September 2026 | Time: 04:44 PM | Name: Ghost |
 
-    1. Stage state, module modes, hook context, progress state, and active exceptions require exception-safe restoration on success, early exit, and every failure path.
+    1. Stage state, module modes, hook context, rank-zero progress state, and active exceptions require exception-safe restoration on success, early exit, and every failure path.
     2. Cleanup is a transaction across Strategy, datamodule, callbacks, module, logger, profiler, and progress presentation. The first causal failure remains primary while later cleanup failures become attached evidence.
-    3. A completion record may be rendered only after failure-prone end hooks and teardown have succeeded; otherwise the console states a lie immediately before the run fails.
+    3. A completion record may be rendered only after failure-prone end hooks and teardown have succeeded; stage presentation is one hook-rich state machine, while terminal fitting, throttling, writing, and failure tolerance belong to its renderer.
     4. Zero-batch stages, sanity validation, fit-owned validation, standalone evaluation, prediction, interruption, and setup failure each expose different lifecycle edges and require direct execution.
     5. Nested hook contexts must restore the previous hook name rather than clearing it unconditionally, because hooks can invoke nested framework operations.
 
