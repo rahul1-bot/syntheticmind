@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, ClassVar
 
+from syntheticmind.plugins.environments import ClusterEnvironment
+from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.utilities.exceptions import MisconfigurationError
 
 if TYPE_CHECKING:
@@ -22,11 +24,12 @@ class _DistributedEnvironment:
         "WORLD_SIZE",
         "OMP_NUM_THREADS"
     )
-    def __init__(self, strategy: DDPStrategy) -> None:
-        self._strategy: DDPStrategy = strategy
+
+    def __init__(self, strategy: LaunchStrategy) -> None:
+        self._strategy: LaunchStrategy = strategy
 
     def local_values(self) -> dict[str, str]:
-        cluster_environment = self._strategy.cluster_environment
+        cluster_environment: ClusterEnvironment = self._strategy.cluster_environment
         master_address: str = cluster_environment.main_address
         master_port: str = str(cluster_environment.main_port)
         if not master_address.strip():
@@ -74,24 +77,28 @@ class _DistributedEnvironment:
         local_rank: int
     ) -> dict[str, str]:
         rank_environment: dict[str, str] = dict(environment)
-        rank_environment["LOCAL_RANK"] = str(local_rank)
+        rank_environment["LOCAL_RANK"]: str = str(local_rank)
         node_rank: int = int(environment["NODE_RANK"])
-        rank_environment["RANK"] = str(
+        rank_environment["RANK"]: str = str(
             node_rank * self._strategy.num_processes + local_rank
         )
         return rank_environment
 
     def capture(self) -> dict[str, str | None]:
-        return {
-            key: os.environ.get(key) for key in self._environment_keys
-        }
+        snapshot: dict[str, str | None] = {}
+        key: str
+        for key in self._environment_keys:
+            snapshot[key]: str | None = os.environ.get(key)
+        return snapshot
 
     def restore(self, snapshot: dict[str, str | None]) -> None:
+        key: str
+        value: str | None
         for key, value in snapshot.items():
             if value is None:
                 os.environ.pop(key, None)
             else:
-                os.environ[key] = value
+                os.environ[key]: str = value
 
     @property
     def creates_processes_externally(self) -> bool:

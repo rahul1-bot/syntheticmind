@@ -98,10 +98,14 @@ from syntheticmind.loops.validation_schedule import ValidationSchedule
 from syntheticmind.precision.precision import Precision
 from syntheticmind.precision.resolver import PrecisionResolver
 from syntheticmind.plugins import Plugin, PluginConfiguration, PluginResolver
+from syntheticmind.plugins.io import CheckpointStorageOptions
+from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
 from syntheticmind.state.checkpoint_state import CheckpointState
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
+from syntheticmind.strategies.launcher import _ProcessLauncher
+from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.strategies.single_device import SingleDeviceStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.console import ConsoleRenderer
@@ -702,46 +706,45 @@ class Trainer:
         )
         if (
             plugin_configuration.checkpoint_io is not None
-            and self.strategy.configured_checkpoint_io is not None
+            and self.strategy.checkpoint.configured_checkpoint_io is not None
         ):
             raise MisconfigurationError(
                 "CheckpointIO was configured through both Trainer(plugins=...) and the strategy. "
                 "Configure it in exactly one place."
             )
         if plugin_configuration.checkpoint_io is not None:
-            self.strategy._attach_checkpoint_io(
+            self.strategy.checkpoint.attach_checkpoint_io(
                 plugin_configuration.checkpoint_io
             )
-        if (
-            plugin_configuration.cluster_environment is not None
-            and self.strategy.configured_cluster_environment is not None
-        ):
-            raise MisconfigurationError(
-                "ClusterEnvironment was configured through both Trainer(plugins=...) and the strategy. "
-                "Configure it in exactly one place."
-            )
         if plugin_configuration.cluster_environment is not None:
-            self.strategy._attach_cluster_environment(
+            if not isinstance(self.strategy, ParallelStrategy):
+                raise MisconfigurationError(
+                    "ClusterEnvironment requires a parallel strategy."
+                )
+            if self.strategy.configured_cluster_environment is not None:
+                raise MisconfigurationError(
+                    "ClusterEnvironment was configured through both Trainer(plugins=...) and the strategy. "
+                    "Configure it in exactly one place."
+                )
+            self.strategy.attach_cluster_environment(
                 plugin_configuration.cluster_environment
             )
-        if (
-            plugin_configuration.layer_sync is not None
-            and self.strategy.configured_layer_sync is not None
-        ):
-            raise MisconfigurationError(
-                "LayerSync was configured through both Trainer(plugins=...) and the strategy. "
-                "Configure it in exactly one place."
-            )
         if plugin_configuration.layer_sync is not None:
-            self.strategy._attach_layer_sync(plugin_configuration.layer_sync)
+            if not isinstance(self.strategy, DDPStrategy):
+                raise MisconfigurationError("LayerSync requires DDPStrategy.")
+            if self.strategy.configured_layer_sync is not None:
+                raise MisconfigurationError(
+                    "LayerSync was configured through both Trainer(plugins=...) and the strategy. "
+                    "Configure it in exactly one place."
+                )
+            self.strategy.attach_layer_sync(plugin_configuration.layer_sync)
         self._precision_plugin: Precision = PrecisionResolver.resolve(
             precision,
             self.accelerator.name(),
             plugin_configuration.precision,
             self.strategy.configured_precision_plugin
         )
-        self.strategy._attach_precision_plugin(self._precision_plugin)
-        self.strategy.validate_configuration()
+        self.strategy.attach_precision_plugin(self._precision_plugin)
 
         self.callbacks: list[Callback] = resolved_callbacks
         configured_checkpoint_callbacks: list[Checkpoint] = [
@@ -979,7 +982,11 @@ class Trainer:
             ckpt_path_provided=ckpt_path is not None
         )
         self._attach_model_callbacks(module, "fit")
-        launcher = self.strategy.launcher
+        launcher: _ProcessLauncher | None = (
+            self.strategy.launcher
+            if isinstance(self.strategy, ParallelStrategy)
+            else None
+        )
         if launcher is not None and launcher.should_launch:
             try:
                 launcher.launch(
@@ -1060,9 +1067,11 @@ class Trainer:
 
             preloaded_checkpoint: CheckpointDict | None = None
             if resume_path is not None:
-                preloaded_checkpoint = self.strategy.load_checkpoint_metadata(
-                    resume_path,
-                    weights_only
+                preloaded_checkpoint: CheckpointDict | None = (
+                    self.strategy.checkpoint.load_metadata(
+                        resume_path,
+                        weights_only
+                    )
                 )
                 resume_epoch: int = CheckpointState._integer_value(
                     preloaded_checkpoint.get("epoch"),
@@ -1226,11 +1235,7 @@ class Trainer:
                     resume_path,
                     module,
                     weights_only=weights_only,
-                    checkpoint=(
-                        None
-                        if self.strategy.restore_checkpoint_after_setup
-                        else preloaded_checkpoint
-                    ),
+                    checkpoint=None,
                     restore_datamodule_state=False
                 )
             _optimizers_to_device(self.optimizers, device)
@@ -1344,7 +1349,11 @@ class Trainer:
             ckpt_path_provided=ckpt_path is not None
         )
         self._attach_model_callbacks(module, "validate")
-        launcher = self.strategy.launcher
+        launcher: _ProcessLauncher | None = (
+            self.strategy.launcher
+            if isinstance(self.strategy, ParallelStrategy)
+            else None
+        )
         if launcher is not None and launcher.should_launch:
             try:
                 return cast(
@@ -1469,7 +1478,11 @@ class Trainer:
             ckpt_path_provided=ckpt_path is not None
         )
         self._attach_model_callbacks(module, "test")
-        launcher = self.strategy.launcher
+        launcher: _ProcessLauncher | None = (
+            self.strategy.launcher
+            if isinstance(self.strategy, ParallelStrategy)
+            else None
+        )
         if launcher is not None and launcher.should_launch:
             try:
                 return cast(
@@ -1599,7 +1612,11 @@ class Trainer:
             ckpt_path_provided=ckpt_path is not None
         )
         self._attach_model_callbacks(module, "predict")
-        launcher = self.strategy.launcher
+        launcher: _ProcessLauncher | None = (
+            self.strategy.launcher
+            if isinstance(self.strategy, ParallelStrategy)
+            else None
+        )
         if launcher is not None and launcher.should_launch:
             try:
                 return cast(
@@ -2329,7 +2346,11 @@ class Trainer:
         self.accelerator.setup_device(device)
         with self.precision_plugin.module_init_context():
             self._configure_model(module)
-        layer_sync = self.strategy.layer_sync
+        layer_sync: LayerSync | None = (
+            self.strategy.layer_sync
+            if isinstance(self.strategy, DDPStrategy)
+            else None
+        )
         if (
             self.state.stage == "fit"
             and self.strategy.is_distributed
@@ -2372,22 +2393,39 @@ class Trainer:
         strategy_model: torch.nn.Module | None = self.strategy.model
         if strategy_model is None:
             raise RuntimeError("Strategy has no model available for precision setup.")
-        connected_model: torch.nn.Module
-        connected_optimizers: list[torch.optim.Optimizer]
-        connected_lr_schedulers: list[SchedulerT]
-        connected_model, connected_optimizers, connected_lr_schedulers = (
+        precision_connection: tuple[
+            torch.nn.Module,
+            list[torch.optim.Optimizer],
+            list[SchedulerT]
+        ] = (
             self.precision_plugin.connect(
                 strategy_model,
                 optimizers,
                 lr_schedulers
             )
         )
+        connected_model: torch.nn.Module = precision_connection[0]
+        connected_optimizers: list[torch.optim.Optimizer] = precision_connection[1]
+        connected_lr_schedulers: list[SchedulerT] = precision_connection[2]
         if not isinstance(connected_model, torch.nn.Module):
             raise TypeError(
                 f"Precision.connect must return torch.nn.Module, got {type(connected_model).__name__}."
         )
-        self.strategy.model = connected_model
-        self.strategy.optimizers = connected_optimizers
+        if not isinstance(connected_optimizers, list):
+            raise TypeError(
+                "Precision.connect must return an optimizer list."
+            )
+        connected_optimizer: torch.optim.Optimizer
+        for connected_optimizer in connected_optimizers:
+            if not isinstance(connected_optimizer, torch.optim.Optimizer):
+                raise TypeError(
+                    "Precision.connect must return torch.optim.Optimizer instances."
+                )
+        self.strategy.model: torch.nn.Module | None = connected_model
+        self.strategy.optimizers: list[torch.optim.Optimizer] = list(
+            connected_optimizers
+        )
+        self.strategy.checkpoint.connect_optimizers(self.strategy.optimizers)
         return module, connected_optimizers, connected_lr_schedulers
 
     def _call_on_validation_model_zero_grad(self, module: Module) -> None:
@@ -2798,7 +2836,7 @@ class Trainer:
         # training epoch loop. The module and callback load hooks fire last so
         # they observe the fully restored payload.
         loaded_checkpoint: CheckpointDict = (
-            self.strategy.load_checkpoint(path, weights_only)
+            self.strategy.checkpoint.load(path, weights_only)
             if checkpoint is None
             else checkpoint
         )
@@ -2810,12 +2848,11 @@ class Trainer:
         )
         self._call_callback_hooks(module, "on_load_checkpoint", loaded_checkpoint)
         self.precision_plugin.on_load_checkpoint(loaded_checkpoint)
-        self.strategy.load_model_state_dict(
+        self.strategy.checkpoint.restore(
             loaded_checkpoint,
-            strict=module.strict_loading
+            strict=module.strict_loading,
+            restore_optimizers=self.state.stage == "fit"
         )
-        if self.state.stage == "fit":
-            self.strategy.load_optimizer_state_dict(loaded_checkpoint)
         epoch: int
         global_step: int
         completed_batches: int
@@ -2946,7 +2983,7 @@ class Trainer:
                     continue
                 if callback.last_model_path:
                     last_model_path: str = callback.last_model_path
-                    if self.strategy.is_checkpoint_path(last_model_path):
+                    if self.strategy.checkpoint.is_checkpoint_path(last_model_path):
                         candidates.append(last_model_path)
                 directory: str = callback._resolve_dirpath(self)
                 for candidate in list_directory(directory):
@@ -2954,7 +2991,7 @@ class Trainer:
                     if (
                         candidate_name.startswith("last")
                         and candidate_name.endswith(".ckpt")
-                        and self.strategy.is_checkpoint_path(candidate)
+                        and self.strategy.checkpoint.is_checkpoint_path(candidate)
                     ):
                         candidates.append(candidate)
             unique_candidates: set[str] = set(candidates)
@@ -2980,7 +3017,7 @@ class Trainer:
                 f"`ckpt_path={ckpt_path!r}` is unavailable without its corresponding integration."
             )
         path: str = normalize_path(ckpt_path)
-        if not self.strategy.is_checkpoint_path(path):
+        if not self.strategy.checkpoint.is_checkpoint_path(path):
             raise FileNotFoundError(f"Checkpoint not found: {path}")
         self._ckpt_path = path
         return path
@@ -3062,7 +3099,17 @@ class Trainer:
                 "on_validation_end"
             }
         ):
-            epoch += 1
+            epoch: int = epoch + 1
+        optimizer_states: list[CheckpointValue] = []
+        if not weights_only:
+            optimizer: torch.optim.Optimizer
+            for optimizer in self.optimizers:
+                optimizer_states.append(
+                    cast(
+                        CheckpointValue,
+                        self.strategy.checkpoint.optimizer_state(optimizer)
+                    )
+                )
         checkpoint: CheckpointDict = CheckpointState.build(
             model=module,
             optimizers=self.optimizers,
@@ -3082,19 +3129,9 @@ class Trainer:
             weights_only=weights_only,
             model_state_dict=cast(
                 CheckpointValue,
-                self.strategy.model_state_dict()
+                self.strategy.checkpoint.model_state_dict()
             ),
-            optimizer_states=(
-                [
-                    cast(
-                        CheckpointValue,
-                        self.strategy.optimizer_state(optimizer)
-                    )
-                    for optimizer in self.optimizers
-                ]
-                if not weights_only
-                else []
-            )
+            optimizer_states=optimizer_states
         )
         if not weights_only:
             self.precision_plugin.on_save_checkpoint(checkpoint)
@@ -3112,7 +3149,7 @@ class Trainer:
         self,
         filepath: str | Path,
         weights_only: bool | None = None,
-        storage_options: object | None = None
+        storage_options: CheckpointStorageOptions = None
     ) -> None:
         if not isinstance(filepath, str | Path):
             raise TypeError("`filepath` must be a string or Path.")
@@ -3133,7 +3170,7 @@ class Trainer:
         self,
         filepath: str | Path,
         weights_only: bool,
-        storage_options: object | None,
+        storage_options: CheckpointStorageOptions,
         synchronize: bool
     ) -> None:
         profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
@@ -3143,10 +3180,11 @@ class Trainer:
         )
         with profile_context:
             checkpoint: CheckpointDict = self._build_checkpoint(weights_only)
-            self.strategy.save_checkpoint(
+            self.strategy.checkpoint.save(
                 checkpoint,
                 filepath,
-                storage_options
+                storage_options,
+                self.global_rank
             )
             if synchronize:
                 if self._profiler_is_setup:
@@ -3231,8 +3269,8 @@ class Trainer:
         )
         self._attempt_teardown("strategy.teardown", self.strategy.teardown, failures)
         self._attempt_teardown(
-            "checkpoint_io.teardown",
-            self.strategy.teardown_checkpoint_io,
+            "checkpoint.teardown",
+            self.strategy.checkpoint.teardown,
             failures
         )
         self._attempt_teardown(
@@ -3245,11 +3283,12 @@ class Trainer:
             self.precision_plugin.teardown,
             failures
         )
-        self._attempt_teardown(
-            "cluster_environment.teardown",
-            self.strategy.cluster_environment.teardown,
-            failures
-        )
+        if isinstance(self.strategy, ParallelStrategy):
+            self._attempt_teardown(
+                "cluster_environment.teardown",
+                self.strategy.cluster_environment.teardown,
+                failures
+            )
         combined_loaders: tuple[tuple[str, CombinedLoader | None], ...] = (
             (
                 ("train", self._train_combined_loader),
@@ -3347,8 +3386,12 @@ class Trainer:
         return primary_exception
 
     def _revert_layer_sync(self) -> None:
-        layer_sync = self.strategy.layer_sync
-        synchronized_model = self._layer_sync_model
+        layer_sync: LayerSync | None = (
+            self.strategy.layer_sync
+            if isinstance(self.strategy, DDPStrategy)
+            else None
+        )
+        synchronized_model: Module | None = self._layer_sync_model
         if synchronized_model is None or layer_sync is None:
             return
         reverted_model: torch.nn.Module = layer_sync.revert(synchronized_model)

@@ -2,9 +2,9 @@
 
     1. ✅ The private repository uses stable `main`, active `dev`, and canonical `origin`; completed phases are committed and synchronized to `origin/dev`.
     2. ✅ The controlling PyTorch Lightning comparison is the ignored local checkout at revision `fcef404516264798b6c582ef556eaa17e5c29bfb`.
-    3. ✅ The governing Python rules are `/Users/rahulsawhney/LocalCode/AI/syntheticmind/docs/references/guidelines/code-guidelines.md`.
+    3. ✅ The governing Python rules are `/Users/rahulsawhney/Library/CloudStorage/OneDrive-Personal/Documents/StudyDocuments/Rahul/code-guidelines.md`; repository-local historical copies have no authority.
     4. ✅ Public terminology, inheritance, method, parameter, default, state, hook, and lifecycle compatibility are mandatory wherever SyntheticMind implements the same machine-learning concept.
-    5. ✅ Fabric, documentation, release work, upstream test-suite replication, new source comments, linters, and static type checkers remain excluded.
+    5. ✅ Fabric, public release or promotional documentation, upstream test-suite replication, new source comments, linters, and static type checkers remain excluded. Internal architecture references and mandatory ledgers remain active.
 
 | Progress Complete | Trainer Runtime Foundation | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 
@@ -108,3 +108,21 @@
     2. DDP duplicates forward-redirection logic and bypasses the wrapper during validation, testing, and prediction, while boolean decision reduction exposes logical-OR semantics where the standard contract distinguishes all-rank and any-rank consensus.
     3. The next bounded phase must establish the shared parallel strategy boundary, preserve the public DDP and model-parallel classes, route every stage through the correct wrapper call path, and retain launcher, collective, checkpoint, precision, and failure behavior.
     4. Verification must include two-rank automatic and manual optimization, validation, test, prediction, buffer and forward-hook participation, all-rank and any-rank decisions, signal propagation, full and sharded model-parallel resume, and existing launcher modes.
+
+| Progress Complete | Strategy Ownership and Distributed Execution | Date: 04 September 2026 | Time: 07:05 AM | Name: Ghost |
+
+    1. ✅ `Strategy` and `ParallelStrategy` are contract-only Protocols; all three concrete strategies implement the selected contract explicitly without shared ABC state or default lifecycle code.
+    2. ✅ `ModelParallelStrategy` is independent from `DDPStrategy`, with device-mesh topology, local or distributed checkpoint ownership, DDP wrapping, process coordination, and forward redirection assigned to their natural owners.
+    3. ✅ Local and model-parallel checkpoint implementations satisfy one restoration contract, while synchronous, asynchronous, wrapping, and externally supplied storage implementations satisfy the earned `CheckpointIO` plugin contract.
+    4. ✅ The complete strategy and launcher package contains no `Any`, generic `object`, ABC, abstract method, module-level function, custom `__call__`, source prose, or terminal trailing comma; every new or rewritten class and module remains within its hard physical-line budget.
+    5. ✅ Process groups persist safely across sequential distributed stages and live DTensor access, while owned failure and process-exit paths retain deterministic cleanup.
+    6. ✅ Direct two-rank DDP execution covers automatic and manual optimization, multiple dataloaders, distributed metrics, all-rank and any-rank decisions, wrapped and inner forward hooks, checkpoint selection, validation, test, and prediction.
+    7. ✅ Subprocess, spawn, fork, and direct external launch modes pass; SIGTERM reaches the local worker group and leaves no surviving probe process.
+    8. ✅ Full and sharded model-parallel baseline, interrupted, and resumed runs remain bit-identical, distributed failure injection preserves the active generation, asynchronous storage snapshots preserve pre-mutation tensors, and Python compilation and diff review pass without static-analysis tools.
+
+| Progress Active | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 07:05 AM | Name: Ghost |
+
+    1. Accelerator, precision, cluster-environment, and layer-synchronization modules remain the immediate inward dependencies of the reconstructed strategy boundary and still contain historical abstract bases, broad annotations, duplicated defaults, or inheritance-driven coupling.
+    2. The next bounded phase must trace device discovery and setup, precision conversion and optimization, cluster topology mutation, and layer synchronization through Trainer and Strategy before changing their contracts.
+    3. Any Protocol must have current interchangeable implementations or current unrelated consumers; concrete behavior must remain on the natural accelerator or plugin owner rather than migrating into another generic runtime object.
+    4. Verification must cover CPU and MPS device resolution, unavailable CUDA rejection, true and mixed precision contexts, optimizer scaling and clipping, plugin conflict detection, cluster rank topology, synchronized batch normalization, launch modes, checkpoints, and strategy regressions.

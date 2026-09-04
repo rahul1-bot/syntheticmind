@@ -4,7 +4,7 @@
     2. The target is full user-facing core PyTorch Lightning capability parity without becoming a Lightning clone or importing its product identity.
     3. Fabric, public documentation, release machinery, promotional work, and upstream test-suite replication remain outside the active objective.
     4. The harness is incomplete. Capability claims require implemented runtime behavior and focused evidence rather than declared parameters or surface resemblance.
-    5. Existing comments remain untouched, new source comments remain prohibited, and code remains the sole active deliverable.
+    5. New source comments and docstrings remain prohibited. Rewritten legacy modules are explicitly in scope for removal of stale or misleading prose, while unrelated surviving comments remain unchanged.
 
 | Strategic Note | Public Contracts and Internal Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 
@@ -102,3 +102,12 @@
     4. Exact model-state comparison establishes trajectory equivalence for full and sharded resume, while injected distributed shard, metadata, and publication failures establish preservation of the active artifact.
     5. Checkpoint format collisions now fail visibly rather than converting a file into a directory or a directory into a file through destructive replacement.
     6. The next architectural target is the Strategy hierarchy and its dependency direction, especially the incorrect inheritance of model parallelism from DDP and the duplicated distributed-step contracts.
+
+| Strategic Note | Strategy Boundary Reconstruction | Date: 04 September 2026 | Time: 07:05 AM | Name: Ghost |
+
+    1. The strategy hierarchy now uses earned structural contracts instead of an ABC carrying hundreds of lines of shared mutable implementation.
+    2. DDP and model parallelism are independent parallel strategies. Their common process-group resource, launcher capability, and forward-redirection algorithm are composed explicitly rather than represented through false DDP inheritance.
+    3. Local and model-parallel checkpoints implement one restoration and persistence contract, while interchangeable storage plugins implement a separate `CheckpointIO` contract. The boundary prevents duplicated strategy aliases and retains distinct distributed-state semantics.
+    4. Broad `object` annotations were removed from the complete strategy and launcher package and replaced with named batch, optimizer, backward, model-state, optimizer-state, stage-argument, and checkpoint-storage contracts.
+    5. Process-group lifetime now follows the participating process rather than an individual Trainer stage, which preserves sequential distributed stages and live DTensor access while retaining exception and exit cleanup.
+    6. The next dependency-ordered phase must audit accelerators, precision plugins, cluster environments, and layer synchronization because these collaborators still feed the reconstructed strategy boundary and retain historical abstraction debt.

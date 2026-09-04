@@ -491,7 +491,12 @@ class ModelCheckpoint(Checkpoint):
                 checkpoint
             )
 
-            trainer.strategy.save_checkpoint(checkpoint, filepath)
+            trainer.strategy.checkpoint.save(
+                checkpoint,
+                filepath,
+                None,
+                trainer.global_rank
+            )
 
     def _update_top_k(
         self,
@@ -904,7 +909,7 @@ class ModelCheckpoint(Checkpoint):
 
     def _remove_checkpoint(self, trainer: Trainer, filepath: str) -> None:
         del self
-        trainer.strategy.remove_checkpoint(filepath)
+        trainer.strategy.checkpoint.remove(filepath, trainer.global_rank)
 
     @property
     def every_n_epochs(self) -> int | None:

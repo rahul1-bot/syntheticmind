@@ -6,16 +6,22 @@ import os
 import subprocess
 import sys
 import threading
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import cast
 
 import torch
 
-from syntheticmind.strategies.launchers.contracts import StageResult
+from syntheticmind.strategies.launchers.contracts import (
+    StageArguments,
+    StageResult
+)
 from syntheticmind.strategies.launchers.environment import _DistributedEnvironment
 from syntheticmind.strategies.launchers.process_observer import _ChildProcessObserver
+from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.launchers.state_transfer import _StageInvoker
-from syntheticmind.utilities.exceptions import SIGTERMException
+from syntheticmind.utilities.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.utilities.types import TrainerStage
 
 if TYPE_CHECKING:
@@ -26,14 +32,25 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
+type _SubprocessLauncherStateValue = (
+    LaunchStrategy
+    | _DistributedEnvironment
+    | _ChildProcessObserver
+    | list[subprocess.Popen[bytes]]
+    | dict[str, str | None]
+    | int
+    | None
+)
+type _SubprocessLauncherState = dict[str, _SubprocessLauncherStateValue]
+
 
 class _SubprocessLauncher:
     def __init__(
         self,
-        strategy: DDPStrategy,
+        strategy: LaunchStrategy,
         environment: _DistributedEnvironment
     ) -> None:
-        self._strategy: DDPStrategy = strategy
+        self._strategy: LaunchStrategy = strategy
         self._environment: _DistributedEnvironment = environment
         self._processes: list[subprocess.Popen[bytes]] = []
         self._observer: _ChildProcessObserver | None = None
@@ -47,19 +64,24 @@ class _SubprocessLauncher:
         trainer: Trainer,
         module: Module,
         datamodule: DataModule | None,
-        stage_kwargs: dict[str, object]
+        stage_kwargs: StageArguments
     ) -> StageResult:
         if self._processes:
             raise RuntimeError("The subprocess launcher already has active workers.")
         environment: dict[str, str] = self._environment.local_values()
-        self._environment_snapshot = self._environment.capture()
+        self._environment_snapshot: dict[str, str | None] | None = (
+            self._environment.capture()
+        )
         try:
             command: list[str] = self._command()
             os.environ.update(self._environment.rank_values(environment, 0))
-            self._num_threads_snapshot = torch.get_num_threads()
+            self._num_threads_snapshot: int | None = torch.get_num_threads()
             torch.set_num_threads(int(environment["OMP_NUM_THREADS"]))
             self._start_workers(command, environment)
-            self._observer = _ChildProcessObserver(self._processes, os.getpid())
+            self._observer: _ChildProcessObserver | None = _ChildProcessObserver(
+                self._processes,
+                os.getpid()
+            )
             self._observer.start()
             return _StageInvoker.invoke(
                 stage,
@@ -77,11 +99,8 @@ class _SubprocessLauncher:
                 raise SIGTERMException() from exception
             raise
 
-    @property
-    def processes(self) -> list[subprocess.Popen[bytes]]:
-        return [process for process in self._processes if process.poll() is None]
-
     def kill(self, signum: int) -> None:
+        process: subprocess.Popen[bytes]
         for process in self._processes:
             if process.poll() is None:
                 try:
@@ -89,11 +108,21 @@ class _SubprocessLauncher:
                 except ProcessLookupError:
                     continue
 
+    @property
+    def processes(self) -> list[subprocess.Popen[bytes]]:
+        active_processes: list[subprocess.Popen[bytes]] = []
+        process: subprocess.Popen[bytes]
+        for process in self._processes:
+            if process.poll() is None:
+                active_processes.append(process)
+        return active_processes
+
     def _start_workers(
         self,
         command: list[str],
         environment: dict[str, str]
     ) -> None:
+        local_rank: int
         for local_rank in range(1, self._strategy.num_processes):
             child_environment: dict[str, str] = dict(os.environ)
             child_environment.update(
@@ -107,21 +136,17 @@ class _SubprocessLauncher:
             self._processes.append(process)
 
     def _command(self) -> list[str]:
-        main_spec: object | None = __main__.__spec__
-        module_name: str | None = getattr(main_spec, "name", None)
+        main_spec: ModuleSpec | None = __main__.__spec__
+        module_name: str | None = main_spec.name if main_spec is not None else None
         if module_name:
             return [sys.executable, "-m", module_name, *sys.argv[1:]]
         if not sys.argv or sys.argv[0] in {"", "-", "-c"}:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
-
             raise MisconfigurationError(
                 "strategy='ddp' requires an importable module or a Python script file. "
                 "Use strategy='ddp_fork' for an interactive session."
             )
         script_path: Path = Path(sys.argv[0]).expanduser().resolve()
         if not script_path.is_file():
-            from syntheticmind.utilities.exceptions import MisconfigurationError
-
             raise MisconfigurationError(
                 f"Cannot re-execute the current program because {script_path} is not a file. "
                 "Use strategy='ddp_fork' for an interactive session."
@@ -129,9 +154,11 @@ class _SubprocessLauncher:
         return [sys.executable, str(script_path), *sys.argv[1:]]
 
     def _terminate_workers(self) -> None:
+        process: subprocess.Popen[bytes]
         for process in self._processes:
             if process.poll() is None:
                 process.terminate()
+        process: subprocess.Popen[bytes]
         for process in self._processes:
             if process.poll() is not None:
                 continue
@@ -142,6 +169,7 @@ class _SubprocessLauncher:
                 process.wait()
 
     def _close(self) -> None:
+        process: subprocess.Popen[bytes]
         for process in self._processes:
             if process.poll() is not None:
                 continue
@@ -164,10 +192,10 @@ class _SubprocessLauncher:
         if self._environment_snapshot is None:
             return
         self._environment.restore(self._environment_snapshot)
-        self._environment_snapshot = None
+        self._environment_snapshot: dict[str, str | None] | None = None
         if self._num_threads_snapshot is not None:
             torch.set_num_threads(self._num_threads_snapshot)
-            self._num_threads_snapshot = None
+            self._num_threads_snapshot: int | None = None
 
     def _stop_observer(self) -> None:
         if self._observer is None:
@@ -175,12 +203,15 @@ class _SubprocessLauncher:
         self._observer.stop()
         if self._observer is not threading.current_thread():
             self._observer.join(timeout=1)
-        self._observer = None
+        self._observer: _ChildProcessObserver | None = None
 
-    def __getstate__(self) -> dict[str, object]:
-        state: dict[str, object] = dict(self.__dict__)
-        state["_processes"] = []
-        state["_observer"] = None
-        state["_environment_snapshot"] = None
-        state["_num_threads_snapshot"] = None
+    def __getstate__(self) -> _SubprocessLauncherState:
+        state: _SubprocessLauncherState = cast(
+            _SubprocessLauncherState,
+            dict(self.__dict__)
+        )
+        state["_processes"]: _SubprocessLauncherStateValue = []
+        state["_observer"]: _SubprocessLauncherStateValue = None
+        state["_environment_snapshot"]: _SubprocessLauncherStateValue = None
+        state["_num_threads_snapshot"]: _SubprocessLauncherStateValue = None
         return state

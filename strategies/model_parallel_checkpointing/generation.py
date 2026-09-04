@@ -3,7 +3,7 @@ import os
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, ClassVar, Literal, cast
 from uuid import uuid7
 
 from fsspec.spec import AbstractFileSystem
@@ -15,7 +15,7 @@ from syntheticmind.utilities.filesystem import join_path, normalize_path
 
 __all__: list[str] = []
 
-type CheckpointBroadcast = Callable[[object, int], object]
+type CheckpointBroadcast = Callable[[str | None, int], str | None]
 type CheckpointGenerationId = Annotated[
     str,
     StringConstraints(
@@ -29,7 +29,7 @@ class _CheckpointGenerationPointer(BaseModel):
     schema_version: Literal[1] = 1
     generation_id: CheckpointGenerationId
     previous_generation_id: CheckpointGenerationId | None = None
-    model_config = ConfigDict(
+    model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
         extra="forbid",
         strict=True,
@@ -38,14 +38,12 @@ class _CheckpointGenerationPointer(BaseModel):
 
     @property
     def retained_generation_ids(self) -> frozenset[str]:
-        return frozenset(
-            generation_id
-            for generation_id in (
-                self.generation_id,
-                self.previous_generation_id
-            )
-            if generation_id is not None
-        )
+        retained_generation_ids: set[str] = set()
+        generation_id: str | None
+        for generation_id in (self.generation_id, self.previous_generation_id):
+            if generation_id is not None:
+                retained_generation_ids.add(generation_id)
+        return frozenset(retained_generation_ids)
 
 
 class _CheckpointGenerationIndex:
@@ -60,8 +58,8 @@ class _CheckpointGenerationIndex:
         global_rank: int,
         broadcast: CheckpointBroadcast
     ) -> str:
-        local_generation_id: object = str(uuid7()) if global_rank == 0 else None
-        broadcast_generation_id: object = broadcast(local_generation_id, 0)
+        local_generation_id: str | None = str(uuid7()) if global_rank == 0 else None
+        broadcast_generation_id: str | None = broadcast(local_generation_id, 0)
         if not isinstance(broadcast_generation_id, str):
             raise CheckpointError("Checkpoint generation broadcast did not return a string.")
         pointer: _CheckpointGenerationPointer = _CheckpointGenerationPointer(
@@ -120,25 +118,33 @@ class _CheckpointGenerationIndex:
         if not is_local_path(pointer_path):
             filesystem: AbstractFileSystem = get_filesystem(pointer_path)
             with filesystem.transaction:
-                opened_file: object = filesystem.open(
-                    os.fspath(pointer_path),
-                    "w",
-                    encoding="utf-8"
+                opened_file: io.TextIOBase = cast(
+                    io.TextIOBase,
+                    filesystem.open(
+                        os.fspath(pointer_path),
+                        "w",
+                        encoding="utf-8"
+                    )
                 )
-                with cast(io.TextIOBase, opened_file) as pointer_file:
-                    pointer_file.write(pointer_payload)
+                with opened_file:
+                    opened_file.write(pointer_payload)
             return
         local_pointer_path: Path = Path(normalize_path(pointer_path))
         local_pointer_path.parent.mkdir(parents=True, exist_ok=True)
-        file_descriptor: int
-        temporary_path_string: str
-        file_descriptor, temporary_path_string = tempfile.mkstemp(
+        temporary_file: tuple[int, str] = tempfile.mkstemp(
             dir=str(local_pointer_path.parent),
             prefix=f".{self._pointer_filename}-"
         )
+        file_descriptor: int = temporary_file[0]
+        temporary_path_string: str = temporary_file[1]
         temporary_path: Path = Path(temporary_path_string)
         try:
-            with os.fdopen(file_descriptor, "w", encoding="utf-8") as pointer_file:
+            pointer_file: io.TextIOBase = os.fdopen(
+                file_descriptor,
+                "w",
+                encoding="utf-8"
+            )
+            with pointer_file:
                 pointer_file.write(pointer_payload)
                 pointer_file.flush()
                 os.fsync(pointer_file.fileno())

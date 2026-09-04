@@ -23,11 +23,12 @@
 #
 # Author: Rahul Sawhney
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
 import torch
+from torch.distributed.checkpoint.state_dict import ValueType
 
 __all__: list[str] = [
     "TrainerStage",
@@ -40,6 +41,8 @@ __all__: list[str] = [
     "BatchScalar",
     "DeviceTransferable",
     "Batch",
+    "DataLoaderSource",
+    "StepArgument",
     "StepOutput",
     "ModelScalar",
     "ModelOutput",
@@ -55,6 +58,16 @@ __all__: list[str] = [
     "CheckpointScalar",
     "CheckpointValue",
     "CheckpointDict",
+    "ModelState",
+    "OptimizerState",
+    "OptimizerStateKey",
+    "OptimizerStateValue",
+    "DistributedCheckpointState",
+    "OptimizerClosure",
+    "OptimizerClosureResult",
+    "OptimizerStepOutput",
+    "OptimizerStepValue",
+    "BackwardInputs",
     "MapLocation"
 ]
 
@@ -121,6 +134,15 @@ type Batch = (
     | tuple[Batch, ...]
 )
 
+type DataLoaderSource = (
+    Iterable[Batch]
+    | dict[str, DataLoaderSource]
+    | list[DataLoaderSource]
+    | tuple[DataLoaderSource, ...]
+)
+
+type StepArgument = Batch | int
+
 type StepOutput = dict[str, torch.Tensor | float]
 
 type ModelScalar = bool | int | float | str | None
@@ -177,6 +199,36 @@ type CheckpointValue = (
 )
 
 type CheckpointDict = dict[str, CheckpointValue]
+
+type ModelState = dict[str, ValueType]
+
+type OptimizerStateKey = str | int
+
+type OptimizerStateValue = (
+    bool
+    | int
+    | float
+    | str
+    | None
+    | torch.Tensor
+    | list[OptimizerStateValue]
+    | tuple[OptimizerStateValue, ...]
+    | dict[OptimizerStateKey, OptimizerStateValue]
+)
+
+type OptimizerState = dict[str, OptimizerStateValue]
+
+type DistributedCheckpointState = dict[str, ModelState | OptimizerState]
+
+type OptimizerClosureResult = float | torch.Tensor | None
+
+type OptimizerClosure = Callable[[], OptimizerClosureResult]
+
+type OptimizerStepOutput = OptimizerClosureResult
+
+type OptimizerStepValue = bool | int | float | str | torch.Tensor | None
+
+type BackwardInputs = torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor] | None
 
 type MapLocation = (
     Callable[[torch.types.Storage, str], torch.types.Storage | None]

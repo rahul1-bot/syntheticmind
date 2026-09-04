@@ -1,5 +1,6 @@
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, ContextDecorator, contextmanager
+from functools import partial
 from types import TracebackType
 from typing import Literal, cast, override
 
@@ -8,26 +9,33 @@ import torch
 from syntheticmind.core.module import Module
 from syntheticmind.precision.precision import Precision
 from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.types import ClipAlgorithm, PrecisionType, StateDict
+from syntheticmind.utilities.types import (
+    ClipAlgorithm,
+    OptimizerClosure,
+    OptimizerClosureResult,
+    OptimizerStepOutput,
+    OptimizerStepValue,
+    PrecisionType,
+    StateDict
+)
 
 __all__: list[str] = ["MixedPrecision"]
 
 
-type _ContextFactory = Callable[..., AbstractContextManager[object]]
-
-
-class _AutocastClearCacheOnExit:
+class _AutocastCacheContext(ContextDecorator):
     def __init__(
         self,
-        context_manager: AbstractContextManager[object],
+        context_manager: AbstractContextManager[None],
         clear_cache: bool
     ) -> None:
-        self._context_manager: AbstractContextManager[object] = context_manager
+        self._context_manager: AbstractContextManager[None] = context_manager
         self._clear_cache: bool = clear_cache
 
-    def __enter__(self) -> object:
+    @override
+    def __enter__(self) -> None:
         return self._context_manager.__enter__()
 
+    @override
     def __exit__(
         self,
         exception_type: type[BaseException] | None,
@@ -42,19 +50,6 @@ class _AutocastClearCacheOnExit:
         if self._clear_cache:
             torch.clear_autocast_cache()
         return output
-
-    def __call__(
-        self,
-        function: Callable[..., object]
-    ) -> Callable[..., object]:
-        decorator: Callable[
-            [Callable[..., object]],
-            Callable[..., object]
-        ] = cast(
-            Callable[[Callable[..., object]], Callable[..., object]],
-            self._context_manager
-        )
-        return decorator(function)
 
 
 class MixedPrecision(Precision):
@@ -74,7 +69,7 @@ class MixedPrecision(Precision):
             raise MisconfigurationError(
                 f"precision='bf16-mixed' does not use a GradScaler, got {scaler!r}."
             )
-        self.precision = precision
+        self.precision: PrecisionType = precision
         self.device: str = device
         self.scaler: torch.GradScaler | None = (
             torch.GradScaler(device=device)
@@ -99,57 +94,27 @@ class MixedPrecision(Precision):
         dtype: torch.dtype = (
             torch.float16 if self.precision == "16-mixed" else torch.bfloat16
         )
-        original_no_grad: _ContextFactory = cast(_ContextFactory, torch.no_grad)
-        original_inference_mode: _ContextFactory = cast(
-            _ContextFactory,
+        original_no_grad: Callable[[], AbstractContextManager[None]] = cast(
+            Callable[[], AbstractContextManager[None]],
+            torch.no_grad
+        )
+        original_inference_mode: Callable[
+            [bool], AbstractContextManager[None]
+        ] = cast(
+            Callable[[bool], AbstractContextManager[None]],
             torch.inference_mode
         )
-
-        def wrap_context_factory(
-            context_factory: _ContextFactory,
-            clear_cache: Callable[..., bool]
-        ) -> _ContextFactory:
-            def wrapped_factory(
-                *args: object,
-                **kwargs: object
-            ) -> AbstractContextManager[object]:
-                return _AutocastClearCacheOnExit(
-                    context_factory(*args, **kwargs),
-                    clear_cache(*args, **kwargs)
-                )
-
-            return wrapped_factory
-
-        def always_clear_cache(
-            *args: object,
-            **kwargs: object
-        ) -> bool:
-            del args, kwargs
-            return True
-
-        def clear_cache_for_inference_mode(
-            *args: object,
-            **kwargs: object
-        ) -> bool:
-            return bool(args[0] if args else kwargs.get("mode", True))
-
+        no_grad_factory: Callable[[], _AutocastCacheContext] = partial(
+            self._no_grad_context,
+            original_no_grad
+        )
+        inference_mode_factory: Callable[[bool], _AutocastCacheContext] = partial(
+            self._inference_mode_context,
+            original_inference_mode
+        )
         try:
-            setattr(
-                torch,
-                "no_grad",
-                wrap_context_factory(
-                    original_no_grad,
-                    always_clear_cache
-                )
-            )
-            setattr(
-                torch,
-                "inference_mode",
-                wrap_context_factory(
-                    original_inference_mode,
-                    clear_cache_for_inference_mode
-                )
-            )
+            setattr(torch, "no_grad", no_grad_factory)
+            setattr(torch, "inference_mode", inference_mode_factory)
             with torch.autocast(self.device, dtype=dtype):
                 yield
         finally:
@@ -167,9 +132,9 @@ class MixedPrecision(Precision):
         self,
         optimizer: torch.optim.Optimizer,
         model: Module,
-        closure: Callable[[], object],
-        **kwargs: object
-    ) -> object:
+        closure: OptimizerClosure,
+        **kwargs: OptimizerStepValue
+    ) -> OptimizerStepOutput:
         scaler: torch.GradScaler | None = self.scaler
         if scaler is None:
             return super().optimizer_step(optimizer, model, closure, **kwargs)
@@ -177,7 +142,7 @@ class MixedPrecision(Precision):
             raise MisconfigurationError(
                 "precision='16-mixed' is incompatible with the LBFGS optimizer."
             )
-        closure_result: object = closure()
+        closure_result: OptimizerClosureResult = closure()
         should_skip_step: bool = closure_result is None and model.automatic_optimization
         if should_skip_step:
             self._after_closure(model, optimizer)
@@ -186,8 +151,10 @@ class MixedPrecision(Precision):
             if not self._optimizer_handles_unscaling(optimizer):
                 self.unscale_gradients(optimizer)
             self._after_closure(model, optimizer)
-            scaler_step: Callable[..., object] = scaler.step
-            step_output: object = scaler_step(optimizer, **kwargs)
+            step_output: OptimizerStepOutput = cast(
+                OptimizerStepOutput,
+                scaler.step(optimizer, **kwargs)
+            )
             scaler.update()
             return step_output
         finally:
@@ -203,9 +170,12 @@ class MixedPrecision(Precision):
         if clip_val <= 0:
             return
         parameters: list[torch.nn.Parameter] = list(self.main_params(optimizer))
-        has_gradients: bool = any(
-            parameter.grad is not None for parameter in parameters
-        )
+        has_gradients: bool = False
+        parameter: torch.nn.Parameter
+        for parameter in parameters:
+            if parameter.grad is not None:
+                has_gradients: bool = True
+                break
         if not has_gradients:
             return
         self.unscale_gradients(optimizer)
@@ -242,6 +212,19 @@ class MixedPrecision(Precision):
     @override
     def teardown(self) -> None:
         self._unscaled_optimizers: set[int] = set()
+
+    def _no_grad_context(
+        self,
+        context_factory: Callable[[], AbstractContextManager[None]]
+    ) -> _AutocastCacheContext:
+        return _AutocastCacheContext(context_factory(), clear_cache=True)
+
+    def _inference_mode_context(
+        self,
+        context_factory: Callable[[bool], AbstractContextManager[None]],
+        mode: bool = True
+    ) -> _AutocastCacheContext:
+        return _AutocastCacheContext(context_factory(mode), clear_cache=mode)
 
     def _optimizer_handles_unscaling(
         self,

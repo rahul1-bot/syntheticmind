@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from typing import cast
@@ -7,9 +7,15 @@ import torch
 
 from syntheticmind.core.module import Module
 from syntheticmind.utilities.types import (
+    BackwardInputs,
     Batch,
     CheckpointDict,
     ClipAlgorithm,
+    OptimizerClosure,
+    OptimizerClosureResult,
+    OptimizerStateValue,
+    OptimizerStepOutput,
+    OptimizerStepValue,
     PrecisionType,
     StateDict
 )
@@ -78,8 +84,10 @@ class Precision:
         tensor: torch.Tensor,
         model: Module,
         optimizer: torch.optim.Optimizer | None,
-        *args: object,
-        **kwargs: object
+        gradient: torch.Tensor | None = None,
+        retain_graph: bool | None = None,
+        create_graph: bool = False,
+        inputs: BackwardInputs = None
     ) -> None:
         del optimizer
         model.trainer._call_module_hook(
@@ -87,8 +95,10 @@ class Precision:
             "backward",
             model.backward,
             tensor,
-            *args,
-            **kwargs
+            gradient,
+            retain_graph,
+            create_graph,
+            inputs
         )
 
     def post_backward(self, tensor: torch.Tensor, module: Module) -> torch.Tensor:
@@ -105,28 +115,27 @@ class Precision:
         self,
         optimizer: torch.optim.Optimizer,
         model: Module,
-        closure: Callable[[], object],
-        **kwargs: object
-    ) -> object:
-        wrapped_closure: Callable[[], object] = partial(
+        closure: OptimizerClosure,
+        **kwargs: OptimizerStepValue
+    ) -> OptimizerStepOutput:
+        wrapped_closure: OptimizerClosure = partial(
             self._wrap_closure,
             model,
             optimizer,
             closure
         )
-        optimizer_step: Callable[..., object] = cast(
-            Callable[..., object],
-            optimizer.step
+        return cast(
+            OptimizerStepOutput,
+            optimizer.step(closure=wrapped_closure, **kwargs)
         )
-        return optimizer_step(closure=wrapped_closure, **kwargs)
 
     def _wrap_closure(
         self,
         model: Module,
         optimizer: torch.optim.Optimizer,
-        closure: Callable[[], object]
-    ) -> object:
-        closure_result: object = closure()
+        closure: OptimizerClosure
+    ) -> OptimizerClosureResult:
+        closure_result: OptimizerClosureResult = closure()
         self._after_closure(model, optimizer)
         return closure_result
 
@@ -184,18 +193,24 @@ class Precision:
         self,
         optimizer: torch.optim.Optimizer
     ) -> Iterator[torch.nn.Parameter]:
-        parameter_group: dict[str, object]
-        for parameter_group in optimizer.param_groups:
-            parameters: object = parameter_group["params"]
+        parameter_group: dict[str, OptimizerStateValue]
+        parameter_groups: list[dict[str, OptimizerStateValue]] = cast(
+            list[dict[str, OptimizerStateValue]],
+            optimizer.param_groups
+        )
+        for parameter_group in parameter_groups:
+            parameters: OptimizerStateValue = parameter_group["params"]
             if not isinstance(parameters, list):
                 raise TypeError(
-                    f"Optimizer parameter groups must contain a list, got {type(parameters).__name__}."
+                    "Optimizer parameter groups must contain a list, got "
+                    f"{type(parameters).__name__}."
                 )
-            parameter: object
+            parameter: OptimizerStateValue
             for parameter in parameters:
                 if not isinstance(parameter, torch.nn.Parameter):
                     raise TypeError(
-                        f"Optimizer parameter groups must contain Parameters, got {type(parameter).__name__}."
+                        "Optimizer parameter groups must contain Parameters, got "
+                        f"{type(parameter).__name__}."
                     )
                 yield parameter
 

@@ -7,7 +7,7 @@
 | `core/` | The `Trainer`, the `Module` and `DataModule` contracts, the hook interfaces, the optimization configuration, and the checkpoint hooks. |
 | `loops/` | The fit, training-epoch, evaluation, and prediction loops the trainer dispatches to. |
 | `accelerators/` | The device abstraction covering CPU, CUDA, and Apple MPS. |
-| `strategies/` | The execution-strategy boundary covering single-device and distributed data-parallel execution. |
+| `strategies/` | Structural execution contracts plus single-device, distributed data-parallel, tensor-parallel, and composable fully sharded execution. |
 | `callbacks/` | The lifecycle callbacks: checkpointing, early stopping, exponential moving averages, monitoring, guarding, and profiling. |
 | `loggers/` | The metric-logger interface with CSV and TensorBoard implementations. |
 | `state/` | The serializable trainer and checkpoint state containers. |
@@ -21,7 +21,7 @@ The public surface follows established PyTorch research vocabulary. Models subcl
 
 ## Checkpoints
 
-Checkpoints are native and resumable. A durable checkpoint carries model, optimizer, scheduler, callback, datamodule, epoch, step, and random-number-generator state, so an interrupted run continues from its last durable state rather than restarting. Every training trajectory, evaluation pass, and recovery arm of the VOCODE study executed through this framework.
+Checkpoints are native and resumable. A durable checkpoint carries model, optimizer, scheduler, callback, datamodule, epoch, step, and random-number-generator state, so an interrupted run continues from its last durable state rather than restarting. Local execution uses an interchangeable structural `CheckpointIO` contract. Model-parallel execution owns full or sharded distributed state directly, and sharded writes publish immutable generations through an atomic active-generation pointer.
 
 ## Related Components
 

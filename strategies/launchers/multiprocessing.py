@@ -17,11 +17,13 @@ from torch.multiprocessing.spawn import (
 from syntheticmind.accelerators.cpu import CPUAccelerator
 from syntheticmind.strategies.launchers.contracts import (
     ProcessStartMethod,
+    StageArguments,
     StageResult,
     _GlobalState,
     _WorkerOutput
 )
 from syntheticmind.strategies.launchers.environment import _DistributedEnvironment
+from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.launchers.state_transfer import (
     _StageInvoker,
     _WorkerStateTransfer
@@ -37,24 +39,32 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
+type _MultiprocessingLauncherStateValue = (
+    LaunchStrategy
+    | _DistributedEnvironment
+    | ProcessStartMethod
+    | list[mp.Process]
+)
+type _MultiprocessingLauncherState = dict[str, _MultiprocessingLauncherStateValue]
+
 
 class _MultiprocessingWorker:
     @classmethod
     def run(
-        cls,
+        cls: type[_MultiprocessingWorker],
         local_rank: int,
         trainer: Trainer,
         stage: TrainerStage,
         module: Module,
         datamodule: DataModule | None,
-        stage_kwargs: dict[str, object],
+        stage_kwargs: StageArguments,
         environment: dict[str, str],
         output_path: Path,
         initial_global_state: _GlobalState
     ) -> None:
         worker_environment: dict[str, str] = dict(environment)
-        worker_environment["LOCAL_RANK"] = str(local_rank)
-        worker_environment["RANK"] = str(local_rank)
+        worker_environment["LOCAL_RANK"]: str = str(local_rank)
+        worker_environment["RANK"]: str = str(local_rank)
         os.environ.update(worker_environment)
         torch.set_num_threads(int(worker_environment["OMP_NUM_THREADS"]))
         initial_global_state.restore()
@@ -81,11 +91,11 @@ class _MultiprocessingWorker:
 class _MultiprocessingLauncher:
     def __init__(
         self,
-        strategy: DDPStrategy,
+        strategy: LaunchStrategy,
         environment: _DistributedEnvironment,
         start_method: ProcessStartMethod
     ) -> None:
-        self._strategy: DDPStrategy = strategy
+        self._strategy: LaunchStrategy = strategy
         self._environment: _DistributedEnvironment = environment
         self._start_method: ProcessStartMethod = start_method
         self._processes: list[mp.Process] = []
@@ -96,13 +106,16 @@ class _MultiprocessingLauncher:
         trainer: Trainer,
         module: Module,
         datamodule: DataModule | None,
-        stage_kwargs: dict[str, object]
+        stage_kwargs: StageArguments
     ) -> StageResult:
         self._validate_launch(trainer, module, datamodule, stage_kwargs)
         environment: dict[str, str] = self._environment.local_values()
         initial_global_state: _GlobalState = _GlobalState.capture()
-        with tempfile.TemporaryDirectory(prefix="syntheticmind-launch-") as directory:
-            output_path: Path = Path(directory) / "rank_zero_output.pt"
+        temporary_directory: tempfile.TemporaryDirectory[str] = (
+            tempfile.TemporaryDirectory(prefix="syntheticmind-launch-")
+        )
+        with temporary_directory:
+            output_path: Path = Path(temporary_directory.name) / "rank_zero_output.pt"
             self._start_and_join(
                 trainer,
                 stage,
@@ -131,11 +144,8 @@ class _MultiprocessingLauncher:
         )
         return worker_output.result
 
-    @property
-    def processes(self) -> list[mp.Process]:
-        return list(self._processes)
-
     def kill(self, signum: int) -> None:
+        process: mp.Process
         for process in self._processes:
             if process.pid is not None and process.is_alive():
                 try:
@@ -143,12 +153,16 @@ class _MultiprocessingLauncher:
                 except ProcessLookupError:
                     continue
 
+    @property
+    def processes(self) -> list[mp.Process]:
+        return list(self._processes)
+
     def _validate_launch(
         self,
         trainer: Trainer,
         module: Module,
         datamodule: DataModule | None,
-        stage_kwargs: dict[str, object]
+        stage_kwargs: StageArguments
     ) -> None:
         if getattr(mp.current_process(), "_inheriting", False):
             raise RuntimeError(
@@ -177,7 +191,7 @@ class _MultiprocessingLauncher:
         stage: TrainerStage,
         module: Module,
         datamodule: DataModule | None,
-        stage_kwargs: dict[str, object],
+        stage_kwargs: StageArguments,
         environment: dict[str, str],
         output_path: Path,
         initial_global_state: _GlobalState
@@ -202,7 +216,7 @@ class _MultiprocessingLauncher:
             if process_context_result is None:
                 raise RuntimeError("The multiprocessing launcher returned no process context.")
             process_context: ProcessContext = process_context_result
-            self._processes = list(process_context.processes)
+            self._processes: list[mp.Process] = list(process_context.processes)
             while not process_context.join():
                 pass
         except BaseException as exception:
@@ -212,13 +226,16 @@ class _MultiprocessingLauncher:
                 and exception.exit_code in {-15, 143}
             )
             if trainer.received_sigterm or process_received_sigterm:
-                trainer._signal_connector.received_sigterm = True
+                trainer._signal_connector.received_sigterm: bool = True
                 raise SIGTERMException() from exception
             raise
         finally:
             self._processes.clear()
 
-    def __getstate__(self) -> dict[str, object]:
-        state: dict[str, object] = dict(self.__dict__)
-        state["_processes"] = []
+    def __getstate__(self) -> _MultiprocessingLauncherState:
+        state: _MultiprocessingLauncherState = cast(
+            _MultiprocessingLauncherState,
+            dict(self.__dict__)
+        )
+        state["_processes"]: _MultiprocessingLauncherStateValue = []
         return state

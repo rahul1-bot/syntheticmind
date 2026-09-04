@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing import cast
 
 import torch.multiprocessing as mp
 
 from syntheticmind.strategies.launchers.contracts import (
     ProcessStartMethod,
+    StageArguments,
     StageResult
 )
 from syntheticmind.strategies.launchers.environment import _DistributedEnvironment
 from syntheticmind.strategies.launchers.multiprocessing import _MultiprocessingLauncher
 from syntheticmind.strategies.launchers.state_transfer import _StageInvoker
 from syntheticmind.strategies.launchers.subprocess import _SubprocessLauncher
+from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.types import TrainerStage
 
@@ -27,7 +30,7 @@ __all__: list[str] = ["ProcessStartMethod"]
 class _ProcessLauncher:
     def __init__(
         self,
-        strategy: DDPStrategy,
+        strategy: LaunchStrategy,
         start_method: ProcessStartMethod
     ) -> None:
         available_start_methods: set[str] = {"popen", *mp.get_all_start_methods()}
@@ -36,7 +39,7 @@ class _ProcessLauncher:
                 f"The process start method {start_method!r} is unavailable. "
                 f"Available methods: {sorted(available_start_methods)}."
             )
-        self._strategy: DDPStrategy = strategy
+        self._strategy: LaunchStrategy = strategy
         self._start_method: ProcessStartMethod = start_method
         self._environment: _DistributedEnvironment = _DistributedEnvironment(strategy)
         self._subprocess_launcher: _SubprocessLauncher = _SubprocessLauncher(
@@ -53,7 +56,7 @@ class _ProcessLauncher:
         trainer: Trainer,
         module: Module,
         datamodule: DataModule | None,
-        stage_kwargs: dict[str, object]
+        stage_kwargs: StageArguments
     ) -> StageResult:
         with trainer._signal_connector.launch_context():
             trainer._raise_if_sigterm()
@@ -73,14 +76,17 @@ class _ProcessLauncher:
                     "torchrun or a cluster scheduler that exports the distributed environment."
                 )
             if stage == "predict" and self._start_method != "popen":
-                return_predictions: object = stage_kwargs.get("return_predictions", True)
+                return_predictions: bool | None = cast(
+                    bool | None,
+                    stage_kwargs.get("return_predictions", True)
+                )
                 if return_predictions is True:
                     raise MisconfigurationError(
                         "Returning predictions is not supported by multiprocessing DDP launch. "
                         "Set return_predictions=False, use strategy='ddp', or launch with torchrun."
                     )
             if self._start_method == "popen":
-                result = self._subprocess_launcher.launch(
+                result: StageResult = self._subprocess_launcher.launch(
                     stage,
                     trainer,
                     module,
@@ -88,7 +94,7 @@ class _ProcessLauncher:
                     stage_kwargs
                 )
             else:
-                result = self._multiprocessing_launcher.launch(
+                result: StageResult = self._multiprocessing_launcher.launch(
                     stage,
                     trainer,
                     module,

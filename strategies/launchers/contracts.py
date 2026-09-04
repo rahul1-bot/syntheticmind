@@ -1,4 +1,5 @@
 import random
+from pathlib import Path
 from typing import ClassVar, Literal, cast
 
 import numpy as np
@@ -6,6 +7,8 @@ import torch
 from pydantic import BaseModel, ConfigDict
 
 from syntheticmind.utilities.types import (
+    CheckpointDict,
+    DataLoaderSource,
     ModelOutput,
     RunningStage,
     StateDict,
@@ -22,15 +25,22 @@ type StageResult = (
     | list[list[ModelOutput]]
 )
 type NumPyRandomState = tuple[str, np.ndarray, int, int, float]
+type PythonRandomState = tuple[int, tuple[int, ...], None]
+type StageArgument = DataLoaderSource | str | Path | bool | None
+type StageArguments = dict[str, StageArgument]
 
 
 class _GlobalState(BaseModel):
+    schema_version: Literal[1] = 1
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
-        arbitrary_types_allowed=True
+        arbitrary_types_allowed=True,
+        extra="forbid",
+        strict=True,
+        validate_default=True
     )
 
-    python_random_state: tuple[object, ...]
+    python_random_state: PythonRandomState
     numpy_random_state: NumPyRandomState
     torch_random_state: torch.Tensor
     torch_cuda_random_state: list[torch.Tensor]
@@ -42,7 +52,7 @@ class _GlobalState(BaseModel):
     @classmethod
     def capture(cls) -> _GlobalState:
         return cls(
-            python_random_state=cast(tuple[object, ...], random.getstate()),
+            python_random_state=cast(PythonRandomState, random.getstate()),
             numpy_random_state=cast(NumPyRandomState, np.random.get_state()),
             torch_random_state=torch.random.get_rng_state(),
             torch_cuda_random_state=(
@@ -63,14 +73,18 @@ class _GlobalState(BaseModel):
             self.deterministic_algorithms,
             warn_only=self.deterministic_warn_only
         )
-        torch.backends.cudnn.benchmark = self.cudnn_benchmark
-        torch.backends.cudnn.deterministic = self.cudnn_deterministic
+        torch.backends.cudnn.benchmark: bool = self.cudnn_benchmark
+        torch.backends.cudnn.deterministic: bool = self.cudnn_deterministic
 
 
 class _WorkerOutput(BaseModel):
+    schema_version: Literal[1] = 1
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
-        arbitrary_types_allowed=True
+        arbitrary_types_allowed=True,
+        extra="forbid",
+        strict=True,
+        validate_default=True
     )
 
     result: StageResult
@@ -90,10 +104,12 @@ class _WorkerOutput(BaseModel):
     total_val_batches: list[int | None] | None
     total_test_batches: list[int | None] | None
     total_predict_batches: list[int | None] | None
-    train_dataloader_states: list[dict[str, object]]
+    train_dataloader_states: list[CheckpointDict]
     train_dataloader_state_active: bool
     train_dataloader_batches_completed: int
     train_total_batch_idx: int
     received_sigterm: bool
     is_last_batch: bool
     global_state: _GlobalState
+    CheckpointDict,
+    DataLoaderSource,

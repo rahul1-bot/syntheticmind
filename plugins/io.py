@@ -1,8 +1,7 @@
-from __future__ import annotations
-
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import override
+from typing import Protocol, override, runtime_checkable
 
 import numpy as np
 import torch
@@ -14,34 +13,34 @@ from syntheticmind.utilities.types import CheckpointDict, CheckpointValue, MapLo
 __all__: list[str] = [
     "AsyncCheckpointIO",
     "CheckpointIO",
+    "CheckpointPath",
+    "CheckpointStorageOptions",
     "TorchCheckpointIO"
 ]
 
 type CheckpointPath = str | Path
+type CheckpointStorageOptions = Mapping[str, CheckpointValue] | None
 
 
-class CheckpointIO:
+@runtime_checkable
+class CheckpointIO(Protocol):
     def save_checkpoint(
         self,
         checkpoint: CheckpointDict,
         path: CheckpointPath,
-        storage_options: object | None = None
-    ) -> None:
-        raise NotImplementedError
+        storage_options: CheckpointStorageOptions = None
+    ) -> None: ...
 
     def load_checkpoint(
         self,
         path: CheckpointPath,
         map_location: MapLocation = None,
         weights_only: bool | None = None
-    ) -> CheckpointDict:
-        raise NotImplementedError
+    ) -> CheckpointDict: ...
 
-    def remove_checkpoint(self, path: CheckpointPath) -> None:
-        raise NotImplementedError
+    def remove_checkpoint(self, path: CheckpointPath) -> None: ...
 
-    def teardown(self) -> None:
-        pass
+    def teardown(self) -> None: ...
 
 
 class TorchCheckpointIO(CheckpointIO):
@@ -50,7 +49,7 @@ class TorchCheckpointIO(CheckpointIO):
         self,
         checkpoint: CheckpointDict,
         path: CheckpointPath,
-        storage_options: object | None = None
+        storage_options: CheckpointStorageOptions = None
     ) -> None:
         if storage_options is not None:
             raise TypeError(
@@ -76,46 +75,26 @@ class TorchCheckpointIO(CheckpointIO):
     def remove_checkpoint(self, path: CheckpointPath) -> None:
         remove_path(path, recursive=True)
 
+    @override
+    def teardown(self) -> None:
+        pass
+
 
 class _WrappingCheckpointIO(CheckpointIO):
     def __init__(self, checkpoint_io: CheckpointIO | None = None) -> None:
         self._checkpoint_io: CheckpointIO | None = checkpoint_io
         self._base_checkpoint_io_configured: bool = checkpoint_io is not None
         if isinstance(checkpoint_io, _WrappingCheckpointIO):
-            self._base_checkpoint_io_configured = (
+            self._base_checkpoint_io_configured: bool = (
                 checkpoint_io._base_checkpoint_io_configured
             )
-
-    @property
-    def checkpoint_io(self) -> CheckpointIO | None:
-        return self._checkpoint_io
-
-    @checkpoint_io.setter
-    def checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
-        if isinstance(checkpoint_io, _WrappingCheckpointIO):
-            raise TypeError("A wrapping CheckpointIO cannot be installed as its own base.")
-        if self._checkpoint_io is None:
-            self._checkpoint_io = checkpoint_io
-            self._base_checkpoint_io_configured = True
-            return
-        if (
-            isinstance(self._checkpoint_io, _WrappingCheckpointIO)
-            and not self._base_checkpoint_io_configured
-        ):
-            self._checkpoint_io.checkpoint_io = checkpoint_io
-            self._base_checkpoint_io_configured = True
-
-    def _require_checkpoint_io(self) -> CheckpointIO:
-        if self._checkpoint_io is None:
-            raise RuntimeError("The wrapping CheckpointIO has no base implementation.")
-        return self._checkpoint_io
 
     @override
     def save_checkpoint(
         self,
         checkpoint: CheckpointDict,
         path: CheckpointPath,
-        storage_options: object | None = None
+        storage_options: CheckpointStorageOptions = None
     ) -> None:
         self._require_checkpoint_io().save_checkpoint(
             checkpoint,
@@ -145,6 +124,30 @@ class _WrappingCheckpointIO(CheckpointIO):
         if self._checkpoint_io is not None:
             self._checkpoint_io.teardown()
 
+    @property
+    def checkpoint_io(self) -> CheckpointIO | None:
+        return self._checkpoint_io
+
+    @checkpoint_io.setter
+    def checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:
+        if isinstance(checkpoint_io, _WrappingCheckpointIO):
+            raise TypeError("A wrapping CheckpointIO cannot be installed as its own base.")
+        if self._checkpoint_io is None:
+            self._checkpoint_io: CheckpointIO | None = checkpoint_io
+            self._base_checkpoint_io_configured: bool = True
+            return
+        if (
+            isinstance(self._checkpoint_io, _WrappingCheckpointIO)
+            and not self._base_checkpoint_io_configured
+        ):
+            self._checkpoint_io.checkpoint_io: CheckpointIO = checkpoint_io
+            self._base_checkpoint_io_configured: bool = True
+
+    def _require_checkpoint_io(self) -> CheckpointIO:
+        if self._checkpoint_io is None:
+            raise RuntimeError("The wrapping CheckpointIO has no base implementation.")
+        return self._checkpoint_io
+
 
 class AsyncCheckpointIO(_WrappingCheckpointIO):
     def __init__(self, checkpoint_io: CheckpointIO | None = None) -> None:
@@ -152,45 +155,27 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
         self._executor: ThreadPoolExecutor | None = None
         self._error: BaseException | None = None
 
-    def _ensure_setup(self) -> ThreadPoolExecutor:
-        if self._executor is None:
-            self._executor = ThreadPoolExecutor(max_workers=1)
-        return self._executor
-
-    def _raise_error(self) -> None:
-        if self._error is not None:
-            raise self._error
-
-    def _wait(self) -> None:
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
-            self._executor = None
-        self._raise_error()
-
     @override
     def save_checkpoint(
         self,
         checkpoint: CheckpointDict,
         path: CheckpointPath,
-        storage_options: object | None = None
+        storage_options: CheckpointStorageOptions = None
     ) -> None:
         self._raise_error()
-        snapshot: CheckpointDict = {
-            key: _clone_checkpoint_value(value)
-            for key, value in checkpoint.items()
-        }
-
-        def save() -> None:
-            try:
-                self._require_checkpoint_io().save_checkpoint(
-                    snapshot,
-                    path,
-                    storage_options
-                )
-            except BaseException as exception:
-                self._error = exception
-
-        self._ensure_setup().submit(save)
+        snapshot: CheckpointDict = {}
+        checkpoint_name: str
+        checkpoint_value: CheckpointValue
+        for checkpoint_name, checkpoint_value in checkpoint.items():
+            snapshot[checkpoint_name]: CheckpointValue = self._clone_value(
+                checkpoint_value
+            )
+        self._ensure_setup().submit(
+            self._save_snapshot,
+            snapshot,
+            path,
+            storage_options
+        )
         self._raise_error()
 
     @override
@@ -212,7 +197,7 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
     def teardown(self) -> None:
         if self._executor is not None:
             self._executor.shutdown(wait=True)
-            self._executor = None
+            self._executor: ThreadPoolExecutor | None = None
         asynchronous_error: BaseException | None = self._error
         try:
             super().teardown()
@@ -222,26 +207,69 @@ class AsyncCheckpointIO(_WrappingCheckpointIO):
             detail: str = " ".join(str(teardown_error).split())
             description: str = type(teardown_error).__name__
             if detail:
-                description = f"{description}: {detail}"
+                description: str = f"{description}: {detail}"
             asynchronous_error.add_note(
                 f"CheckpointIO teardown also failed: {description}"
             )
         if asynchronous_error is not None:
             raise asynchronous_error
 
+    def _ensure_setup(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(
+                max_workers=1
+            )
+        return self._executor
 
-def _clone_checkpoint_value(value: CheckpointValue) -> CheckpointValue:
-    if isinstance(value, torch.Tensor):
-        return value.detach().clone()
-    if isinstance(value, np.ndarray):
-        return value.copy()
-    if isinstance(value, list):
-        return [_clone_checkpoint_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_clone_checkpoint_value(item) for item in value)
-    if isinstance(value, dict):
-        return {
-            key: _clone_checkpoint_value(item)
-            for key, item in value.items()
-        }
-    return value
+    def _raise_error(self) -> None:
+        if self._error is not None:
+            raise self._error
+
+    def _wait(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor: ThreadPoolExecutor | None = None
+        self._raise_error()
+
+    def _save_snapshot(
+        self,
+        snapshot: CheckpointDict,
+        path: CheckpointPath,
+        storage_options: CheckpointStorageOptions
+    ) -> None:
+        try:
+            self._require_checkpoint_io().save_checkpoint(
+                snapshot,
+                path,
+                storage_options
+            )
+        except BaseException as exception:
+            self._error: BaseException | None = exception
+
+    def _clone_value(self, value: CheckpointValue) -> CheckpointValue:
+        if isinstance(value, torch.Tensor):
+            return value.detach().clone()
+        if isinstance(value, np.ndarray):
+            return value.copy()
+        if isinstance(value, list):
+            cloned_list: list[CheckpointValue] = []
+            list_value: CheckpointValue
+            for list_value in value:
+                cloned_list.append(self._clone_value(list_value))
+            return cloned_list
+        if isinstance(value, tuple):
+            cloned_values: list[CheckpointValue] = []
+            tuple_value: CheckpointValue
+            for tuple_value in value:
+                cloned_values.append(self._clone_value(tuple_value))
+            return tuple(cloned_values)
+        if isinstance(value, dict):
+            cloned_mapping: dict[str, CheckpointValue] = {}
+            mapping_name: str
+            mapping_value: CheckpointValue
+            for mapping_name, mapping_value in value.items():
+                cloned_mapping[mapping_name]: CheckpointValue = self._clone_value(
+                    mapping_value
+                )
+            return cloned_mapping
+        return value

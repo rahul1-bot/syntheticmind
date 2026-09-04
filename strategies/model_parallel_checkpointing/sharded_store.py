@@ -7,6 +7,7 @@ from typing import cast
 import torch.distributed.checkpoint as distributed_checkpoint
 from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
 from torch.distributed.checkpoint import StorageReader, StorageWriter
+from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 
 from syntheticmind.strategies.model_parallel_checkpointing.generation import (
     CheckpointBroadcast,
@@ -19,7 +20,7 @@ from syntheticmind.utilities.filesystem import (
     basename, is_directory, is_file, is_local_path, join_path,
     list_directory, make_directory, normalize_path, remove_path
 )
-from syntheticmind.utilities.types import CheckpointDict
+from syntheticmind.utilities.types import CheckpointDict, DistributedCheckpointState
 
 __all__: list[str] = []
 
@@ -50,7 +51,7 @@ class _ShardedCheckpointStore:
 
     def save(
         self,
-        state: dict[str, object],
+        state: DistributedCheckpointState,
         metadata: CheckpointDict,
         path: str | Path,
         global_rank: int,
@@ -107,7 +108,7 @@ class _ShardedCheckpointStore:
             self._prune_generations(path)
         barrier()
 
-    def load_state(self, state: dict[str, object], path: str | Path) -> None:
+    def load_state(self, state: DistributedCheckpointState, path: str | Path) -> None:
         generation_path: str = self._active_generation_path(path)
         reader: StorageReader = self._storage_reader(generation_path)
         distributed_checkpoint.load(state, storage_reader=reader)
@@ -149,19 +150,19 @@ class _ShardedCheckpointStore:
         operation_name: str
     ) -> None:
         local_error: BaseException | None = None
-        local_message: object = None
+        local_message: str | None = None
         if global_rank == 0:
             try:
                 operation()
             except BaseException as exception:
                 local_error: BaseException | None = exception
                 detail: str = " ".join(str(exception).split())
-                local_message: object = (
+                local_message: str | None = (
                     f"{type(exception).__name__}: {detail}"
                     if detail
                     else type(exception).__name__
                 )
-        broadcast_message: object = broadcast(local_message, 0)
+        broadcast_message: str | None = broadcast(local_message, 0)
         if broadcast_message is None:
             return
         if not isinstance(broadcast_message, str):
@@ -217,18 +218,12 @@ class _ShardedCheckpointStore:
             )
             if pointer is None:
                 return
-            retained_generation_names: frozenset[str] = frozenset(
-                generation_name
-                for generation_name in (
-                    pointer.generation_id,
-                    pointer.previous_generation_id
-                )
-                if generation_name is not None
-            )
+            retained_generation_names: frozenset[str] = pointer.retained_generation_ids
             generations_path: str = join_path(
                 checkpoint_path,
                 self._generations_directory_name
             )
+            generation_path: str
             for generation_path in list_directory(generations_path):
                 if not is_directory(generation_path):
                     continue
@@ -245,13 +240,9 @@ class _ShardedCheckpointStore:
     def _storage_writer(self, path: str | Path) -> StorageWriter:
         if is_local_path(path):
             return FileSystemWriter(normalize_path(path))
-        from torch.distributed.checkpoint._fsspec_filesystem import FsspecWriter
-
         return FsspecWriter(path)
 
     def _storage_reader(self, path: str | Path) -> StorageReader:
         if is_local_path(path):
             return FileSystemReader(normalize_path(path))
-        from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader
-
         return FsspecReader(path)

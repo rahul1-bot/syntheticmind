@@ -176,3 +176,12 @@
     4. The pointer is a durable schema rather than an implementation string, so it carries an explicit schema version, rejects extra fields and unknown versions, and constrains generation identifiers to canonical UUIDv7 values.
     5. Exact resumed progress is insufficient evidence for checkpoint correctness. An uninterrupted trajectory and a resumed trajectory must produce exactly matching model state under identical initialization, data ordering, and optimizer steps.
     6. Cross-format overwrite should fail rather than destroy an existing checkpoint because a portable atomic replacement cannot switch safely between a regular file and a non-empty directory.
+
+| Memory | Strategy Contracts and Process Lifetime | Date: 04 September 2026 | Time: 07:05 AM | Name: Ghost |
+
+    1. Replacing an ABC with a Protocol is correct only when shared state and default lifecycle behavior are removed from the contract; otherwise the syntax changes while the architectural coupling remains.
+    2. DDP, tensor parallelism, and composable fully sharded execution share process coordination but not model-wrapping identity. Shared coordination belongs to a composed process resource, while each concrete strategy retains its own placement and checkpoint semantics.
+    3. A process group used by several sequential Trainer stages or retained DTensors cannot be destroyed during stage teardown. The correct release boundary is exception recovery or process exit unless a separately owned external group proves a different lifecycle.
+    4. `object` in an owned contract erases which values can cross the boundary. Named recursive aliases for steps, optimizer closures, state dictionaries, stage arguments, and storage options expose the actual supported domain and make invalid widening visible during review.
+    5. Checkpoint artifact reading and live-state restoration are separate operations. Metadata may be loaded before model construction, while restoration must occur only after the model and optimizers exist; a bounded preload cache preserves this ordering without duplicate disk reads.
+    6. Asynchronous checkpointing requires a main-thread snapshot before worker submission. The snapshot and background save belong to the checkpoint plugin itself and do not justify nested functions, module functions, or a callable wrapper object.
