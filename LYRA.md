@@ -239,13 +239,13 @@
     4. DataConnector still applies resolved batch limits because loader cardinality is known only at the data boundary, while Trainer retains side-effectful torch flags, seeding, and runtime construction.
     5. Trainer runtime construction now follows explicit accelerator, policy, connector, loop, and live-state phases, while checkpoint restoration separately applies resumed trajectory coordinates after participant state exists; this preserves order without introducing public builders or pseudo-domain classes.
 
-| Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
+| Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 06:52 PM | Name: Ghost |
 
     1. A training checkpoint and a weights-only model artifact are distinct contracts; only the former carries optimizer, scheduler, callback, DataModule, precision, loop, progress, configuration, and randomness state.
     2. One immutable random-state snapshot covers Python, NumPy, torch CPU, and only the active CUDA or MPS backend across checkpoint and multiprocessing boundaries.
-    3. Mid-epoch continuation retains completed-batch coordinates and epoch-start randomness even when an ordinary dataloader exposes no state dictionary.
+    3. Mid-epoch continuation retains loader coordinates and randomness, but accumulated parameter gradients are not checkpoint state; resumable saves therefore wait for a completed optimizer boundary while weights-only snapshots remain available.
     4. Resolved configuration provenance permits a larger run ceiling while rejecting trajectory-changing accumulation, data, validation, clipping, determinism, sampler, synchronization, reload, or precision drift.
-    5. Strict corruption, stochastic CPU and MPS resume, subprocess, spawn, DDP, and full or sharded model-parallel evidence controls schema acceptance.
+    5. Unsafe direct-save rejection, deferred callback triggers, exact local and spawned accumulated resume, strict corruption, stochastic CPU and MPS replay, subprocess, DDP, and full or sharded model-parallel evidence control acceptance.
 
 | Strategic Note | Path-Bound Storage Contract | Date: 04 September 2026 | Time: 05:20 PM | Name: Ghost |
 

@@ -2085,6 +2085,12 @@ class Trainer:
         storage_options: CheckpointStorageOptions,
         synchronize: bool
     ) -> None:
+        if not weights_only and not self._checkpoint_is_durable:
+            raise MisconfigurationError(
+                "A resumable checkpoint cannot be saved while an automatic "
+                "optimization batch is incomplete or gradients are accumulating. "
+                "Save after the optimizer step or use weights_only=True."
+            )
         profile_context: AbstractContextManager[str] | AbstractContextManager[None] = (
             self.profiler.profile("save_checkpoint")
             if self.profiler.is_active
@@ -2618,6 +2624,12 @@ class Trainer:
         if self.fit_loop.epoch_loop is None:
             return False
         return self.fit_loop.epoch_loop.is_last_batch
+
+    @property
+    def _checkpoint_is_durable(self) -> bool:
+        if self.state.stage != "fit" or self.fit_loop.epoch_loop is None:
+            return True
+        return self.fit_loop.epoch_loop.checkpoint_is_durable
 
     def _raise_if_sigterm(self, synchronize: bool = True) -> None:
         if not synchronize and self.strategy.is_distributed:

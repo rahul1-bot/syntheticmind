@@ -151,6 +151,11 @@ class ModelCheckpoint(Checkpoint):
     def _resolve_dirpath(self, trainer: syntheticmind.Trainer) -> str:
         return self._paths.resolve_directory(trainer)
 
+    def _should_skip(self, trainer: syntheticmind.Trainer) -> bool:
+        return self._schedule.should_skip(trainer) or (
+            not self.save_weights_only and not trainer._checkpoint_is_durable
+        )
+
     @override
     def setup(
         self,
@@ -184,7 +189,7 @@ class ModelCheckpoint(Checkpoint):
         batch_idx: int
     ) -> None:
         del outputs, batch, batch_idx
-        if self._schedule.should_skip(trainer):
+        if self._should_skip(trainer):
             return
         trigger: tuple[bool, float] = self._schedule.batch_trigger(trainer)
         due: bool = trigger[0]
@@ -206,7 +211,7 @@ class ModelCheckpoint(Checkpoint):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
-        if self._schedule.should_skip(trainer):
+        if self._should_skip(trainer):
             return
         if not self._schedule.validation_trigger(trainer):
             return
@@ -234,7 +239,7 @@ class ModelCheckpoint(Checkpoint):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
-        if self._schedule.should_skip(trainer):
+        if self._should_skip(trainer):
             return
         if not self._schedule.epoch_trigger(trainer):
             return
@@ -366,6 +371,12 @@ class ModelCheckpoint(Checkpoint):
         if trainer.fast_dev_run or not self.save_on_exception:
             return
         if trainer.state.stage != "fit" or not trainer.is_global_zero:
+            return
+        if not self.save_weights_only and not trainer._checkpoint_is_durable:
+            log.warning(
+                "Skipping exception checkpoint because automatic optimization "
+                "has not reached a durable optimizer-step boundary."
+            )
             return
         if trainer.strategy.checkpoint_requires_all_ranks:
             log.warning(

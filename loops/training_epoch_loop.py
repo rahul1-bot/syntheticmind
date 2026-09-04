@@ -82,6 +82,7 @@ class TrainingEpochLoop(Loop):
         self._combined_loader_state_restored: bool = False
         self._completed_loader_states: list[DataLoaderState] = []
         self._use_completed_loader_states: bool = False
+        self._checkpoint_is_durable: bool = True
         self.is_last_batch: bool = False
 
     def reset_on_run(self) -> None:
@@ -97,6 +98,7 @@ class TrainingEpochLoop(Loop):
         self._combined_loader_state_restored: bool = False
         self._completed_loader_states: list[DataLoaderState] = []
         self._use_completed_loader_states: bool = False
+        self._checkpoint_is_durable: bool = True
 
     def run(self) -> None:
         self._start_epoch()
@@ -146,6 +148,7 @@ class TrainingEpochLoop(Loop):
 
     def _start_epoch(self) -> None:
         self.validation_ran_this_epoch: bool = False
+        self._checkpoint_is_durable: bool = True
         if self._resume_rng_state is not None:
             self.trainer._checkpoint_connector.restore_random_state(
                 self._resume_rng_state
@@ -267,6 +270,7 @@ class TrainingEpochLoop(Loop):
         data_fetcher: _DataFetcher[tuple[Batch, int, int]],
         epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]]
     ) -> bool | None:
+        self._checkpoint_is_durable: bool = False
         self._restore_checkpoint_random_state()
         batch: Batch = trainer._transfer_batch(
             module,
@@ -281,6 +285,7 @@ class TrainingEpochLoop(Loop):
             batch,
             batch_idx
         ):
+            self._checkpoint_is_durable: bool = True
             return None
         model: nn.Module | None = trainer.strategy.model
         assert model is not None
@@ -299,6 +304,9 @@ class TrainingEpochLoop(Loop):
         outputs: StepOutput = optimization_result[0]
         is_accumulating: bool = optimization_result[1]
         self._record_batch_progress(data_fetcher, batch_idx)
+        self._checkpoint_is_durable: bool = (
+            not module.automatic_optimization or not is_accumulating
+        )
         self._run_batch_end(
             trainer,
             module,
@@ -366,6 +374,7 @@ class TrainingEpochLoop(Loop):
                 "step",
                 batch_idx + 1
             )
+            self._checkpoint_is_durable: bool = True
         if module.automatic_optimization:
             self.update_lr_schedulers(
                 trainer,
@@ -891,6 +900,10 @@ class TrainingEpochLoop(Loop):
 
     def _max_steps_reached(self, state: TrainerState) -> bool:
         return self.max_steps != -1 and state.global_step >= self.max_steps
+
+    @property
+    def checkpoint_is_durable(self) -> bool:
+        return self._checkpoint_is_durable
 
     def _dispatch_step_metrics(
         self,
