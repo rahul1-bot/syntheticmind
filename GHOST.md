@@ -274,3 +274,12 @@
     3. The relocation changes ownership only. Exception identities, serialized state domains, batch shapes, optimizer declarations, precision inputs, checkpoint maps, and public Trainer stage values remain unchanged.
     4. Package compilation, local model checkpoint hydration, optimizer execution, metric-view isolation, two-rank DDP execution, and two-rank TorchMetrics reduction pass through the relocated contracts.
     5. Obsolete exporter and interrupted-hold ledger entries were pruned during mandatory ledger consolidation because deployment exporters were later removed from the active training-harness scope and Git retains their exact chronology.
+
+| Architecture Decision | Training Data Composition Ownership | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
+
+    1. `CombinedLoader` moved from the transitional utility package to the canonical `syntheticmind.combined_loader` module and is exported from the package root as a first-class training-data composition concept.
+    2. Root placement preserves dependency direction because both model-facing `DatasetDataModule` construction and outward Trainer stage execution consume the concept; placing it beneath Trainer connectors would force core data contracts to import orchestration.
+    3. The four private mode iterators remain colocated because minimum-size, maximum-size, cycling, and sequential traversal are real algorithmic variants constructed, reset, serialized, and consumed exclusively by `CombinedLoader`.
+    4. Module-level functions, the mutable mode-dispatch dictionary, generic `object` annotations, and the legacy utility import surface were removed. Recursive batch, iterable, sampler, state, and pickle domains are now explicit, and byte batches are represented by the shared batch scalar contract.
+    5. The cohesive 588-line module and 337-line primary class exceed generic structural limits under Rahul's explicit SyntheticMind concept-integrity authority. Splitting tree structure, limits, iteration, state continuation, and worker teardown would create implementation fragments and is therefore rejected.
+    6. All four combination modes, finite and unsized limits, nested dataset construction, serialization, state capture and restoration, persistent workers, spawned DDP lifecycle execution, exact stateful resume, and direct two-rank prediction ordering pass through the canonical module.

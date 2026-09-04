@@ -3,10 +3,13 @@ from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import Literal, Protocol, cast, override, runtime_checkable
 
 from torch.utils import _pytree
+from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.dataloader import (
     _BaseDataLoaderIter,
     _MultiProcessingDataLoaderIter
 )
+
+from syntheticmind.types import Batch, DataLoaderState
 
 __all__: list[str] = ["CombinedLoader", "CombinedLoaderMode"]
 
@@ -16,93 +19,68 @@ type CombinedLoaderMode = Literal[
     "max_size",
     "sequential"
 ]
-type _IteratorOutput = tuple[object, int, int]
-type _Limit = int | float | None
-type _LoaderState = dict[str, object]
-
-_primitive_types: tuple[type[object], ...] = (
-    bool,
-    int,
-    float,
-    str,
-    bytes,
-    type(None)
+type _IterableLeaf = Iterable[Batch] | Dataset[Batch]
+type _IterableCollection = (
+    _IterableLeaf
+    | dict[str, _IterableCollection]
+    | list[_IterableCollection]
+    | tuple[_IterableCollection, ...]
 )
+type _TreeNode = Batch | _IterableCollection
+type _IteratorOutput = tuple[Batch, int, int]
+type _Limit = int | float | None
+type _SamplerLeaf = Sampler[int] | Sampler[list[int]] | None
+type _SamplerCollection = (
+    _SamplerLeaf
+    | dict[str, _SamplerCollection]
+    | list[_SamplerCollection]
+    | tuple[_SamplerCollection, ...]
+)
+type _ModeStateValue = (
+    list[Iterable[Batch]]
+    | list[Iterator[Batch] | None]
+    | list[int]
+    | list[int | None]
+    | list[bool]
+    | int
+    | None
+)
+type _ModeState = dict[str, _ModeStateValue]
 
 
 @runtime_checkable
 class _StatefulIterable(Protocol):
-    def state_dict(self) -> _LoaderState: ...
+    def state_dict(self) -> DataLoaderState: ...
 
-    def load_state_dict(self, state_dict: _LoaderState) -> None: ...
-
-
-def _is_primitive_collection(value: object) -> bool:
-    children: Iterable[object]
-    if isinstance(value, dict):
-        children = value.values()
-    elif isinstance(value, (list, tuple)):
-        children = value
-    else:
-        return False
-    child: object
-    for child in children:
-        if not isinstance(child, _primitive_types):
-            return False
-    return True
-
-
-def _safe_len(iterable: object) -> int | None:
-    if not isinstance(iterable, Sized):
-        return None
-    try:
-        return len(iterable)
-    except TypeError:
-        return None
-
-
-def _normalize_limit(limit: _Limit) -> _Limit:
-    if limit is None:
-        return None
-    if type(limit) is bool or not isinstance(limit, (int, float)):
-        raise TypeError("CombinedLoader limits must be non-negative integer counts or infinity.")
-    if isinstance(limit, int):
-        if limit < 0:
-            raise ValueError("CombinedLoader limits must be non-negative integer counts or infinity.")
-        return limit
-    if math.isinf(limit) and limit > 0:
-        return limit
-    if not math.isfinite(limit) or limit < 0 or int(limit) != limit:
-        raise ValueError("CombinedLoader limits must be non-negative integer counts or infinity.")
-    return limit
+    def load_state_dict(self, state_dict: DataLoaderState) -> None: ...
 
 
 class _ModeIterator(Iterator[_IteratorOutput]):
     def __init__(
         self,
-        iterables: list[Iterable[object]],
+        iterables: list[Iterable[Batch]],
         limits: list[int | None],
         length: int | None
     ) -> None:
-        self.iterables: list[Iterable[object]] = iterables
+        self.iterables: list[Iterable[Batch]] = iterables
         self.limits: list[int | None] = limits
         self.length: int | None = length
-        self.iterators: list[Iterator[object]] = []
+        self.iterators: list[Iterator[Batch]] = []
         self.counts: list[int] = []
         self.yielded: int = 0
 
     @override
     def __iter__(self) -> _ModeIterator:
-        self.iterators: list[Iterator[object]] = []
-        iterable: Iterable[object]
+        self.iterators: list[Iterator[Batch]] = []
+        iterable: Iterable[Batch]
         for iterable in self.iterables:
             self.iterators.append(iter(iterable))
         self.counts: list[int] = [0] * len(self.iterables)
         self.yielded: int = 0
         return self
 
-    def _next(self, index: int) -> object:
-        value: object = next(self.iterators[index])
+    def _next(self, index: int) -> Batch:
+        value: Batch = next(self.iterators[index])
         self.counts[index] += 1
         return value
 
@@ -110,14 +88,15 @@ class _ModeIterator(Iterator[_IteratorOutput]):
         return self.length is not None and self.yielded >= self.length
 
     def reset(self) -> None:
-        self.iterators: list[Iterator[object]] = []
+        self.iterators: list[Iterator[Batch]] = []
         self.counts: list[int] = []
         self.yielded: int = 0
 
-    def __getstate__(self) -> dict[str, object]:
-        state: dict[str, object] = dict(self.__dict__)
-        serializable_iterators: list[Iterator[object] | None] = []
-        iterator: Iterator[object]
+    @override
+    def __getstate__(self) -> _ModeState:
+        state: _ModeState = cast(_ModeState, dict(self.__dict__))
+        serializable_iterators: list[Iterator[Batch] | None] = []
+        iterator: Iterator[Batch]
         for iterator in self.iterators:
             serializable_iterators.append(
                 None
@@ -133,7 +112,7 @@ class _MinSize(_ModeIterator):
     def __next__(self) -> _IteratorOutput:
         if self._is_complete():
             raise StopIteration
-        values: list[object] = []
+        values: list[Batch] = []
         index: int
         for index in range(len(self.iterators)):
             values.append(self._next(index))
@@ -147,7 +126,7 @@ class _MaxSize(_ModeIterator):
     def __next__(self) -> _IteratorOutput:
         if self._is_complete():
             raise StopIteration
-        values: list[object | None] = [None] * len(self.iterators)
+        values: list[Batch] = [None] * len(self.iterators)
         yielded_value: bool = False
         index: int
         for index in range(len(self.iterators)):
@@ -164,9 +143,10 @@ class _MaxSize(_ModeIterator):
 
 
 class _MaxSizeCycle(_ModeIterator):
+    @override
     def __init__(
         self,
-        iterables: list[Iterable[object]],
+        iterables: list[Iterable[Batch]],
         limits: list[int | None],
         length: int | None
     ) -> None:
@@ -183,12 +163,12 @@ class _MaxSizeCycle(_ModeIterator):
     def __next__(self) -> _IteratorOutput:
         if self._is_complete():
             raise StopIteration
-        values: list[object] = []
+        values: list[Batch] = []
         index: int
-        iterable: Iterable[object]
+        iterable: Iterable[Batch]
         for index, iterable in enumerate(self.iterables):
             try:
-                value: object = self._next(index)
+                value: Batch = self._next(index)
             except StopIteration:
                 self.completed[index] = True
                 if all(self.completed):
@@ -208,9 +188,10 @@ class _MaxSizeCycle(_ModeIterator):
 
 
 class _Sequential(_ModeIterator):
+    @override
     def __init__(
         self,
-        iterables: list[Iterable[object]],
+        iterables: list[Iterable[Batch]],
         limits: list[int | None],
         length: int | None
     ) -> None:
@@ -231,7 +212,7 @@ class _Sequential(_ModeIterator):
     def __next__(self) -> _IteratorOutput:
         while self.iterator_idx < len(self.iterables):
             try:
-                value: object = self._next(0)
+                value: Batch = self._next(0)
             except StopIteration:
                 self.iterator_idx += 1
                 self.batch_idx: int = 0
@@ -244,17 +225,18 @@ class _Sequential(_ModeIterator):
             return value, batch_idx, dataloader_idx
         raise StopIteration
 
-    def _next(self, index: int) -> object:
+    @override
+    def _next(self, index: int) -> Batch:
         del index
         limit: int | None = self.limits[self.iterator_idx]
         if limit is not None and self.counts[self.iterator_idx] >= limit:
             raise StopIteration
-        value: object = next(self.iterators[0])
+        value: Batch = next(self.iterators[0])
         self.counts[self.iterator_idx] += 1
         return value
 
     def _load_iterator(self) -> None:
-        self.iterators: list[Iterator[object]] = (
+        self.iterators: list[Iterator[Batch]] = (
             [iter(self.iterables[self.iterator_idx])]
             if self.iterator_idx < len(self.iterables)
             else []
@@ -267,72 +249,78 @@ class _Sequential(_ModeIterator):
         self.batch_idx: int = 0
 
 
-_mode_iterators: dict[CombinedLoaderMode, type[_ModeIterator]] = {
-    "min_size": _MinSize,
-    "max_size_cycle": _MaxSizeCycle,
-    "max_size": _MaxSize,
-    "sequential": _Sequential
-}
-
-
-class CombinedLoader(Iterable[_IteratorOutput]):
+class CombinedLoader(Iterator[_IteratorOutput]):
     def __init__(
         self,
-        iterables: object,
+        iterables: _IterableCollection,
         mode: CombinedLoaderMode = "min_size"
     ) -> None:
-        if mode not in _mode_iterators:
+        if mode not in ("min_size", "max_size_cycle", "max_size", "sequential"):
             raise ValueError(
-                f"Unsupported mode {mode!r}; expected one of {tuple(_mode_iterators)}."
+                f"Unsupported mode {mode!r}; expected min_size, max_size_cycle, "
+                "max_size, or sequential."
             )
-        flattened: list[object]
+        flattened: list[_IterableLeaf]
         spec: _pytree.TreeSpec
-        flattened, spec = _pytree.tree_flatten(
-            iterables,
-            is_leaf=_is_primitive_collection
+        flattened, spec = cast(
+            tuple[list[_IterableLeaf], _pytree.TreeSpec],
+            _pytree.tree_flatten(
+                iterables,
+                is_leaf=self._is_primitive_collection
+            )
         )
-        self._iterables: object = iterables
-        self._flattened: list[object] = flattened
+        self._iterables: _IterableCollection = iterables
+        self._flattened: list[_IterableLeaf] = flattened
         self._spec: _pytree.TreeSpec = spec
         self._mode: CombinedLoaderMode = mode
         self._limits: list[_Limit] | None = None
         self._iterator: _ModeIterator | None = None
 
     @property
-    def iterables(self) -> object:
+    def iterables(self) -> _IterableCollection:
         return self._iterables
 
     @property
-    def flattened(self) -> list[object]:
+    def flattened(self) -> list[_IterableLeaf]:
         return self._flattened
 
     @flattened.setter
-    def flattened(self, flattened: list[object]) -> None:
+    def flattened(self, flattened: list[_IterableLeaf]) -> None:
         if len(flattened) != len(self._flattened):
             raise ValueError(
                 f"Flattened length {len(flattened)} does not match {len(self._flattened)}."
             )
-        self._flattened: list[object] = list(flattened)
-        self._iterables: object = _pytree.tree_unflatten(
-            self._flattened,
-            self._spec
+        self._flattened: list[_IterableLeaf] = list(flattened)
+        self._iterables: _IterableCollection = cast(
+            _IterableCollection,
+            _pytree.tree_unflatten(self._flattened, self._spec)
         )
 
     @property
-    def sampler(self) -> object:
-        values: list[object] = []
-        iterable: object
+    def sampler(self) -> _SamplerCollection:
+        values: list[_SamplerLeaf] = []
+        iterable: _IterableLeaf
         for iterable in self._flattened:
-            values.append(getattr(iterable, "sampler", None))
-        return _pytree.tree_unflatten(values, self._spec)
+            values.append(
+                cast(_SamplerLeaf, getattr(iterable, "sampler", None))
+            )
+        return cast(
+            _SamplerCollection,
+            _pytree.tree_unflatten(values, self._spec)
+        )
 
     @property
-    def batch_sampler(self) -> object:
-        values: list[object] = []
-        iterable: object
+    def batch_sampler(self) -> _SamplerCollection:
+        values: list[_SamplerLeaf] = []
+        iterable: _IterableLeaf
         for iterable in self._flattened:
-            values.append(getattr(iterable, "batch_sampler", None))
-        return _pytree.tree_unflatten(values, self._spec)
+            values.append(
+                cast(_SamplerLeaf, getattr(iterable, "batch_sampler", None))
+            )
+        return cast(
+            _SamplerCollection,
+            _pytree.tree_unflatten(values, self._spec)
+        )
 
     @property
     def limits(self) -> list[_Limit] | None:
@@ -352,10 +340,10 @@ class CombinedLoader(Iterable[_IteratorOutput]):
             normalized_limits: list[_Limit] = []
             limit: _Limit
             for limit in limit_values:
-                normalized_limits.append(_normalize_limit(limit))
+                normalized_limits.append(self._normalize_limit(limit))
             self._limits: list[_Limit] | None = normalized_limits
             return
-        normalized: _Limit = _normalize_limit(cast(_Limit, limits))
+        normalized: _Limit = self._normalize_limit(cast(_Limit, limits))
         self._limits: list[_Limit] | None = [normalized] * len(self._flattened)
 
     @property
@@ -365,10 +353,10 @@ class CombinedLoader(Iterable[_IteratorOutput]):
     def _length(self) -> int | None:
         lengths: list[int | None] = []
         limits: list[int | None] = self._resolved_limits()
-        iterable: object
+        iterable: _IterableLeaf
         limit: int | None
         for iterable, limit in zip(self._flattened, limits, strict=True):
-            length: int | None = _safe_len(iterable)
+            length: int | None = self._safe_length(iterable)
             if limit is not None:
                 length: int | None = (
                     limit
@@ -398,19 +386,19 @@ class CombinedLoader(Iterable[_IteratorOutput]):
         return sum(cast(list[int], lengths))
 
     def _has_sized_iterables(self) -> bool:
-        iterable: object
+        iterable: _IterableLeaf
         for iterable in self._flattened:
-            if _safe_len(iterable) is None:
+            if self._safe_length(iterable) is None:
                 return False
         return True
 
     @override
     def __iter__(self) -> CombinedLoader:
-        iterables: list[Iterable[object]] = []
-        iterable: object
+        iterables: list[Iterable[Batch]] = []
+        iterable: _IterableLeaf
         for iterable in self._flattened:
-            iterables.append(cast(Iterable[object], iterable))
-        iterator_type: type[_ModeIterator] = _mode_iterators[self._mode]
+            iterables.append(cast(Iterable[Batch], iterable))
+        iterator_type: type[_ModeIterator] = self._iterator_type()
         self._iterator: _ModeIterator | None = iterator_type(
             iterables,
             self._resolved_limits(),
@@ -424,17 +412,21 @@ class CombinedLoader(Iterable[_IteratorOutput]):
             ) from exception
         return self
 
+    @override
     def __next__(self) -> _IteratorOutput:
         if self._iterator is None:
             raise RuntimeError("CombinedLoader must be iterated before requesting a batch.")
-        output: object
+        output: Batch
         batch_idx: int
         dataloader_idx: int
         output, batch_idx, dataloader_idx = next(self._iterator)
         if self._mode != "sequential":
-            output: object = _pytree.tree_unflatten(
-                cast(list[object], output),
-                self._spec
+            output: Batch = cast(
+                Batch,
+                _pytree.tree_unflatten(
+                    cast(list[Batch], output),
+                    self._spec
+                )
             )
         return output, batch_idx, dataloader_idx
 
@@ -448,10 +440,13 @@ class CombinedLoader(Iterable[_IteratorOutput]):
 
     def _dataset_length(self) -> int:
         lengths: list[int] = []
-        iterable: object
+        iterable: _IterableLeaf
         for iterable in self._flattened:
-            dataset: object | None = getattr(iterable, "dataset", None)
-            length: int | None = _safe_len(dataset)
+            dataset: Dataset[Batch] | None = cast(
+                Dataset[Batch] | None,
+                getattr(iterable, "dataset", None)
+            )
+            length: int | None = self._safe_length(dataset)
             if length is not None:
                 lengths.append(length)
         if not lengths:
@@ -462,18 +457,18 @@ class CombinedLoader(Iterable[_IteratorOutput]):
             return max(lengths)
         return sum(lengths)
 
-    def _state_dicts(self) -> list[_LoaderState]:
-        state_dicts: list[_LoaderState] = []
-        iterable: object
+    def _state_dicts(self) -> list[DataLoaderState]:
+        state_dicts: list[DataLoaderState] = []
+        iterable: _IterableLeaf
         for iterable in self._flattened:
             if isinstance(iterable, _StatefulIterable):
-                state_dict: object = iterable.state_dict()
+                state_dict: DataLoaderState = iterable.state_dict()
                 if not isinstance(state_dict, dict):
                     raise TypeError(
                         f"{type(iterable).__qualname__}.state_dict() must return a "
                         f"mapping, got {type(state_dict).__qualname__}."
                     )
-                state_dicts.append(cast(_LoaderState, state_dict))
+                state_dicts.append(state_dict)
         return state_dicts
 
     def _has_stateful_iterables(self) -> bool:
@@ -482,11 +477,11 @@ class CombinedLoader(Iterable[_IteratorOutput]):
             for iterable in self._flattened
         )
 
-    def _load_state_dicts(self, state_dicts: list[_LoaderState]) -> None:
+    def _load_state_dicts(self, state_dicts: list[DataLoaderState]) -> None:
         if not state_dicts:
             return
         stateful_iterables: list[_StatefulIterable] = []
-        candidate_iterable: object
+        candidate_iterable: _IterableLeaf
         for candidate_iterable in self._flattened:
             if isinstance(candidate_iterable, _StatefulIterable):
                 stateful_iterables.append(candidate_iterable)
@@ -497,7 +492,7 @@ class CombinedLoader(Iterable[_IteratorOutput]):
                 "collection matches the checkpointed loader collection."
             )
         iterable: _StatefulIterable
-        state_dict: _LoaderState
+        state_dict: DataLoaderState
         for iterable, state_dict in zip(
             stateful_iterables,
             state_dicts,
@@ -509,15 +504,17 @@ class CombinedLoader(Iterable[_IteratorOutput]):
         if self._iterator is not None:
             self._iterator.reset()
         self._iterator: _ModeIterator | None = None
-        iterable: object
+        iterable: _IterableLeaf
         for iterable in self._flattened:
-            if hasattr(iterable, "_iterator"):
-                if isinstance(
-                    getattr(iterable, "_iterator"),
-                    _MultiProcessingDataLoaderIter
-                ):
-                    delattr(iterable, "_iterator")
-                setattr(iterable, "_iterator", None)
+            if not isinstance(iterable, DataLoader):
+                continue
+            data_iterator: _BaseDataLoaderIter | None = cast(
+                _BaseDataLoaderIter | None,
+                getattr(iterable, "_iterator", None)
+            )
+            if isinstance(data_iterator, _MultiProcessingDataLoaderIter):
+                delattr(iterable, "_iterator")
+            setattr(iterable, "_iterator", None)
 
     def _resolved_limits(self) -> list[int | None]:
         if self._limits is None:
@@ -532,3 +529,60 @@ class CombinedLoader(Iterable[_IteratorOutput]):
                 else int(limit)
             )
         return resolved_limits
+
+    def _iterator_type(self) -> type[_ModeIterator]:
+        match self._mode:
+            case "min_size":
+                return _MinSize
+            case "max_size_cycle":
+                return _MaxSizeCycle
+            case "max_size":
+                return _MaxSize
+            case "sequential":
+                return _Sequential
+
+    @staticmethod
+    def _is_primitive_collection(value: _TreeNode) -> bool:
+        children: Iterable[_TreeNode]
+        if isinstance(value, dict):
+            children = cast(dict[str, _TreeNode], value).values()
+        elif isinstance(value, list | tuple):
+            children = cast(list[_TreeNode] | tuple[_TreeNode, ...], value)
+        else:
+            return False
+        child: _TreeNode
+        for child in children:
+            if not isinstance(child, (bool, int, float, str, bytes, type(None))):
+                return False
+        return True
+
+    @staticmethod
+    def _safe_length(value: _TreeNode | None) -> int | None:
+        if not isinstance(value, Sized):
+            return None
+        try:
+            return len(value)
+        except TypeError:
+            return None
+
+    @staticmethod
+    def _normalize_limit(limit: _Limit) -> _Limit:
+        if limit is None:
+            return None
+        if type(limit) is bool or not isinstance(limit, (int, float)):
+            raise TypeError(
+                "CombinedLoader limits must be non-negative integer counts or infinity."
+            )
+        if isinstance(limit, int):
+            if limit < 0:
+                raise ValueError(
+                    "CombinedLoader limits must be non-negative integer counts or infinity."
+                )
+            return limit
+        if math.isinf(limit) and limit > 0:
+            return limit
+        if not math.isfinite(limit) or limit < 0 or int(limit) != limit:
+            raise ValueError(
+                "CombinedLoader limits must be non-negative integer counts or infinity."
+            )
+        return limit

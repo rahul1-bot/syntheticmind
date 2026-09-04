@@ -5,7 +5,6 @@
 | Module | Contents |
 |---|---|
 | `distributed.py` | Transitional rank and collective operations pending Strategy and callback ownership reconstruction. |
-| `combined_loader.py` | Transitional nested-loader composition pending ownership by the training data lifecycle. |
 | `model_helpers.py` | Transitional hook inspection and module-mode behavior pending ownership by their lifecycle concepts. |
 | `model_summary.py` | Transitional model inspection behavior pending ownership by the model-summary callback family. |
 

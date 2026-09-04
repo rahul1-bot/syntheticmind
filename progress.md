@@ -270,9 +270,17 @@
     4. ✅ Model checkpoint hydration, optimizer execution, local metric views, two-rank DDP strategy execution, and two-rank TorchMetrics reduction pass after relocation.
     5. ✅ Stale deployment-export and interrupted-hold records were removed during ledger consolidation, keeping the active progress index below its child-scope soft limit.
 
-| Progress Active | Training Data Composition Ownership | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
+| Progress Complete | Training Data Composition Ownership | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
 
-    1. `utilities/combined_loader.py` remains the largest executable member of the transitional utility package even though nested loader composition is a recognized training-data concept consumed by the DataConnector and stage loops.
-    2. The next bounded phase must trace combination modes, nested structure reconstruction, finite and infinite length, iterator cleanup, worker lifecycle, limits, and checkpoint state before selecting its canonical data-lifecycle owner.
-    3. Relocation alone is insufficient: module-level operations, broad annotations, state schema, and launcher reconstruction require direct semantic review without fragmenting one cohesive loader-composition concept.
-    4. Verification must cover every combination mode, nested loader state, finite and unsized inputs, worker cleanup, spawned DDP execution, stateful resume, multiple-loader metrics, and prediction output ordering.
+    1. ✅ `CombinedLoader` moved to its canonical package-root module and is exported directly, while every production and ignored verification consumer migrated without a utility compatibility façade.
+    2. ✅ Four genuine combination-mode algorithms remain private and colocated; module functions, mutable dispatch state, broad annotations, and generic state dictionaries were removed without adding a class or module.
+    3. ✅ Recursive batch, iterable, sampler, loader-state, and pickle domains are explicit, byte batches are supported, and public mode, limit, flattened-tree, sampler, reset, length, and continuation meanings remain stable.
+    4. ✅ Direct execution covers all modes, finite and unsized limits, invalid leaves and limits, nested datasets, pickling, state capture and restoration, and persistent-worker cleanup.
+    5. ✅ Spawned two-rank fit, validation, test, prediction, exact stateful resume, metric identity, sampler partitioning, and direct distributed prediction ordering pass after relocation.
+    6. ✅ The explicit concept-integrity size exception is recorded because splitting the loader tree lifecycle would manufacture one-consumer implementation fragments rather than improve machine-learning architecture.
+
+| Progress Active | Distributed Ownership Evacuation | Date: 04 September 2026 | Time: 11:53 AM | Name: Ghost |
+
+    1. `utilities/distributed.py` remains a mixed collection of rank inspection, collective tensor reduction, object broadcast, process-group teardown, and compatibility aliases despite Strategy already owning distributed execution.
+    2. The next bounded phase must map each current caller to Strategy, Trainer, callback, or logger ownership and remove free aliases without duplicating collectives or forcing model-facing code to reach into Trainer internals.
+    3. Existing external-process-group behavior, rank-zero output, boolean consensus, metric reduction, object broadcast, process cleanup, and every launcher require direct verification before the utility module can be deleted.

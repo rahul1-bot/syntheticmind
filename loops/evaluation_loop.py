@@ -49,7 +49,7 @@ from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.combined_loader import CombinedLoader
+from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
 from syntheticmind.utilities.model_helpers import (

@@ -93,7 +93,7 @@ type SchedulerInterval = Literal["step", "epoch"]
 
 type Reduction = Literal["mean", "sum", "min", "max"]
 
-type BatchScalar = bool | int | float | str | None
+type BatchScalar = bool | int | float | str | bytes | None
 
 
 @runtime_checkable

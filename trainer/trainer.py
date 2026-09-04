@@ -62,7 +62,7 @@ from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
 )
 from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
 from syntheticmind.trainer.console import ConsoleRenderer
-from syntheticmind.utilities.combined_loader import CombinedLoader
+from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.exceptions import MisconfigurationError, SIGTERMException
 from syntheticmind.storage.filesystem import (

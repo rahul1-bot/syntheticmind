@@ -20,7 +20,7 @@ from syntheticmind.loops.optimization.automatic import _AutomaticOptimization
 from syntheticmind.loops.optimization.manual import _ManualOptimization
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.combined_loader import CombinedLoader
+from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size

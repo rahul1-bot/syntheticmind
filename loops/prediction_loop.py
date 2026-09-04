@@ -34,7 +34,7 @@ from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.combined_loader import CombinedLoader
+from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.core.data_transfer import move_data_to_device
 from syntheticmind.utilities.model_helpers import (
     ModuleMode,
