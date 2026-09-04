@@ -235,3 +235,12 @@
     5. `ModelCheckpoint` retains save cadence and retention policy, Strategy retains topology-specific state representation, and `CheckpointIO` retains storage transport. Neither callback nor Strategy independently coordinates the full training trajectory.
     6. The cohesive connector exceeds the generic source-size budget under the explicit concept-integrity rule; splitting path, payload, restoration, random streams, and continuation would recreate competing checkpoint owners.
     7. Best and last selection, user-managed paths, weights-only artifacts, strict schema rejection, asynchronous storage, callback and hyperparameter state, exact stateful-loader continuation, DDP spawn and fork, full and sharded model-parallel resume, and injected distributed publication failure pass.
+
+| Architecture Decision | Optimization Concept Boundaries | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
+
+    1. `core/optimizer.py` now owns the model-facing `configure_optimizers` vocabulary, strict scheduler configuration, managed optimizer access, no-op optimizer, and declaration normalization without defining optimizer or scheduler factory families.
+    2. `loops/optimization/automatic.py` owns automatic loss extraction, accumulation normalization, closure execution, zeroing, and backward invocation; `manual.py` owns manual-step output normalization while the research Module controls backward and optimizer calls.
+    3. TrainingEpochLoop retains batch iteration, accumulation boundaries, scheduler cadence, metric dispatch, and validation scheduling. Strategy retains topology-sensitive model and optimizer execution, and precision retains closure wrapping, numerical stepping, scaling, unscaling, hooks, and clipping.
+    4. `SyntheticOptimizer` now uses explicitly connected step and toggle operations. Dynamic `__class__` mutation, generic attribute forwarding, concrete Trainer references, and four optimizer-only Trainer Protocols were removed.
+    5. The previous optimizer and scheduler factory configurations and their free-function utility builders were dead parallel APIs that renamed PyTorch algorithms and were deleted.
+    6. Automatic, multi-optimizer manual, managed manual DDP, LBFGS repeated closure, accumulation tail, clipping, mixed precision, step scheduling, plateau monitoring, invalid configuration, spawn, fork, full model-parallel resume, and sharded model-parallel resume pass.

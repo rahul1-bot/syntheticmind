@@ -64,11 +64,13 @@ __all__: list[str] = [
     "OptimizerState",
     "OptimizerStateKey",
     "OptimizerStateValue",
+    "OptimizerParameterGroup",
     "DistributedCheckpointState",
     "OptimizerClosure",
     "OptimizerClosureResult",
     "OptimizerStepOutput",
     "OptimizerStepValue",
+    "OptimizerStepOptions",
     "BackwardInputs",
     "MapLocation"
 ]
@@ -224,6 +226,11 @@ type OptimizerStateValue = (
 
 type OptimizerState = dict[str, OptimizerStateValue]
 
+type OptimizerParameterGroup = dict[
+    str,
+    OptimizerStateValue | torch.nn.Parameter | list[torch.nn.Parameter]
+]
+
 type DistributedCheckpointState = dict[str, ModelState | OptimizerState]
 
 type OptimizerClosureResult = float | torch.Tensor | None
@@ -233,6 +240,8 @@ type OptimizerClosure = Callable[[], OptimizerClosureResult]
 type OptimizerStepOutput = OptimizerClosureResult
 
 type OptimizerStepValue = bool | int | float | str | torch.Tensor | None
+
+type OptimizerStepOptions = dict[str, OptimizerStepValue]
 
 type BackwardInputs = torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor] | None
 

@@ -1,51 +1,10 @@
-# This module:
-# 1. Executes one training epoch: batch fetching with timing instrumentation, the
-#    batch-transfer hook chain, step execution under the configured precision
-#    policy, gradient accumulation, optimizer and scheduler stepping, and metric
-#    dispatch at step and epoch granularity
-# 2. Implements deterministic mid-epoch resume by restoring the epoch-start
-#    random-number state recorded in checkpoints and replaying already-completed
-#    batches without executing them
-# 3. Schedules mid-epoch validation against batch-count, epoch-fraction, or
-#    global-step intervals
-# 4. Owns the mixed-precision GradScaler lifecycle and both gradient-clipping
-#    entry points
-#
-# Design decisions:
-# - For each batch-transfer hook, the datamodule implementation takes precedence
-#   over the module implementation. Precedence is decided per hook by comparing
-#   the datamodule's bound attribute against the DataModule base attribute, so a
-#   datamodule that overrides a hook wins for that hook only, and the module
-#   remains the default for the rest
-# - During accumulation batches under DistributedDataParallel, the step and
-#   backward run inside model.no_sync(), so inter-rank gradient reduction occurs
-#   only on the optimizer-step batch rather than on every micro-batch
-# - The loss is divided by accumulate_grad_batches before backward, so the
-#   accumulated gradient matches the gradient of the equivalent large batch
-# - The final limited batch forces a non-accumulating step, and a tail flush
-#   after the loop performs one more optimizer step when the epoch ends inside
-#   an accumulation window, so no accumulated gradients are silently discarded
-# - Step metrics are withheld during accumulation batches and emitted from rank
-#   zero every log_every_n_steps. Epoch metrics accumulate through
-#   MetricAccumulator under each metric's declared reduction and batch-size
-#   weighting, update the trainer's callback metrics on every rank, and reach
-#   the logger only from rank zero
-# - Mid-epoch resume first restores the epoch-start random-number state, then
-#   consumes and discards the already-completed prefix from a fresh dataloader
-#   iterator. The dataloader therefore reproduces the exact original batch
-#   sequence, and execution continues at the first incomplete batch
-# - The GradScaler exists only for 16-mixed precision on CUDA devices, and
-#   gradients are unscaled before clipping so thresholds apply to true
-#   gradient magnitudes rather than scaled ones
-#
-# Author: Rahul Sawhney
 
 import time
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 import torch
 from torch import nn
@@ -54,9 +13,11 @@ from torch.nn.parallel import DistributedDataParallel
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.core.optimizer import SyntheticOptimizer, do_nothing_closure
+from syntheticmind.core.optimizer import SyntheticOptimizer
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
+from syntheticmind.loops.optimization.automatic import _AutomaticOptimization
+from syntheticmind.loops.optimization.manual import _ManualOptimization
 from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
@@ -66,11 +27,16 @@ from syntheticmind.utilities.metric_accumulator import MetricAccumulator, extrac
 from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.utilities.types import (
     Batch,
+    BackwardInputs,
     CheckpointDict,
     ClipAlgorithm,
     DataLoaderState,
+    OptimizerClosure,
+    OptimizerStepOptions,
+    OptimizerStepOutput,
     PrecisionType,
-    StepOutput
+    StepOutput,
+    TrainingStepOutput
 )
 
 if TYPE_CHECKING:
@@ -79,86 +45,8 @@ if TYPE_CHECKING:
 __all__: list[str] = ["TrainingEpochLoop"]
 
 
-class _AutomaticClosure:
-    __slots__: tuple[str, ...] = (
-        "_strategy",
-        "_step_fn",
-        "_backward_fn",
-        "_zero_grad_fn",
-        "_normalize",
-        "_outputs"
-    )
-
-    def __init__(
-        self,
-        strategy: Strategy,
-        step_fn: Callable[[], object],
-        backward_fn: Callable[[torch.Tensor], None],
-        zero_grad_fn: Callable[[], None] | None,
-        normalize: int
-    ) -> None:
-        self._strategy: Strategy = strategy
-        self._step_fn: Callable[[], object] = step_fn
-        self._backward_fn: Callable[[torch.Tensor], None] = backward_fn
-        self._zero_grad_fn: Callable[[], None] | None = zero_grad_fn
-        self._normalize: int = normalize
-        self._outputs: StepOutput = {}
-
-    @property
-    def outputs(self) -> StepOutput:
-        return dict(self._outputs)
-
-    @torch.enable_grad()
-    def __call__(self) -> torch.Tensor | None:
-        raw_outputs: object = self._step_fn()
-        if raw_outputs is None:
-            warnings.warn(
-                "training_step returned None; this batch will be skipped.",
-                UserWarning,
-                stacklevel=3
-            )
-            if self._strategy.is_distributed:
-                raise RuntimeError(
-                    "Returning None from training_step is not supported with distributed training."
-                )
-            self._outputs: StepOutput = {}
-            if self._zero_grad_fn is not None:
-                self._zero_grad_fn()
-            return None
-        if isinstance(raw_outputs, torch.Tensor):
-            raw_loss: object = raw_outputs
-            normalized_outputs: StepOutput = {}
-        elif isinstance(raw_outputs, Mapping):
-            if "loss" not in raw_outputs or raw_outputs["loss"] is None:
-                raise MisconfigurationError(
-                    "In automatic optimization, a training_step mapping must contain the key 'loss'."
-                )
-            raw_loss: object = raw_outputs["loss"]
-            normalized_outputs: StepOutput = dict(raw_outputs)
-        else:
-            raise MisconfigurationError(
-                "In automatic optimization, training_step must return a Tensor, a mapping, or None."
-            )
-        if not isinstance(raw_loss, torch.Tensor):
-            raise MisconfigurationError(
-                "The loss returned by training_step must be a torch.Tensor."
-            )
-        loss: torch.Tensor = raw_loss / self._normalize
-        normalized_outputs["loss"] = loss.detach().clone()
-        self._outputs: StepOutput = normalized_outputs
-        if self._zero_grad_fn is not None:
-            self._zero_grad_fn()
-        self._backward_fn(loss)
-        return loss.detach().clone()
-
-
 class TrainingEpochLoop(Loop):
-    # Loop that executes one training epoch each time run() is invoked. The fit
-    # loop constructs it once, configures it from the trainer arguments, and
-    # calls it once per epoch. The loop coordinates the strategy (step
-    # execution), the module and callbacks (hook delivery), the optimizer and
-    # scheduler (stepping cadence), and the logger (metric emission), while
-    # keeping enough internal state to support deterministic mid-epoch resume.
+    @override
     def __init__(
         self,
         min_steps: int | None = None,
@@ -169,10 +57,6 @@ class TrainingEpochLoop(Loop):
         gradient_clip_algorithm: ClipAlgorithm | None = None,
         log_every_n_steps: int = 10
     ) -> None:
-        # Stores the epoch-execution configuration supplied by the trainer and
-        # initializes the resume-tracking state: the count of completed batches
-        # inside the current epoch, the flag marking whether the batch loop is
-        # active, and the random-number-state slots used by mid-epoch resume.
         super().__init__()
         self.min_steps: int | None = min_steps
         self.max_steps: int = max_steps
@@ -181,6 +65,10 @@ class TrainingEpochLoop(Loop):
         self.gradient_clip_val: int | float | None = gradient_clip_val
         self.gradient_clip_algorithm: ClipAlgorithm | None = gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
+        self.automatic_optimization: _AutomaticOptimization = (
+            _AutomaticOptimization(accumulate_grad_batches)
+        )
+        self.manual_optimization: _ManualOptimization = _ManualOptimization()
         self.validation_ran_this_epoch: bool = False
         self._grad_scaler: torch.GradScaler | None = None
         self._gradients_unscaled: bool = False
@@ -196,8 +84,6 @@ class TrainingEpochLoop(Loop):
         self.is_last_batch: bool = False
 
     def reset_on_run(self) -> None:
-        # Clears the mid-epoch resume markers at the start of a new run so a
-        # fresh run never replays batch positions recorded by a previous one.
         self.reset_on_teardown()
         self.is_last_batch = False
 
@@ -212,14 +98,6 @@ class TrainingEpochLoop(Loop):
         self._use_completed_loader_states: bool = False
 
     def run(self) -> None:
-        # Executes one complete training epoch. The sequence per batch is:
-        # fetch with timing instrumentation, on_train_batch_start hooks, the
-        # batch-transfer hook chain, the training step under the precision
-        # context, backward and optimizer handling according to the
-        # accumulation schedule, on_train_batch_end hooks, step-metric
-        # dispatch, and finally the mid-epoch validation check and the
-        # cooperative stop check. After the batch loop, a tail optimizer step
-        # flushes any accumulated gradients and epoch metrics are dispatched.
         self.validation_ran_this_epoch: bool = False
 
         if self._resume_rng_state is not None:
@@ -290,7 +168,7 @@ class TrainingEpochLoop(Loop):
             )
         dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_train_dataloader"):
-            data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
+            data_fetcher: _DataFetcher[tuple[Batch, int, int]] = _DataFetcher(
                 combined_loader,
                 max_batches,
                 sized=loader_is_sized,
@@ -300,7 +178,7 @@ class TrainingEpochLoop(Loop):
                     else None
                 )
             )
-            train_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
+            train_iterator: Iterator[tuple[Batch, int, int]] = iter(data_fetcher)
         if data_fetcher.done:
             epoch_completed: bool = True
         trainer._record_dataloader_iterator_creation_time(
@@ -319,7 +197,7 @@ class TrainingEpochLoop(Loop):
                 with trainer.profiler.profile(
                     f"[{type(self).__name__}].train_dataloader_next"
                 ):
-                    fetched_batch: object
+                    fetched_batch: Batch
                     fetched_batch, _, _ = next(train_iterator)
             except StopIteration:
                 epoch_completed: bool = True
@@ -333,9 +211,6 @@ class TrainingEpochLoop(Loop):
 
             batch: Batch = cast(Batch, fetched_batch)
             batch: Batch = trainer.precision_plugin.convert_input(batch)
-            # Mid-epoch resume: the already-completed prefix is consumed and
-            # discarded, so the dataloader reproduces the original batch
-            # sequence and execution continues at the first incomplete batch.
             if batch_idx < skip_batches:
                 continue
             if self._resume_checkpoint_rng_state is not None:
@@ -415,11 +290,6 @@ class TrainingEpochLoop(Loop):
                 epoch_completed: bool = True
                 break
 
-            # Automatic path: the loss is divided by the accumulation factor
-            # so the accumulated gradient matches the equivalent large batch,
-            # DDP gradient sync is suppressed on accumulation batches, and
-            # the optimizer steps only on window boundaries, with the final
-            # limited batch forcing a non-accumulating step.
             with trainer.profiler.profile("run_training_batch"):
                 if module.automatic_optimization:
                     assert optimizer is not None
@@ -431,7 +301,7 @@ class TrainingEpochLoop(Loop):
                     if isinstance(model, DistributedDataParallel) and is_accumulating:
                         no_sync_ctx: AbstractContextManager[None] = model.no_sync()
 
-                    automatic_closure: _AutomaticClosure = self._make_automatic_closure(
+                    automatic_closure: OptimizerClosure = self._make_automatic_closure(
                         trainer,
                         module,
                         strategy,
@@ -446,19 +316,30 @@ class TrainingEpochLoop(Loop):
                         self._do_optimizer_step(
                             trainer, module, optimizer, state, batch_idx, automatic_closure
                         )
-                    outputs: StepOutput = automatic_closure.outputs
+                    outputs: StepOutput = self.automatic_optimization.outputs
                 else:
-                    outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
+                    manual_step: Callable[[], TrainingStepOutput] = partial(
+                        self._run_training_step,
+                        strategy,
+                        module,
+                        model,
+                        batch,
+                        batch_idx
+                    )
+                    outputs: StepOutput = self.manual_optimization.run(manual_step)
                     is_accumulating: bool = False
 
             self._completed_batches = batch_idx + 1
             self._total_batches_processed += 1
             if self._use_completed_loader_states:
-                fetched_loader_states: object | None = data_fetcher.state
-                if not isinstance(fetched_loader_states, list):
+                if not isinstance(data_fetcher.state, list):
                     raise RuntimeError(
                         "Stateful training data did not produce a loader-state snapshot."
                     )
+                fetched_loader_states: list[DataLoaderState] = cast(
+                    list[DataLoaderState],
+                    data_fetcher.state
+                )
                 self._completed_loader_states: list[DataLoaderState] = cast(
                     list[DataLoaderState],
                     fetched_loader_states
@@ -531,9 +412,6 @@ class TrainingEpochLoop(Loop):
             )
             self._resume_checkpoint_rng_state = None
 
-        # Tail flush: when the epoch ends inside an accumulation window, one
-        # more optimizer step runs so accumulated gradients are never
-        # silently discarded.
         if module.automatic_optimization and tail_is_accumulating:
             assert optimizer is not None
             strategy.sync_gradients(optimizer)
@@ -557,27 +435,27 @@ class TrainingEpochLoop(Loop):
                 update_plateau_schedulers=False
             )
 
-        combined_loader_states: list[dict[str, object]] = (
+        combined_loader_states: list[DataLoaderState] = cast(
+            list[DataLoaderState],
             self._completed_loader_states
             if self._use_completed_loader_states
             else combined_loader._state_dicts()
         )
         if combined_loader_states and not epoch_completed:
-            trainer._last_train_dataloader_states = (
+            trainer._checkpoint_connector.train_dataloader_states: list[
+                DataLoaderState
+            ] = (
                 combined_loader_states
             )
-            trainer._train_dataloader_state_active = True
-            trainer._last_train_dataloader_batches_completed = (
+            trainer._checkpoint_connector.train_dataloader_state_active: bool = True
+            trainer._checkpoint_connector.train_dataloader_batches_completed: int = (
                 self._completed_batches
             )
-            trainer._last_train_total_batch_idx = (
+            trainer._checkpoint_connector.train_total_batch_idx: int = (
                 self._total_batches_processed - 1
             )
         else:
-            trainer._last_train_dataloader_states = []
-            trainer._train_dataloader_state_active = False
-            trainer._last_train_dataloader_batches_completed = 0
-            trainer._last_train_total_batch_idx = -1
+            trainer._checkpoint_connector.reset_training_continuation()
 
         self._has_entered_batch_loop: bool = False
         self._completed_batches: int = 0
@@ -590,9 +468,6 @@ class TrainingEpochLoop(Loop):
         self,
         device: torch.device
     ) -> AbstractContextManager[None]:
-        # Returns the autocast context matching the configured precision policy:
-        # float16 autocast for 16-mixed, bfloat16 autocast for bf16-mixed, and a
-        # null context for full precision.
         del device
         return self.trainer.precision_plugin.train_step_context()
 
@@ -603,14 +478,10 @@ class TrainingEpochLoop(Loop):
         model: nn.Module,
         batch: Batch,
         batch_idx: int
-    ) -> StepOutput:
-        # Executes the training step through the strategy inside the precision
-        # context. The module's current-hook marker is set for the duration of
-        # the step so Module.log can resolve its logging rule, and it is cleared
-        # in a finally block so a raising step cannot leave a stale marker.
+    ) -> TrainingStepOutput:
         with self._make_autocast_context(self.trainer.strategy.root_device):
             with module._hook_context("training_step"):
-                outputs: StepOutput = self.trainer._call_strategy_hook(
+                outputs: TrainingStepOutput = self.trainer._call_strategy_hook(
                     "training_step",
                     strategy.training_step,
                     model,
@@ -627,8 +498,8 @@ class TrainingEpochLoop(Loop):
         model: nn.Module,
         batch: Batch,
         batch_idx: int
-    ) -> _AutomaticClosure:
-        step_fn: Callable[[], object] = partial(
+    ) -> OptimizerClosure:
+        step_operation: Callable[[], TrainingStepOutput] = partial(
             self._run_training_step,
             strategy,
             module,
@@ -636,34 +507,30 @@ class TrainingEpochLoop(Loop):
             batch,
             batch_idx
         )
-        backward_fn: Callable[[torch.Tensor], None] = partial(
+        backward_operation: Callable[[torch.Tensor], None] = partial(
             self.manual_backward,
             trainer,
             module
         )
-        zero_grad_fn: Callable[[], None] | None = None
+        zero_grad_operation: Callable[[], None] | None = None
         if batch_idx % self.accumulate_grad_batches == 0:
-            zero_grad_fn: Callable[[], None] | None = partial(
+            zero_grad_operation: Callable[[], None] | None = partial(
                 self._optimizer_zero_grad,
                 trainer,
                 module,
                 trainer.optimizers[0],
                 batch_idx
             )
-        automatic_closure: _AutomaticClosure = _AutomaticClosure(
+        automatic_closure: OptimizerClosure = partial(
+            self.automatic_optimization.run,
             strategy,
-            step_fn,
-            backward_fn,
-            zero_grad_fn,
-            self.accumulate_grad_batches
+            step_operation,
+            backward_operation,
+            zero_grad_operation
         )
         return automatic_closure
 
     def _clip_gradients(self, optimizer: torch.optim.Optimizer) -> None:
-        # Applies the configured clipping algorithm to every parameter in the
-        # optimizer that currently holds a gradient. Parameters without
-        # gradients are excluded so norm computation reflects only live
-        # gradients.
         gradient_clip_val: int | float = self.gradient_clip_val or 0.0
         gradient_clip_algorithm: ClipAlgorithm = self.gradient_clip_algorithm or "norm"
         self.trainer.precision_plugin.clip_gradients(
@@ -678,12 +545,6 @@ class TrainingEpochLoop(Loop):
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
-        # Public clipping entry point for manual-optimization modules. Explicit
-        # arguments override the configured values for this invocation only:
-        # the configured values are swapped in, restored in a finally block,
-        # and gradients are unscaled first when a GradScaler is active so the
-        # threshold applies to true magnitudes. A non-positive resolved value
-        # disables clipping for the invocation.
         resolved_gradient_clip_val: int | float | None = (
             self.gradient_clip_val if gradient_clip_val is None else gradient_clip_val
         )
@@ -695,8 +556,6 @@ class TrainingEpochLoop(Loop):
             else gradient_clip_algorithm.lower()
         )
         if resolved_gradient_clip_algorithm not in {"norm", "value"}:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
-
             raise MisconfigurationError(
                 "gradient_clip_algorithm must be 'norm' or 'value'."
             )
@@ -718,20 +577,20 @@ class TrainingEpochLoop(Loop):
         trainer: Trainer,
         module: Module,
         loss: torch.Tensor,
-        *args: object,
-        **kwargs: object
+        gradient: torch.Tensor | None = None,
+        retain_graph: bool | None = None,
+        create_graph: bool = False,
+        inputs: BackwardInputs = None
     ) -> None:
-        # Runs the backward pass surrounded by the backward hook pair. Callback
-        # hooks fire before the corresponding module hooks. With an active
-        # GradScaler the loss is scaled before backward; otherwise backward is
-        # delegated to the strategy so distributed synchronization applies.
         trainer._call_strategy_hook(
             "backward",
             trainer.strategy.backward,
             loss,
             None,
-            *args,
-            **kwargs
+            gradient,
+            retain_graph,
+            create_graph,
+            inputs
         )
 
     def optimizer_step(
@@ -739,15 +598,11 @@ class TrainingEpochLoop(Loop):
         trainer: Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
-        closure: Callable[[], object] | None = None,
-        kwargs: dict[str, object] | None = None,
-        automatic: bool = False,
-        increment_global_step: bool = True
-    ) -> object:
-        # Public optimizer-step entry point for manual-optimization modules;
-        # delegates to the shared stepping helper so hook order and scaler
-        # handling match the automatic path.
-        output: object = self._optimizer_step_only(
+        closure: OptimizerClosure | None = None,
+        kwargs: OptimizerStepOptions | None = None,
+        automatic: bool = False
+    ) -> OptimizerStepOutput:
+        output: OptimizerStepOutput = self._optimizer_step_only(
             trainer,
             module,
             optimizer,
@@ -755,7 +610,7 @@ class TrainingEpochLoop(Loop):
             kwargs=kwargs,
             automatic=automatic
         )
-        if increment_global_step:
+        if not automatic:
             self._increment_global_step(trainer.state, module)
         return output
 
@@ -766,8 +621,6 @@ class TrainingEpochLoop(Loop):
         optimizer: torch.optim.Optimizer,
         batch_idx: int
     ) -> None:
-        # Public gradient-clearing entry point for manual-optimization modules;
-        # delegates to the shared helper so the zero-grad hooks always fire.
         self._optimizer_zero_grad(trainer, module, optimizer, batch_idx)
 
     def _do_optimizer_step(
@@ -777,19 +630,14 @@ class TrainingEpochLoop(Loop):
         optimizer: torch.optim.Optimizer,
         state: TrainerState,
         batch_idx: int,
-        closure: Callable[[], object] | None = None
+        closure: OptimizerClosure | None = None
     ) -> None:
-        # Executes the full step sequence for the automatic-optimization path:
-        # optimizer step, step-interval scheduler advance, gradient clearing,
-        # and the global-step increment. Plateau schedulers are excluded here
-        # because they advance on monitored metrics at epoch boundaries.
         synthetic_optimizer: SyntheticOptimizer = next(
             wrapped_optimizer
             for wrapped_optimizer in trainer._synthetic_optimizers
             if wrapped_optimizer.optimizer is optimizer
         )
-        synthetic_optimizer._automatic_step = True
-        try:
+        with synthetic_optimizer.automatic_step_context():
             trainer._call_module_hook(
                 module,
                 "optimizer_step",
@@ -799,8 +647,6 @@ class TrainingEpochLoop(Loop):
                 synthetic_optimizer,
                 closure
             )
-        finally:
-            synthetic_optimizer._automatic_step = False
         self._increment_global_step(state, module)
         self.update_lr_schedulers(
             trainer,
@@ -853,17 +699,13 @@ class TrainingEpochLoop(Loop):
         trainer: Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
-        closure: Callable[[], object] | None = None,
-        kwargs: dict[str, object] | None = None,
+        closure: OptimizerClosure | None = None,
+        kwargs: OptimizerStepOptions | None = None,
         automatic: bool = False
-    ) -> object:
-        # Applies the optimizer step preceded by its hooks and by gradient
-        # clipping. When a GradScaler is active, gradients are unscaled before
-        # clipping and the step runs through the scaler, which skips the update
-        # on overflow and adjusts the scale afterward.
+    ) -> OptimizerStepOutput:
         del automatic
-        step_kwargs: dict[str, object] = {} if kwargs is None else kwargs
-        resolved_closure: Callable[[], object] = closure or do_nothing_closure
+        step_kwargs: OptimizerStepOptions = {} if kwargs is None else kwargs
+        resolved_closure: OptimizerClosure = closure or self._empty_closure
         return trainer._call_strategy_hook(
             "optimizer_step",
             trainer.strategy.optimizer_step,
@@ -873,35 +715,8 @@ class TrainingEpochLoop(Loop):
             **step_kwargs
         )
 
-    def _call_before_optimizer_step(
-        self,
-        trainer: Trainer,
-        module: Module,
-        optimizer: torch.optim.Optimizer,
-        automatic: bool
-    ) -> None:
-        callbacks: list[Callback] = trainer.callbacks
-        trainer._call_callback_hooks(
-            module,
-            "on_before_optimizer_step",
-            optimizer,
-            callback_group=callbacks
-        )
-        trainer._call_module_hook(
-            module,
-            "on_before_optimizer_step",
-            module.on_before_optimizer_step,
-            optimizer
-        )
-        if automatic:
-            trainer._call_module_hook(
-                module,
-                "configure_gradient_clipping",
-                module.configure_gradient_clipping,
-                optimizer,
-                self.gradient_clip_val,
-                self.gradient_clip_algorithm
-            )
+    def _empty_closure(self) -> None:
+        return None
 
     def _optimizer_zero_grad(
         self,
@@ -910,9 +725,6 @@ class TrainingEpochLoop(Loop):
         optimizer: torch.optim.Optimizer,
         batch_idx: int
     ) -> None:
-        # Clears gradients preceded by the zero-grad hooks, so callbacks and
-        # the module observe gradients in their final post-step state before
-        # they are released.
         callbacks: list[Callback] = trainer.callbacks
         trainer._call_callback_hooks(
             module,
@@ -937,9 +749,6 @@ class TrainingEpochLoop(Loop):
 
     @staticmethod
     def _increment_global_step(state: TrainerState, module: Module) -> None:
-        # Advances the trainer-owned global-step counter and mirrors the new
-        # value onto the module so Module.global_step stays consistent with
-        # trainer state between checkpoints.
         state.increment_global_step()
         module._global_step = state.global_step
 
@@ -951,12 +760,6 @@ class TrainingEpochLoop(Loop):
         is_accumulating: bool,
         is_last_batch: bool
     ) -> None:
-        # Decides whether validation runs after the current batch. An integer
-        # interval counts either optimizer steps (global_step scope) or batches
-        # within the epoch (epoch scope); a float below one selects evenly
-        # spaced positions as a fraction of the epoch. The final batch position
-        # is excluded in batch-scoped modes because epoch-end validation is
-        # scheduled separately by the fit loop.
         if module.automatic_optimization and not is_accumulating:
             trainer._call_on_validation_model_zero_grad(module)
         trainer._is_mid_epoch_validation = not is_last_batch
@@ -978,13 +781,6 @@ class TrainingEpochLoop(Loop):
         batch: Batch,
         is_accumulating: bool = False
     ) -> None:
-        # Drains the module's logged-metric buffer after each batch. Metrics
-        # marked for distributed synchronization are mean-reduced across ranks
-        # before use. Step-scoped logger metrics are emitted from rank zero at
-        # the configured cadence, and never during accumulation batches so a
-        # partially accumulated step is not reported. Epoch-scoped metrics feed
-        # per-name accumulators under each metric's declared reduction, with
-        # logger visibility tracked separately from callback visibility.
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             module._reset_logged_metrics()
@@ -1052,11 +848,6 @@ class TrainingEpochLoop(Loop):
         epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]],
         state: TrainerState
     ) -> None:
-        # Reduces every epoch accumulator at the epoch boundary. The reduced
-        # values update the trainer's callback metrics on every rank, because
-        # monitoring callbacks such as early stopping must see them everywhere.
-        # Logger emission is restricted to rank zero and to the metrics whose
-        # logging configuration requested logger visibility.
         if not epoch_accum:
             return
         callback_reduced: dict[str, torch.Tensor] = {}

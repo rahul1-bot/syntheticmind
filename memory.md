@@ -244,3 +244,12 @@
     4. A stateless class named `CheckpointState` obscures behavior and lifecycle. Path preload caches, user-managed selection, continuation coordinates, and schema validation prove that checkpoint coordination is a live connector responsibility.
     5. Private checkpoints require one explicit schema version and one canonical key per semantic field. Emitting singular and plural aliases increases ambiguity and restoration branches without serving current SyntheticMind consumers.
     6. Full, sharded, asynchronous, weights-only, mid-epoch, and failure-atomic paths must be verified separately because success in one persistence representation does not prove another.
+
+| Memory | Optimizer Versus Optimization Semantics | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
+
+    1. An optimizer is a model-facing PyTorch object and declaration contract; optimization is the loop lifecycle that invokes forward, loss extraction, zeroing, backward, accumulation, clipping, stepping, and scheduler cadence.
+    2. Automatic and manual optimization are recognized execution modes and justify a loop subpackage. A `core/optimization/` package mixing parser, wrapper, and execution behavior erases that distinction.
+    3. A managed optimizer should adapt hook-aware stepping and parameter toggling through explicit connected operations. Dynamic subclass fabrication and generic attribute forwarding make runtime identity dishonest and hide the supported API.
+    4. PyTorch optimizer closures remain ordinary callables, but SyntheticMind can supply a bound `run` method instead of defining a custom callable object or nested function.
+    5. Strategy and precision jointly own the actual optimizer step because wrapping, sharding, scaling, unscaling, and overflow behavior depend on execution topology and numerical policy.
+    6. Scheduler cadence belongs to the training epoch lifecycle, while `Module.lr_scheduler_step` remains the explicit extension hook for schedulers outside the standard PyTorch API.

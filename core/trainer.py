@@ -24,11 +24,11 @@ from syntheticmind.core.hooks import DataHooks, ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import (
     LRSchedulerConfig,
+    OptimizerLRScheduler,
     SyntheticOptimizer,
+    _OptimizerConfigurationParser,
     _SchedulerInstance,
-    _init_optimizers_and_lr_schedulers,
 )
-from syntheticmind.core.protocols import OptimizerTrainerProtocol
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loops.batch_limits import (
     normalize_batch_limit,
@@ -72,7 +72,6 @@ from syntheticmind.utilities.filesystem import (
     normalize_path,
 )
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
-from syntheticmind.utilities.optimizers import _optimizers_to_device
 from syntheticmind.utilities.seed import SeedManager
 from syntheticmind.utilities.torch_flags import configure_torch_flags
 from syntheticmind.utilities.types import (
@@ -687,19 +686,21 @@ class Trainer:
                     "the optimizer_idx parameter from training_step, set automatic_optimization = False, "
                     "and access optimizers through self.optimizers()."
                 )
-            optimization_configuration: object = self._call_module_hook(
+            optimization_configuration: OptimizerLRScheduler = self._call_module_hook(
                 module,
                 "configure_optimizers",
                 module.configure_optimizers
             )
+            optimizer_parser: _OptimizerConfigurationParser = (
+                _OptimizerConfigurationParser(
+                    module.automatic_optimization,
+                    is_overridden("lr_scheduler_step", module, Module)
+                )
+            )
             optimizer_initialization: tuple[
                 list[torch.optim.Optimizer],
                 list[LRSchedulerConfig]
-            ] = _init_optimizers_and_lr_schedulers(
-                optimization_configuration,
-                module.automatic_optimization,
-                is_overridden("lr_scheduler_step", module, Module)
-            )
+            ] = optimizer_parser.resolve(optimization_configuration)
             self.optimizers: list[torch.optim.Optimizer] = optimizer_initialization[0]
             self.lr_scheduler_configs: list[LRSchedulerConfig] = optimizer_initialization[1]
             module, self.optimizers, self.lr_scheduler_configs = (
@@ -709,14 +710,22 @@ class Trainer:
                     self.lr_scheduler_configs
                 )
             )
-            self._synthetic_optimizers: list[SyntheticOptimizer] = [
-                SyntheticOptimizer._to_synthetic_optimizer(
-                    optimizer,
-                    cast(OptimizerTrainerProtocol, self),
-                    module
+            epoch_loop: TrainingEpochLoop | None = self.fit_loop.epoch_loop
+            if epoch_loop is None:
+                raise RuntimeError("Trainer fit loop has no training epoch loop.")
+            strategy_model: torch.nn.Module | None = self.strategy.model
+            if strategy_model is None:
+                raise RuntimeError("Strategy has no model for optimizer connection.")
+            self._synthetic_optimizers: list[SyntheticOptimizer] = []
+            optimizer: torch.optim.Optimizer
+            for optimizer in self.optimizers:
+                synthetic_optimizer: SyntheticOptimizer = SyntheticOptimizer(optimizer)
+                synthetic_optimizer.connect(
+                    strategy_model,
+                    partial(epoch_loop.optimizer_step, self, module),
+                    module.toggled_optimizer
                 )
-                for optimizer in self.optimizers
-            ]
+                self._synthetic_optimizers.append(synthetic_optimizer)
 
             if not module.automatic_optimization:
                 assert self.fit_loop.epoch_loop is not None
@@ -753,7 +762,9 @@ class Trainer:
                     checkpoint=None,
                     restore_datamodule_state=False
                 )
-            _optimizers_to_device(self.optimizers, device)
+            synthetic_optimizer: SyntheticOptimizer
+            for synthetic_optimizer in self._synthetic_optimizers:
+                synthetic_optimizer.move_state_to(device)
 
             self._callback_connector.validate_state_keys()
 

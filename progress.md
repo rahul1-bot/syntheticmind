@@ -227,3 +227,17 @@
     2. The training epoch loop still owns automatic closure construction, manual backward, gradient accumulation, optimizer stepping, clipping, and scheduler cadence in one oversized class rather than recognized automatic and manual optimization modes.
     3. The next phase must keep `core/optimizer.py` as the model-facing optimizer contract and place execution under `loops/optimization/automatic.py` and `manual.py`, with Strategy controlling setup order and precision controlling numerical stepping.
     4. Verification must cover closure semantics, automatic and manual optimization, multiple optimizers, accumulation tails, clipping, mixed precision, step and plateau schedulers, checkpoint continuation, DDP synchronization, spawn, fork, and model parallelism.
+
+| Progress Complete | Optimization Execution Reconstruction | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
+
+    1. ✅ Core optimizer ownership now contains managed optimizer access, accepted live optimizer and scheduler declarations, strict scheduler configuration, declaration normalization, and no-op execution without factory baggage.
+    2. ✅ Automatic and manual optimization are explicit loop concepts, optimizer closures use bound verb methods, and TrainingEpochLoop retains only the surrounding epoch and cadence responsibilities.
+    3. ✅ Dynamic optimizer subclassing, generic attribute forwarding, free optimizer functions, dead factory configurations, utility builders, broad closure values, custom callable objects, and optimizer-only Trainer Protocols were removed.
+    4. ✅ Automatic, managed manual, multiple optimizer, DDP manual, LBFGS closure, accumulation tail, clipping, bf16 mixed precision, step scheduler, plateau scheduler, invalid configuration, spawn, fork, and exact full or sharded model-parallel resume paths pass.
+
+| Progress Active | Canonical Trainer Package Migration | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
+
+    1. The public Trainer remains physically located in `core/trainer.py` even though its accelerator, callback, data, logger, checkpoint, and signal composition boundaries now live under `trainer/connectors/`.
+    2. The next phase must move Trainer to `trainer/trainer.py`, move `TrainerState` to `trainer/states.py`, update all production dependency directions, and remove the top-level `state/` package without leaving a compatibility re-export façade.
+    3. Existing conditional annotation blocks may update their Trainer import path under the explicit project topology authority, but no new `TYPE_CHECKING` occurrence may be introduced.
+    4. Verification must cover production imports, Module and DataModule back-references, callbacks, loops, launchers, serialization, subprocess, spawn, fork, checkpoints, logging, and model parallelism through the canonical path.
