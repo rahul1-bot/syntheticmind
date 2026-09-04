@@ -156,7 +156,7 @@ class DeviceStatsMonitor(Callback):
         self._emit(trainer, stage, trainer.global_step)
 
     def _validate_filters(self, trainer: syntheticmind.Trainer) -> None:
-        if self.filter_keys is None or not trainer.is_global_zero:
+        if self.filter_keys is None:
             return
         statistics: dict[str, float] = trainer.accelerator.get_device_stats(
             trainer.strategy.root_device
@@ -174,8 +174,6 @@ class DeviceStatsMonitor(Callback):
         stage: _DeviceStage,
         step: int
     ) -> None:
-        if not trainer.is_global_zero:
-            return
         statistics: dict[str, float] = trainer.accelerator.get_device_stats(
             trainer.strategy.root_device
         )

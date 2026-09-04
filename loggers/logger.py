@@ -1,143 +1,202 @@
-# This module:
-# 1. Defines the abstract logger contract: batched float metrics with an explicit
-#    step index, one-time hyperparameter records, and a finalize hook
-# 2. Resolves the on-disk logging directory from save_dir, run name, and an
-#    optional version segment
-#
-# Design decisions:
-# - Implementations receive already-reduced float metrics with the step index
-#   attached; reduction happens upstream in the trainer so every backend records
-#   identical values for the same run
-# - log_dir composes save_dir/name, appends the version only when one is set, and
-#   creates the directory on first access so implementations can open files
-#   without pre-flight checks
-# - finalize is part of the contract because buffered backends must flush and
-#   close on teardown, including teardown after a failure
-# - Identity (save_dir, name, version) is fixed at construction so a logger's
-#   destination cannot drift while a run is writing to it
-#
-# Author: Rahul Sawhney
-
-from abc import ABC, abstractmethod
-from collections.abc import Callable
+import json
+import math
+from argparse import Namespace
+from datetime import date, datetime, timedelta
+from operator import itemgetter
 from pathlib import Path
+from typing import cast
+
+import numpy as np
+import torch
+from torch import nn
 
 from syntheticmind.storage.filesystem import join_path, normalize_path
-from syntheticmind.types import HyperparameterDict
+from syntheticmind.types import HyperparameterDict, HyperparameterValue
 
 __all__: list[str] = ["Logger"]
 
+type _JsonValue = (
+    bool | int | float | str | None | list[_JsonValue] | dict[str, _JsonValue]
+)
 
-class Logger(ABC):
-    # Abstract base for experiment loggers. Subclasses implement the three
-    # abstract members; directory resolution and identity handling live here so
-    # every backend lays out its files the same way.
+
+class Logger:
     def __init__(
         self,
         save_dir: str | Path,
         name: str = "default",
-        version: str | None = None
+        version: int | str | None = None
     ) -> None:
-        # Binds the immutable logger identity: the root directory, the run name
-        # used as a subdirectory, and an optional version subdirectory.
-        #
-        # Args:
-        #     save_dir: Root directory under which the logger's output
-        #         directory is composed.
-        #     name: Run name used as the first subdirectory level.
-        #         Default: ``"default"``.
-        #     version: Optional version label used as the second
-        #         subdirectory level; ``None`` omits the segment entirely.
-        #         Default: ``None``.
+        if not isinstance(save_dir, str | Path):
+            raise TypeError("`save_dir` must be a string or Path.")
+        self._validate_path_segment(name, "name")
+        if isinstance(version, bool) or not isinstance(version, int | str | None):
+            raise TypeError("`version` must be an integer, string, or None.")
+        if isinstance(version, int) and version < 0:
+            raise ValueError(f"Integer logger versions must be non-negative, got {version}.")
+        if isinstance(version, str):
+            self._validate_path_segment(version, "version")
         self._save_dir: str = normalize_path(save_dir)
         self._name: str = name
-        self._version: str | None = version
+        self._version: int | str | None = version
 
-    @abstractmethod
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
-        # Records one batch of reduced metric values against the given step.
-        raise NotImplementedError
+        del metrics, step
+        raise NotImplementedError(f"{type(self).__name__} must implement log_metrics().")
 
-    @abstractmethod
     def log_hyperparams(self, params: HyperparameterDict) -> None:
-        # Records the run's hyperparameters once, near the start of execution.
-        raise NotImplementedError
+        del params
+        raise NotImplementedError(f"{type(self).__name__} must implement log_hyperparams().")
 
-    @abstractmethod
     def finalize(self) -> None:
-        # Flushes buffers and releases file handles at the end of the run.
-        raise NotImplementedError
+        raise NotImplementedError(f"{type(self).__name__} must implement finalize().")
 
     @property
     def save_dir(self) -> str:
-        # Root directory under which this logger writes.
         return self._save_dir
 
     @property
     def name(self) -> str:
-        # Run name used as the first subdirectory level.
         return self._name
 
     @property
-    def version(self) -> str | None:
-        # Optional version label used as the second subdirectory level.
+    def version(self) -> int | str | None:
         return self._version
 
     @property
     def log_dir(self) -> str:
-        # Fully resolved output directory (save_dir/name[/version]), created on
-        # access so callers can immediately open files inside it.
-        directory: str = self._log_directory()
-        return directory
+        return self._log_directory()
 
     def _log_directory(self) -> str:
-        directory: str = join_path(self._save_dir, self._name)
-        if self._version is not None:
-            directory: str = join_path(directory, self._version)
-        return directory
+        directory: str = (
+            join_path(self._save_dir, self._name)
+            if self._name
+            else self._save_dir
+        )
+        if self._version is None or self._version == "":
+            return directory
+        version_segment: str = (
+            f"version_{self._version}"
+            if isinstance(self._version, int)
+            else self._version
+        )
+        return join_path(directory, version_segment)
 
-    def __repr__(self) -> str:
-        # Compact identity line for logs and interactive debugging.
-        return (
-            f"{type(self).__name__}("
-            f"save_dir={str(self._save_dir)!r}, "
-            f"name={self._name!r}, "
-            f"version={self._version!r})"
+    def _validated_metrics(
+        self,
+        metrics: dict[str, float],
+        step: int
+    ) -> dict[str, float]:
+        if type(step) is not int:
+            raise TypeError(f"Logger step must be an integer, got {step!r}.")
+        if step < 0:
+            raise ValueError(f"Logger step must be non-negative, got {step}.")
+        if not isinstance(metrics, dict):
+            raise TypeError("Logger metrics must be a dictionary.")
+        validated_metrics: dict[str, float] = {}
+        metric_name: str
+        metric_value: float
+        for metric_name, metric_value in metrics.items():
+            if not isinstance(metric_name, str) or not metric_name:
+                raise TypeError("Logger metric names must be non-empty strings.")
+            if isinstance(metric_value, bool) or not isinstance(metric_value, int | float):
+                raise TypeError(
+                    f"Logger metric {metric_name!r} must be numeric, got "
+                    f"{type(metric_value).__name__}."
+                )
+            validated_metrics[metric_name]: float = float(metric_value)
+        return validated_metrics
+
+    def _normalize_hyperparameters(
+        self,
+        params: HyperparameterDict
+    ) -> dict[str, _JsonValue]:
+        if not isinstance(params, dict):
+            raise TypeError("Logger hyperparameters must be a dictionary.")
+        normalized: dict[str, _JsonValue] = {}
+        name: str
+        value: HyperparameterValue
+        for name, value in params.items():
+            if not isinstance(name, str) or not name:
+                raise TypeError("Hyperparameter names must be non-empty strings.")
+            normalized[name]: _JsonValue = self._normalize_hyperparameter(value)
+        return normalized
+
+    def _normalize_hyperparameter(self, value: HyperparameterValue) -> _JsonValue:
+        if value is None or isinstance(value, bool | int | str):
+            return value
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("Hyperparameter floats must be finite for logging.")
+            return value
+        if isinstance(value, bytes):
+            return {"bytes_hex": value.hex()}
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, timedelta):
+            return {"duration_seconds": value.total_seconds()}
+        if isinstance(value, Path | torch.dtype | torch.device):
+            return str(value)
+        if isinstance(value, nn.Module):
+            raise TypeError(
+                f"Live module {type(value).__qualname__} cannot be logged as a hyperparameter."
+            )
+        if isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                raise TypeError("Only scalar tensors can be logged as hyperparameters.")
+            tensor_value: HyperparameterValue = cast(
+                HyperparameterValue,
+                value.detach().cpu().item()
+            )
+            return self._normalize_hyperparameter(tensor_value)
+        if isinstance(value, np.ndarray):
+            if value.size != 1:
+                raise TypeError("Only scalar arrays can be logged as hyperparameters.")
+            array_value: HyperparameterValue = cast(
+                HyperparameterValue,
+                value.item()
+            )
+            return self._normalize_hyperparameter(array_value)
+        if isinstance(value, np.generic):
+            numpy_value: HyperparameterValue = cast(HyperparameterValue, value.item())
+            return self._normalize_hyperparameter(numpy_value)
+        if isinstance(value, Namespace):
+            namespace_values: HyperparameterDict = cast(HyperparameterDict, vars(value))
+            return self._normalize_hyperparameters(namespace_values)
+        if isinstance(value, dict):
+            return self._normalize_hyperparameters(value)
+        if isinstance(value, list | tuple):
+            item: HyperparameterValue
+            return [self._normalize_hyperparameter(item) for item in value]
+        if isinstance(value, set | frozenset):
+            ordered_values: list[tuple[str, _JsonValue]] = []
+            item: HyperparameterValue
+            for item in value:
+                normalized_item: _JsonValue = self._normalize_hyperparameter(item)
+                ordering_key: str = json.dumps(
+                    normalized_item,
+                    allow_nan=False,
+                    sort_keys=True
+                )
+                ordered_values.append((ordering_key, normalized_item))
+            ordered_values.sort(key=itemgetter(0))
+            return [item[1] for item in ordered_values]
+        raise TypeError(
+            f"Unsupported hyperparameter value type: {type(value).__qualname__}."
         )
 
+    def _validate_path_segment(self, value: str, name: str) -> None:
+        if not isinstance(value, str):
+            raise TypeError(f"Logger {name} must be a string.")
+        if value in {".", ".."} or "/" in value or "\\" in value:
+            raise ValueError(
+                f"Logger {name} must be one path segment without traversal, got {value!r}."
+            )
 
-class _NoOpExperiment:
-    def __getattr__(self, name: str) -> Callable[..., None]:
-        return self._discard
-
-    def __getitem__(self, key: object) -> _NoOpExperiment:
-        return self
-
-    def _discard(self, *args: object, **kwargs: object) -> None:
-        pass
-
-
-class _NoOpLogger(Logger):
-    def __init__(self) -> None:
-        super().__init__(Path(), name="", version="")
-        self._experiment: _NoOpExperiment = _NoOpExperiment()
-
-    @property
-    def experiment(self) -> _NoOpExperiment:
-        return self._experiment
-
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
-        pass
-
-    def log_hyperparams(self, params: HyperparameterDict) -> None:
-        pass
-
-    def finalize(self) -> None:
-        pass
-
-    def __getitem__(self, key: object) -> _NoOpLogger:
-        return self
-
-    @property
-    def log_dir(self) -> str:
-        return ""
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(save_dir={self._save_dir!r}, "
+            f"name={self._name!r}, version={self._version!r})"
+        )

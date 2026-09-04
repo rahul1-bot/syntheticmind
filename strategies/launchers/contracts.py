@@ -95,6 +95,7 @@ class _WorkerOutput(BaseModel):
     logged_metrics: dict[str, torch.Tensor]
     progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]]
     last_progress_bar_stage: RunningStage | None
+    hyperparameters_logged: bool
     callback_states: list[StateDict]
     datamodule_state: StateDict | None
     precision_plugin_state: StateDict

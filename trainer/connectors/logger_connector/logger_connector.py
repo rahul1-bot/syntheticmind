@@ -7,7 +7,7 @@ import torch
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loggers.csv_logger import CSVLogger
-from syntheticmind.loggers.logger import Logger, _NoOpLogger
+from syntheticmind.loggers.logger import Logger
 from syntheticmind.loggers.tensorboard import TensorBoardLogger
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.storage.filesystem import (
@@ -39,6 +39,7 @@ class _LoggerConnector:
         self._fast_dev_run: bool = fast_dev_run
         self._enable_autolog_hparams: bool = enable_autolog_hparams
         self._loggers: list[Logger] = self._resolve_loggers(logger)
+        self._hyperparameters_logged: bool = False
         self.callback_metrics: dict[str, torch.Tensor] = {}
         self.logged_metrics: dict[str, torch.Tensor] = {}
         self.progress_bar_metrics_by_stage: dict[
@@ -120,18 +121,24 @@ class _LoggerConnector:
         metrics: Mapping[str, torch.Tensor | float],
         step: int
     ) -> None:
+        if not self._strategy.is_global_zero:
+            return
         scalar_metrics: dict[str, float] = {
             name: self.metric_to_float(value)
             for name, value in metrics.items()
         }
         configured_logger: Logger
         for configured_logger in self._loggers:
-            configured_logger.log_metrics(scalar_metrics, step=step)
+            configured_logger.log_metrics(dict(scalar_metrics), step=step)
 
     def log_hyperparams(self, params: HyperparameterDict) -> None:
-        configured_logger: Logger
-        for configured_logger in self._loggers:
-            configured_logger.log_hyperparams(params)
+        if not self._loggers:
+            return
+        if self._strategy.is_global_zero:
+            configured_logger: Logger
+            for configured_logger in self._loggers:
+                configured_logger.log_hyperparams(dict(params))
+        self._hyperparameters_logged: bool = True
 
     def autolog_hyperparameters(
         self,
@@ -142,6 +149,7 @@ class _LoggerConnector:
             not self._enable_autolog_hparams
             or not self._loggers
             or self._fast_dev_run
+            or self._hyperparameters_logged
         ):
             return
         module_hyperparameters: HyperparameterDict | None = (
@@ -187,8 +195,7 @@ class _LoggerConnector:
             for key, value in merged_hyperparameters.items()
             if key != "_class_path"
         }
-        if self._strategy.is_global_zero:
-            self.log_hyperparams(filtered_hyperparameters)
+        self.log_hyperparams(filtered_hyperparameters)
 
     def metric_to_float(self, value: torch.Tensor | float) -> float:
         if isinstance(value, torch.Tensor):
@@ -206,27 +213,40 @@ class _LoggerConnector:
         if logger is not None and not isinstance(logger, Logger):
             raise TypeError("logger must be a Logger or None.")
         self._loggers: list[Logger] = [] if logger is None else [logger]
+        self._hyperparameters_logged: bool = False
 
     @property
     def loggers(self) -> list[Logger]:
-        return self._loggers
+        return list(self._loggers)
 
     @loggers.setter
     def loggers(self, loggers: list[Logger] | None) -> None:
         resolved_loggers: list[Logger] = [] if loggers is None else list(loggers)
         if not all(isinstance(logger, Logger) for logger in resolved_loggers):
             raise TypeError("loggers must contain only Logger instances.")
+        if len({id(logger) for logger in resolved_loggers}) != len(resolved_loggers):
+            raise ValueError("The same Logger instance cannot be configured more than once.")
         self._loggers: list[Logger] = resolved_loggers
+        self._hyperparameters_logged: bool = False
+
+    @property
+    def hyperparameters_logged(self) -> bool:
+        return self._hyperparameters_logged
+
+    @hyperparameters_logged.setter
+    def hyperparameters_logged(self, value: bool) -> None:
+        if type(value) is not bool:
+            raise TypeError("hyperparameters_logged must be a bool.")
+        self._hyperparameters_logged: bool = value
 
     @property
     def log_dir(self) -> str:
         logger: Logger | None = self.logger
-        if isinstance(logger, CSVLogger | TensorBoardLogger):
-            directory: str = logger.log_dir
-        elif logger is not None:
-            directory: str = logger.save_dir
-        else:
-            directory: str = str(self._default_root_dir)
+        directory: str = (
+            logger.log_dir
+            if logger is not None
+            else str(self._default_root_dir)
+        )
         return self._strategy.broadcast(directory)
 
     def _resolve_loggers(
@@ -235,13 +255,13 @@ class _LoggerConnector:
     ) -> list[Logger]:
         if logger is None or logger is True:
             if self._fast_dev_run:
-                return [_NoOpLogger()]
+                return []
             return [self._default_logger()]
         if logger is False:
             return []
         if isinstance(logger, Logger):
-            return [_NoOpLogger()] if self._fast_dev_run else [logger]
-        if not isinstance(logger, Iterable):
+            return [] if self._fast_dev_run else [logger]
+        if isinstance(logger, str | bytes) or not isinstance(logger, Iterable):
             raise TypeError(
                 "logger must be a Logger, an iterable of Logger instances, "
                 "True, False, or None."
@@ -255,13 +275,15 @@ class _LoggerConnector:
                     f"logger item {index} must be a Logger, got "
                     f"{type(configured_logger).__name__}."
                 )
-        if self._fast_dev_run and loggers:
-            return [_NoOpLogger()]
+        if len({id(configured_logger) for configured_logger in loggers}) != len(loggers):
+            raise ValueError("The same Logger instance cannot be configured more than once.")
+        if self._fast_dev_run:
+            return []
         return loggers
 
     def _default_logger(self) -> Logger:
         name: str = "syntheticmind_logs"
-        version: str = self._next_version(join_path(self._default_root_dir, name))
+        version: int = self._next_version(join_path(self._default_root_dir, name))
         if find_spec("tensorboard") is not None:
             return TensorBoardLogger(
                 save_dir=self._default_root_dir,
@@ -274,7 +296,7 @@ class _LoggerConnector:
             version=version
         )
 
-    def _next_version(self, root_dir: str | Path) -> str:
+    def _next_version(self, root_dir: str | Path) -> int:
         versions: list[int] = []
         path: str
         for path in list_directory(root_dir):
@@ -284,7 +306,7 @@ class _LoggerConnector:
             suffix: str = name.removeprefix("version_")
             if suffix.isdigit():
                 versions.append(int(suffix))
-        return f"version_{max(versions, default=-1) + 1}"
+        return max(versions, default=-1) + 1
 
     def _hyperparameters_equal(
         self,

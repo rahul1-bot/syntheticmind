@@ -114,14 +114,15 @@
     6. The connector contains no `Any`, generic `object`, module-level function, source comment, custom callable object, or unannotated assignment; Trainer source comments were removed from the rewritten module rather than retained as stale architecture.
     7. Direct, module-owned, and DataModule-owned execution, nested loaders, spawn and fork transfer, two-rank DDP, model parallelism, stateful checkpoint continuation, overfit batches, reload cadence, batch limits, persistent workers, and unrepeated prediction all pass.
 
-| Architecture Decision | Logger Connector Ownership | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
+| Architecture Decision | Logger Routing and Persistence Ownership | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
 
-    1. Logger selection, default run-version allocation, callback metrics, logger metrics, progress metrics, stage reset boundaries, scalar conversion, hyperparameter merging, and external logger emission now belong to the Trainer logger connector.
-    2. Modules retain metric declaration and computation, loops retain step and epoch reduction cadence, and concrete loggers retain backend persistence. The connector owns routing among these concepts without adding a parallel logging API.
-    3. The former `loggers/configuration.py` free-function module was removed because logger selection and destination identity are part of connector composition rather than a standalone utility surface.
-    4. Callback, logged, and progress views remain distinct; sanity results do not leak into live views, public properties return defensive mappings, and launcher transfer preserves the selected worker's observable state.
-    5. The connector contains no broad annotation, free function, source prose, custom callable object, or unannotated assignment and remains below the project class threshold without artificial fragments.
-    6. Local metric views, CSV metrics and hyperparameters, distributed reductions, TorchMetrics, DDP stage transitions, spawn, fork, progress rendering, and launcher state transfer pass after the migration.
+    1. Module hooks produce metrics, loops own reduction cadence, the Trainer logger connector owns view routing and global-rank persistence, and concrete loggers own only destination identity, serialization, buffering, and finalization.
+    2. `Logger` is now a regular stateful inheritance contract rather than an ABC; fake no-op experiments and arbitrary attribute swallowing were removed, and fast-development runs use an empty logger collection.
+    3. Logger names and versions are validated single path segments, integer versions retain standard `version_N` layout, custom loggers contribute their own `log_dir`, duplicate instances are rejected, and public logger collections are defensive copies.
+    4. Shared hyperparameter normalization accepts portable deterministic values, rejects live modules and non-scalar tensors or arrays, and emits once per run across sequential and spawned stages through explicit launcher-state transfer.
+    5. CSV persistence validates existing headers, reconciles worker-written schema before later stages, widens columns transactionally, restores in-memory schema on failed promotion, resumes existing rows, and supports transactional fsspec replacement.
+    6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
+    7. Local and remote CSV, atomic failure retry, TensorBoard event reading, multi-logger mutation isolation, MPS metric views, external DDP, and internal DDP spawn pass; device statistics now populate every rank's callback view while the connector alone gates durable output.
 
 | Architecture Decision | Checkpoint Connector Ownership | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
 

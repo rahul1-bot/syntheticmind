@@ -1,15 +1,11 @@
-# syntheticmind.loggers: The Metric Loggers
+# syntheticmind.loggers: Experiment Records
 
-`loggers/` receives the metrics a `Module` emits through `log` and `log_dict` and persists them outside the process. Loggers are passive consumers: reduction and cadence are decided by the logging contract in `../core/hooks.py`, so every attached logger records the same values.
+The Trainer logger connector owns metric reduction, scalar conversion, rank-zero routing, default selection, and multi-logger fan-out. Logger implementations receive completed scalar observations and portable hyperparameters; they own only destination identity, persistence, buffering, and finalization.
 
 | Module | Contents |
 |---|---|
-| `logger.py` | `Logger`, the abstract contract covering hyperparameter recording and step-keyed metric recording. |
-| `csv_logger.py` | `CSVLogger`, append-only CSV persistence; this is the format consumed by the study's training-history records. |
-| `tensorboard.py` | `TensorBoardLogger`, which writes TensorBoard event files through the internal `_TensorBoardWriter`. |
+| `logger.py` | Stateful logger inheritance contract, run-directory identity, metric validation, and portable hyperparameter normalization. |
+| `csv_logger.py` | Resumable CSV metrics with transactional schema widening plus deterministic JSON hyperparameters on local or fsspec storage. |
+| `tensorboard.py` | Local TensorBoard scalar events and hyperparameter records through a lazily acquired writer. |
 
-Multiple loggers may be attached to one trainer, and each receives every logged value.
-
-## Related Components
-
-The training histories preserved under `../../../artifacts/study_1/` originate from the CSV logger output of the study's training runs.
+Disabled logging is represented by an empty logger collection. No fake experiment accepts arbitrary attributes or silently absorbs misspelled backend calls.

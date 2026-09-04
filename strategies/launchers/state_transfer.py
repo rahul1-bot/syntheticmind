@@ -84,6 +84,9 @@ class _WorkerStateTransfer:
             logged_metrics=logged_metrics,
             progress_bar_metrics_by_stage=progress_metrics,
             last_progress_bar_stage=trainer._logger_connector.last_progress_bar_stage,
+            hyperparameters_logged=(
+                trainer._logger_connector.hyperparameters_logged
+            ),
             callback_states=callback_states,
             datamodule_state=(
                 datamodule.state_dict() if datamodule is not None else None
@@ -152,6 +155,9 @@ class _WorkerStateTransfer:
         ] = restored_progress_metrics
         trainer._logger_connector.last_progress_bar_stage: RunningStage | None = (
             worker_output.last_progress_bar_stage
+        )
+        trainer._logger_connector.hyperparameters_logged: bool = (
+            worker_output.hyperparameters_logged
         )
         callback: Callback
         callback_state: StateDict

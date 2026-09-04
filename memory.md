@@ -151,13 +151,15 @@
     5. Multiprocessing result transfer must serialize connector-owned loader totals rather than reaching for obsolete Trainer fields; worker transfer failures expose hidden ownership remnants after an otherwise successful local refactor.
     6. A cohesive connector may exceed a generic size threshold when every retained method participates in one lifecycle and extraction would produce one-consumer implementation fragments. Runtime breadth and conceptual unity control the exception.
 
-| Memory | Metric Production, Routing, and Persistence | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
+| Memory | Metric Production, Routing, and Persistence | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
 
     1. Metric production belongs to Module hooks, reduction cadence belongs to loops, view routing belongs to the logger connector, and durable output belongs to concrete loggers; merging these phases creates hidden state and inconsistent consumers.
     2. Callback metrics may include monitoring values that are intentionally absent from external logs, while progress metrics are scalar presentation state and logged metrics retain tensors for programmatic inspection.
     3. Sanity validation must clear every observable metric view after execution so early diagnostic batches cannot alter checkpoint ranking, early stopping, progress output, or experiment records.
-    4. Logger selection, default version discovery, and hyperparameter emission share destination identity and therefore belong to the connector rather than a free configuration module.
-    5. Multiprocessing launch must transfer all three metric views and the last displayed stage as one observation snapshot; transferring only public logged metrics loses callback and progress semantics.
+    4. Global-rank persistence belongs in the connector rather than every callback and loop call site; callbacks may retain rank-local observations while one central gate prevents duplicate durable writes.
+    5. Multiprocessing launch must transfer metric views, presentation state, and one-time hyperparameter progress; a later worker otherwise repeats run metadata or widens a CSV file from stale parent schema.
+    6. CSV schema widening is a commit operation: adopt the existing header, serialize all prior rows under the union, atomically replace the file, and roll back live field state if promotion fails.
+    7. Broad in-memory hyperparameters become logger data only after deterministic portable normalization; live modules, non-scalar tensors, non-scalar arrays, and non-finite values must fail instead of degrading through arbitrary string conversion.
 
 | Memory | Checkpoint Trajectory and Policy Ownership | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
 

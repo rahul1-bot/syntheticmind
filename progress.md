@@ -119,12 +119,12 @@
     3. ✅ The rewritten connector contains no broad annotations, free functions, source prose, custom callable object, or unannotated assignment; its explicit concept-integrity size exception is documented.
     4. ✅ Module, DataModule, direct, nested, stateful, persistent-worker, overfit, limited, reloaded, DDP, spawn, fork, prediction, and model-parallel execution paths pass.
 
-| Progress Complete | Logger Connector Reconstruction | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
+| Progress Complete | Logger Routing and Persistence Reconstruction | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
 
-    1. ✅ Logger selection, metric views, scalar conversion, hyperparameter merging, progress routing, reset boundaries, and external emission now belong to one Trainer logger connector.
-    2. ✅ Metric computation remains on Module-owned records and reduction cadence remains on loops, while the removed logger configuration module leaves no free-function selection path.
-    3. ✅ Callback, logger, and progress views retain distinct tensor or scalar contracts and survive worker-to-parent state transfer without sanity-stage leakage.
-    4. ✅ Local, CSV, hyperparameter, distributed, TorchMetrics, DDP, spawn, fork, progress, and launcher-transfer verification passes.
+    1. ✅ Logger selection, scalar conversion, rank-zero fan-out, metric views, default versioning, run metadata, and launcher reconciliation belong to the Trainer connector; backend persistence remains on concrete loggers.
+    2. ✅ The stateful Logger contract no longer uses an ABC or fake experiment, fast-development runs expose no logger, identities reject path traversal, and public collections cannot mutate connector state.
+    3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
+    4. ✅ Local, MPS, remote fsspec, multi-logger, failure injection, external DDP, internal DDP spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
 
 | Progress Complete | Checkpoint Connector Reconstruction | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
 
