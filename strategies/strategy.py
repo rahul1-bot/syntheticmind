@@ -40,7 +40,7 @@ from syntheticmind.plugins.io import (
 )
 from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.precision.precision import Precision
-from syntheticmind.utilities.model_initialization import _EmptyInit
+from syntheticmind.utilities.model_initialization import _ModuleInitializer
 from syntheticmind.utilities.types import (
     Batch,
     CheckpointDict,
@@ -359,7 +359,7 @@ class Strategy(ABC):
         if empty_init is not None and type(empty_init) is not bool:
             raise TypeError("`empty_init` must be a bool or None.")
         with (
-            _EmptyInit(enabled=bool(empty_init)),
+            _ModuleInitializer(enabled=bool(empty_init)),
             self.root_device,
             self.precision_plugin.tensor_init_context()
         ):

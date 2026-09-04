@@ -84,3 +84,12 @@
     4. A restart requires one Rahul-aligned slice at a time, full reading of the directly affected runtime path, minimal code movement, and focused executable verification before the next slice begins.
     5. Lightning remains a behavioral and terminology reference, while SyntheticMind architecture remains independently governed by `code-guidelines.md`.
     6. No implementation or parity work remains active until Rahul explicitly resumes it.
+
+| Strategic Note | Controlled SyntheticMind Restart | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
+
+    1. Rahul explicitly resumed the complete harness objective under the current root workspace `code-guidelines.md`; older repository-local guideline material remains historical and cannot override the current standard.
+    2. The first accepted slice recovered model-parallel persistence ownership without reproducing the interrupted function collection or introducing a public abstraction family.
+    3. Full and sharded two-rank training and resume now execute through `Module`, `Trainer`, `ModelParallelStrategy`, optimizer state, callback checkpointing, and Trainer progress restoration rather than through a standalone PyTorch primitive probe.
+    4. The model call contract was corrected so default prediction passes through inherited `nn.Module.__call__` behavior and registered forward hooks.
+    5. The next checkpoint slice must provide atomic sharded generation publication and failure recovery before model-parallel checkpoint durability can be marked complete.
+    6. Subsequent work remains sequential: finish checkpoint durability, repair strategy ownership and dependency direction, then recompute missing core Trainer capability against pinned and current Lightning evidence.

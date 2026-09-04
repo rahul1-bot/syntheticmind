@@ -75,3 +75,19 @@
     4. The immediate technical remainder is to decide which interrupted changes are retained, rewritten, or removed, then complete one narrowly scoped model-parallel contract and verify it end to end.
     5. After that phase is accepted, the remaining core Lightning parity surface must be recomputed before selecting the next folder or capability.
     6. No further work is active until Rahul explicitly chooses the next bounded action.
+
+| Progress Complete | Model-Parallel Ownership Recovery | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
+
+    1. ✅ Rahul resumed the complete SyntheticMind objective and confirmed the root workspace `code-guidelines.md` as the current governing standard.
+    2. ✅ Eleven model-parallel checkpoint functions were consolidated into one private persistence owner, and the one-function distributed-materialization module was removed in favor of the existing module-initialization capability.
+    3. ✅ `ModelParallelStrategy` remains below the 300-line class hard limit, the checkpoint persistence owner remains below the limit, no new public surface or Protocol was introduced, and every modified Python file parses without terminal trailing commas.
+    4. ✅ Two-rank CPU tensor-parallel training and resume pass for full and sharded checkpoint modes through the real SyntheticMind lifecycle, including optimizer state and Trainer progress continuation.
+    5. ✅ Ordinary checkpoint loading, callback composition, DDP multiple-loader execution, distributed metric reduction, local or MPS gathering, meta-parameter materialization, and default prediction forward-hook dispatch pass after the change.
+    6. ✅ Existing source comments remain byte-for-byte preserved in every modified surviving file, and no linter or static type checker was invoked.
+
+| Progress Active | Atomic Sharded Checkpoint Publication | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
+
+    1. Sharded checkpoint overwrite still deletes the previous directory before all new shards and metadata are durably committed.
+    2. The next bounded implementation must stage a complete generation, publish it through one atomic commit point, retain the previous generation until publication succeeds, reject incomplete generations, and clean failed staging data without corrupting the readable checkpoint.
+    3. Verification must cover first publication, overwrite, concurrent-reader visibility at the commit boundary, injected shard or metadata failure, recovery of the previous generation, full-checkpoint compatibility, and two-rank resume.
+    4. Model-parallel strategy inheritance, broader dependency direction, and remaining Trainer capability parity remain queued after the durability contract is accepted.

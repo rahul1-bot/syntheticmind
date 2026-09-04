@@ -125,3 +125,12 @@
     4. The current additions, including the new future-annotations import, vague helper boundaries, and expanded generic Strategy surface, require line-by-line review against `code-guidelines.md` before any continuation.
     5. Future implementation must proceed through Rahul-aligned, narrowly bounded slices with the relevant existing files and runtime path reviewed before mutation.
     6. The recursive goal is stopped. No further code changes, verification expansion, or parity work may continue until Rahul explicitly selects the next bounded action.
+
+| Architecture Decision | Model-Parallel Baseline Recovery | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
+
+    1. Rahul explicitly resumed complete SyntheticMind hardening and established the current root workspace `code-guidelines.md` as the governing Python standard; the repository-local historical guideline copy is reference evidence only and has no current authority.
+    2. The interrupted model-parallel checkpoint functions were consolidated into one private persistence owner that controls full and sharded state extraction, metadata loading, restoration, path recognition, and removal without adding a public API or Protocol.
+    3. Distributed module materialization now belongs to the existing module-initialization capability, while parallel-size validation remains a private operation of `ModelParallelStrategy`; the one-function materialization module was removed.
+    4. The default `Module.predict_step` now invokes the inherited PyTorch module call path, preserving registered forward hooks and compiled-call machinery instead of calling `forward` directly.
+    5. Executable evidence covers two-rank CPU tensor-parallel training and resume for both sharded and full checkpoints, rejection of optimizer-incomplete resumable state before model mutation, meta-parameter materialization, ordinary checkpoint loading, callback composition, DDP multiple-loader execution, distributed logging, and local or MPS gathering.
+    6. Sharded checkpoint replacement still removes the prior directory before the next distributed generation commits and therefore remains outside the accepted durability contract; atomic generation publication is the next bounded checkpoint task.

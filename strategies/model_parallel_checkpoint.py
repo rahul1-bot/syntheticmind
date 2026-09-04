@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import torch
 import torch.distributed.checkpoint as distributed_checkpoint
@@ -33,82 +33,152 @@ from syntheticmind.utilities.types import CheckpointDict
 
 __all__: list[str] = []
 
-_METADATA_FILENAME: str = "meta.pt"
+type ModelParallelCheckpointFormat = Literal["full", "sharded"]
 
 
-def is_sharded_checkpoint(path: str | Path) -> bool:
-    return is_directory(path) and is_file(join_path(path, _METADATA_FILENAME))
+class _ModelParallelCheckpointIO:
+    def __init__(self, checkpoint_format: ModelParallelCheckpointFormat) -> None:
+        self._checkpoint_format: ModelParallelCheckpointFormat = checkpoint_format
+        self._metadata_filename: str = "meta.pt"
 
+    def is_checkpoint(self, path: str | Path) -> bool:
+        return is_file(path) or self._is_sharded_checkpoint(path)
 
-def is_model_parallel_checkpoint(path: str | Path) -> bool:
-    return is_file(path) or is_sharded_checkpoint(path)
-
-
-def load_model_parallel_metadata(
-    path: str | Path,
-    weights_only: bool | None
-) -> CheckpointDict:
-    if is_sharded_checkpoint(path):
-        return load_checkpoint(
-            join_path(path, _METADATA_FILENAME),
-            weights_only=weights_only
+    def load_metadata(
+        self,
+        path: str | Path,
+        weights_only: bool | None
+    ) -> CheckpointDict:
+        if self._is_sharded_checkpoint(path):
+            return load_checkpoint(
+                join_path(path, self._metadata_filename),
+                weights_only=weights_only
+            )
+        if is_file(path):
+            return load_checkpoint(path, weights_only=weights_only)
+        raise ValueError(
+            f"The path {str(path)!r} does not point to a full or sharded checkpoint."
         )
-    if is_file(path):
-        return load_checkpoint(path, weights_only=weights_only)
-    raise ValueError(
-        f"The path {str(path)!r} does not point to a full or sharded checkpoint."
-    )
 
+    def save(
+        self,
+        checkpoint: CheckpointDict,
+        path: str | Path,
+        global_rank: int,
+        barrier: Callable[[], None]
+    ) -> None:
+        if self._checkpoint_format == "sharded":
+            self._save_sharded(checkpoint, path, global_rank, barrier)
+            return
+        self._save_full(checkpoint, path, global_rank, barrier)
 
-def save_model_parallel_checkpoint(
-    checkpoint: CheckpointDict,
-    path: str | Path,
-    save_distributed_checkpoint: bool,
-    is_global_zero: bool,
-    barrier: Callable[[], None]
-) -> None:
-    if save_distributed_checkpoint:
-        if is_global_zero:
+    def load(
+        self,
+        path: str | Path,
+        model: nn.Module,
+        optimizers: list[torch.optim.Optimizer],
+        strict: bool,
+        weights_only: bool | None,
+        preloaded_checkpoint: CheckpointDict | None = None
+    ) -> CheckpointDict:
+        if self._is_sharded_checkpoint(path):
+            return self._load_sharded(
+                path,
+                model,
+                optimizers,
+                strict,
+                weights_only
+            )
+        if not is_file(path):
+            raise ValueError(
+                f"The path {str(path)!r} does not point to a full or sharded checkpoint."
+            )
+        checkpoint: CheckpointDict = (
+            load_checkpoint(path, weights_only=weights_only)
+            if preloaded_checkpoint is None
+            else preloaded_checkpoint
+        )
+        distributed_state: dict[str, object]
+        metadata: dict[str, object]
+        distributed_state, metadata = self._split_checkpoint(checkpoint)
+        self._restore_full_state(
+            distributed_state,
+            model,
+            optimizers,
+            strict
+        )
+        return cast(CheckpointDict, metadata)
+
+    def model_state(self, model: nn.Module) -> dict[str, object]:
+        options: StateDictOptions = self._state_dict_options()
+        return cast(dict[str, object], get_model_state_dict(model, options=options))
+
+    def optimizer_state(
+        self,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer
+    ) -> dict[str, object]:
+        options: StateDictOptions = self._state_dict_options()
+        return cast(
+            dict[str, object],
+            get_optimizer_state_dict(model, optimizer, options=options)
+        )
+
+    def remove(self, path: str | Path) -> None:
+        remove_path(path, recursive=True)
+
+    def _save_sharded(
+        self,
+        checkpoint: CheckpointDict,
+        path: str | Path,
+        global_rank: int,
+        barrier: Callable[[], None]
+    ) -> None:
+        if global_rank == 0:
             remove_path(path, recursive=True)
             make_directory(path)
         barrier()
-        distributed_state, metadata = _split_checkpoint(checkpoint)
-        _save_distributed_state(distributed_state, path)
-        if is_global_zero:
+        distributed_state: dict[str, object]
+        metadata: dict[str, object]
+        distributed_state, metadata = self._split_checkpoint(checkpoint)
+        writer: StorageWriter = self._storage_writer(path)
+        distributed_checkpoint.save(distributed_state, storage_writer=writer)
+        if global_rank == 0:
             save_checkpoint(
                 cast(CheckpointDict, metadata),
-                join_path(path, _METADATA_FILENAME)
+                join_path(path, self._metadata_filename)
             )
         barrier()
-        return
-    if is_directory(path) and not is_sharded_checkpoint(path):
-        raise IsADirectoryError(f"The checkpoint path exists and is a directory: {path}")
-    if is_sharded_checkpoint(path):
-        if is_global_zero:
-            remove_path(path, recursive=True)
-        barrier()
-    if is_global_zero:
-        save_checkpoint(checkpoint, path)
 
+    def _save_full(
+        self,
+        checkpoint: CheckpointDict,
+        path: str | Path,
+        global_rank: int,
+        barrier: Callable[[], None]
+    ) -> None:
+        if is_directory(path) and not self._is_sharded_checkpoint(path):
+            raise IsADirectoryError(f"The checkpoint path exists and is a directory: {path}")
+        if self._is_sharded_checkpoint(path):
+            if global_rank == 0:
+                remove_path(path, recursive=True)
+            barrier()
+        if global_rank == 0:
+            save_checkpoint(checkpoint, path)
 
-def load_model_parallel_checkpoint(
-    path: str | Path,
-    model: nn.Module,
-    optimizers: list[torch.optim.Optimizer],
-    strict: bool,
-    weights_only: bool | None,
-    preloaded_checkpoint: CheckpointDict | None = None
-) -> CheckpointDict:
-    if is_sharded_checkpoint(path):
-        state: dict[str, object] = {
-            "state_dict": get_model_state_dict(model)
-        }
+    def _load_sharded(
+        self,
+        path: str | Path,
+        model: nn.Module,
+        optimizers: list[torch.optim.Optimizer],
+        strict: bool,
+        weights_only: bool | None
+    ) -> CheckpointDict:
+        state: dict[str, object] = {"state_dict": get_model_state_dict(model)}
         for index, optimizer in enumerate(optimizers):
-            state[f"optimizer_{index}"] = get_optimizer_state_dict(
-                model,
-                optimizer
-            )
-        _load_distributed_state(state, path)
+            state[f"optimizer_{index}"] = get_optimizer_state_dict(model, optimizer)
+        reader: StorageReader = self._storage_reader(path)
+        distributed_checkpoint.load(state, storage_reader=reader)
         options: StateDictOptions = StateDictOptions(strict=strict)
         set_model_state_dict(
             model,
@@ -122,139 +192,116 @@ def load_model_parallel_checkpoint(
                 cast(dict[str, object], state[f"optimizer_{index}"]),
                 options=options
             )
-        return load_model_parallel_metadata(path, weights_only)
-    if not is_file(path):
-        raise ValueError(
-            f"The path {str(path)!r} does not point to a full or sharded checkpoint."
+        return self.load_metadata(path, weights_only)
+
+    def _restore_full_state(
+        self,
+        state: dict[str, object],
+        model: nn.Module,
+        optimizers: list[torch.optim.Optimizer],
+        strict: bool
+    ) -> None:
+        options: StateDictOptions = StateDictOptions(
+            full_state_dict=True,
+            strict=strict
         )
-    checkpoint: CheckpointDict = (
-        load_checkpoint(path, weights_only=weights_only)
-        if preloaded_checkpoint is None
-        else preloaded_checkpoint
-    )
-    distributed_state, _ = _split_checkpoint(checkpoint)
-    options = StateDictOptions(full_state_dict=True, strict=strict)
-    set_model_state_dict(
-        model,
-        cast(dict[str, object], distributed_state["state_dict"]),
-        options=options
-    )
-    for index, optimizer in enumerate(optimizers):
-        optimizer_state: object | None = distributed_state.get(
-            f"optimizer_{index}"
-        )
-        if not isinstance(optimizer_state, dict):
-            continue
-        set_optimizer_state_dict(
+        available_optimizer_states: list[dict[str, object]] = [
+            cast(dict[str, object], value)
+            for key, value in sorted(state.items())
+            if key.startswith("optimizer_") and isinstance(value, dict)
+        ]
+        if optimizers and len(available_optimizer_states) != len(optimizers):
+            raise KeyError(
+                "A resumable model-parallel checkpoint must contain exactly one "
+                "state entry for every configured optimizer."
+            )
+        set_model_state_dict(
             model,
-            optimizer,
-            _rekey_optimizer_state(optimizer_state, model),
+            cast(dict[str, object], state["state_dict"]),
             options=options
         )
-    returned_checkpoint: CheckpointDict = dict(checkpoint)
-    returned_checkpoint.pop("state_dict", None)
-    returned_checkpoint.pop("model_state_dict", None)
-    return returned_checkpoint
+        for optimizer, optimizer_state in zip(
+            optimizers,
+            available_optimizer_states,
+            strict=True
+        ):
+            set_optimizer_state_dict(
+                model,
+                optimizer,
+                self._rekey_optimizer_state(optimizer_state, model),
+                options=options
+            )
 
-
-def model_parallel_model_state(
-    model: nn.Module,
-    full_state_dict: bool
-) -> dict[str, object]:
-    options: StateDictOptions = StateDictOptions(
-        full_state_dict=full_state_dict,
-        cpu_offload=True
-    )
-    return cast(dict[str, object], get_model_state_dict(model, options=options))
-
-
-def model_parallel_optimizer_state(
-    model: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    full_state_dict: bool
-) -> dict[str, object]:
-    options: StateDictOptions = StateDictOptions(
-        full_state_dict=full_state_dict,
-        cpu_offload=True
-    )
-    return cast(
-        dict[str, object],
-        get_optimizer_state_dict(model, optimizer, options=options)
-    )
-
-
-def _split_checkpoint(
-    checkpoint: CheckpointDict
-) -> tuple[dict[str, object], dict[str, object]]:
-    payload: dict[str, object] = dict(checkpoint)
-    model_state: object | None = payload.pop("state_dict", None)
-    model_state_alias: object | None = payload.pop("model_state_dict", None)
-    if not isinstance(model_state, dict):
-        model_state = model_state_alias
-    if not isinstance(model_state, dict):
-        raise KeyError("Checkpoint is missing a model `state_dict`.")
-    optimizer_states: object | None = payload.pop("optimizer_states", None)
-    optimizer_state_aliases: object | None = payload.pop(
-        "optimizer_state_dicts",
-        None
-    )
-    optimizer_state: object | None = payload.pop("optimizer_state_dict", None)
-    if not isinstance(optimizer_states, list):
-        optimizer_states = optimizer_state_aliases
-    if not isinstance(optimizer_states, list):
-        optimizer_states = [optimizer_state] if isinstance(optimizer_state, dict) else []
-    distributed_state: dict[str, object] = {"state_dict": model_state}
-    for index, state in enumerate(optimizer_states):
-        if not isinstance(state, dict):
-            raise TypeError("Optimizer checkpoint state must be a dictionary.")
-        distributed_state[f"optimizer_{index}"] = state
-    return distributed_state, payload
-
-
-def _rekey_optimizer_state(
-    optimizer_state: dict[str, object],
-    model: nn.Module
-) -> dict[str, object]:
-    state: object | None = optimizer_state.get("state")
-    if not isinstance(state, dict) or not state:
-        return optimizer_state
-    if not isinstance(next(iter(state)), int):
-        return optimizer_state
-    from torch.distributed.fsdp import FullyShardedDataParallel, OptimStateKeyType
-
-    return cast(
-        dict[str, object],
-        FullyShardedDataParallel.rekey_optim_state_dict(
-            optimizer_state,
-            OptimStateKeyType.PARAM_NAME,
-            model
+    def _split_checkpoint(
+        self,
+        checkpoint: CheckpointDict
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        metadata: dict[str, object] = dict(checkpoint)
+        model_state: object | None = metadata.pop("state_dict", None)
+        model_state_alias: object | None = metadata.pop("model_state_dict", None)
+        if not isinstance(model_state, dict):
+            model_state: object | None = model_state_alias
+        if not isinstance(model_state, dict):
+            raise KeyError("Checkpoint is missing a model `state_dict`.")
+        optimizer_states: object | None = metadata.pop("optimizer_states", None)
+        optimizer_state_aliases: object | None = metadata.pop(
+            "optimizer_state_dicts",
+            None
         )
-    )
+        optimizer_state: object | None = metadata.pop("optimizer_state_dict", None)
+        if not isinstance(optimizer_states, list):
+            optimizer_states: object | None = optimizer_state_aliases
+        if not isinstance(optimizer_states, list):
+            optimizer_states: object | None = (
+                [optimizer_state] if isinstance(optimizer_state, dict) else []
+            )
+        distributed_state: dict[str, object] = {"state_dict": model_state}
+        for index, state in enumerate(optimizer_states):
+            if not isinstance(state, dict):
+                raise TypeError("Optimizer checkpoint state must be a dictionary.")
+            distributed_state[f"optimizer_{index}"] = state
+        return distributed_state, metadata
 
+    def _rekey_optimizer_state(
+        self,
+        optimizer_state: dict[str, object],
+        model: nn.Module
+    ) -> dict[str, object]:
+        state: object | None = optimizer_state.get("state")
+        if not isinstance(state, dict) or not state:
+            return optimizer_state
+        if not isinstance(next(iter(state)), int):
+            return optimizer_state
+        from torch.distributed.fsdp import FullyShardedDataParallel, OptimStateKeyType
 
-def _save_distributed_state(
-    state: dict[str, object],
-    path: str | Path
-) -> None:
-    writer: StorageWriter
-    if is_local_path(path):
-        writer = FileSystemWriter(normalize_path(path))
-    else:
+        return cast(
+            dict[str, object],
+            FullyShardedDataParallel.rekey_optim_state_dict(
+                optimizer_state,
+                OptimStateKeyType.PARAM_NAME,
+                model
+            )
+        )
+
+    def _state_dict_options(self) -> StateDictOptions:
+        return StateDictOptions(
+            full_state_dict=self._checkpoint_format == "full",
+            cpu_offload=True
+        )
+
+    def _is_sharded_checkpoint(self, path: str | Path) -> bool:
+        return is_directory(path) and is_file(join_path(path, self._metadata_filename))
+
+    def _storage_writer(self, path: str | Path) -> StorageWriter:
+        if is_local_path(path):
+            return FileSystemWriter(normalize_path(path))
         from torch.distributed.checkpoint._fsspec_filesystem import FsspecWriter
 
-        writer = FsspecWriter(path)
-    distributed_checkpoint.save(state, storage_writer=writer)
+        return FsspecWriter(path)
 
-
-def _load_distributed_state(
-    state: dict[str, object],
-    path: str | Path
-) -> None:
-    reader: StorageReader
-    if is_local_path(path):
-        reader = FileSystemReader(normalize_path(path))
-    else:
+    def _storage_reader(self, path: str | Path) -> StorageReader:
+        if is_local_path(path):
+            return FileSystemReader(normalize_path(path))
         from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader
 
-        reader = FsspecReader(path)
-    distributed_checkpoint.load(state, storage_reader=reader)
+        return FsspecReader(path)

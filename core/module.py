@@ -481,7 +481,7 @@ class Module(ModelHooks, DataHooks, CheckpointHooks, HyperparametersMixin, nn.Mo
         #             features, _ = batch
         #             return self(features)
         del batch_idx, dataloader_idx
-        return self.forward(batch)
+        return self(batch)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         # Declares the run's optimizers and schedulers. The trainer calls

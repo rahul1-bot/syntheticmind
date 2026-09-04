@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
@@ -16,20 +16,11 @@ from syntheticmind.core.hooks import ModelHooks
 from syntheticmind.core.module import Module
 from syntheticmind.plugins.io import CheckpointIO, CheckpointPath
 from syntheticmind.strategies.ddp import DDPStrategy
-from syntheticmind.strategies.model_parallel_checkpoint import (
-    is_model_parallel_checkpoint,
-    load_model_parallel_checkpoint,
-    load_model_parallel_metadata,
-    model_parallel_model_state,
-    model_parallel_optimizer_state,
-    save_model_parallel_checkpoint
-)
-from syntheticmind.strategies.model_parallel_materialization import (
-    materialize_distributed_module
-)
+from syntheticmind.strategies.model_parallel_checkpoint import _ModelParallelCheckpointIO
 from syntheticmind.utilities.exceptions import MisconfigurationError
-from syntheticmind.utilities.filesystem import normalize_path, remove_path
+from syntheticmind.utilities.filesystem import normalize_path
 from syntheticmind.utilities.model_helpers import is_overridden
+from syntheticmind.utilities.model_initialization import _ModuleInitializer
 from syntheticmind.utilities.types import CheckpointDict
 
 if TYPE_CHECKING:
@@ -47,8 +38,8 @@ class ModelParallelStrategy(DDPStrategy):
         process_group_backend: str | None = None,
         timeout: timedelta | None = default_pg_timeout
     ) -> None:
-        _validate_parallel_size("data_parallel_size", data_parallel_size)
-        _validate_parallel_size("tensor_parallel_size", tensor_parallel_size)
+        self._validate_parallel_size("data_parallel_size", data_parallel_size)
+        self._validate_parallel_size("tensor_parallel_size", tensor_parallel_size)
         if type(save_distributed_checkpoint) is not bool:
             raise TypeError("`save_distributed_checkpoint` must be a bool.")
         super().__init__(
@@ -58,7 +49,11 @@ class ModelParallelStrategy(DDPStrategy):
         )
         self._data_parallel_size: Literal["auto"] | int = data_parallel_size
         self._tensor_parallel_size: Literal["auto"] | int = tensor_parallel_size
-        self._save_distributed_checkpoint: bool = save_distributed_checkpoint
+        self._model_parallel_checkpoint_io: _ModelParallelCheckpointIO = (
+            _ModelParallelCheckpointIO(
+                "sharded" if save_distributed_checkpoint else "full"
+            )
+        )
         self._device_mesh: DeviceMesh | None = None
         self._preloaded_checkpoint_path: str | None = None
         self._preloaded_checkpoint: CheckpointDict | None = None
@@ -67,7 +62,7 @@ class ModelParallelStrategy(DDPStrategy):
     def connect(self, model: nn.Module) -> None:
         super().connect(model)
         if self._device_mesh is not None and isinstance(model, Module):
-            model._device_mesh = self._device_mesh
+            model._device_mesh: DeviceMesh | None = self._device_mesh
 
     @property
     def device_mesh(self) -> DeviceMesh:
@@ -139,14 +134,14 @@ class ModelParallelStrategy(DDPStrategy):
                 f"tensor_parallel_size={tensor_parallel_size} must multiply to "
                 f"world_size={self.world_size}."
             )
-        self._device_mesh = init_device_mesh(
+        self._device_mesh: DeviceMesh | None = init_device_mesh(
             self.root_device.type,
             (data_parallel_size, tensor_parallel_size),
             mesh_dim_names=("data_parallel", "tensor_parallel")
         )
         if not isinstance(self._module, Module):
             raise RuntimeError("ModelParallelStrategy requires a connected Module.")
-        self._module._device_mesh = self._device_mesh
+        self._module._device_mesh: DeviceMesh | None = self._device_mesh
 
     @override
     def setup(self, model: nn.Module, device: torch.device) -> nn.Module:
@@ -167,7 +162,8 @@ class ModelParallelStrategy(DDPStrategy):
                 "ModelParallelStrategy supports composable FSDP2, not "
                 "torch.distributed.fsdp.FullyShardedDataParallel."
             )
-        uninitialized_modules: set[str] = materialize_distributed_module(
+        module_initializer: _ModuleInitializer = _ModuleInitializer(enabled=False)
+        uninitialized_modules: set[str] = module_initializer.materialize_distributed(
             model,
             device
         )
@@ -179,7 +175,7 @@ class ModelParallelStrategy(DDPStrategy):
                 stacklevel=3
             )
         placed_model: nn.Module = model.to(device)
-        self._device = device
+        self._device: torch.device = device
         self.connect(placed_model)
         self.barrier()
         return placed_model
@@ -192,7 +188,9 @@ class ModelParallelStrategy(DDPStrategy):
     ) -> Iterator[None]:
         if empty_init is not None and type(empty_init) is not bool:
             raise TypeError("`empty_init` must be a bool or None.")
-        empty_context = torch.device("meta") if empty_init else nullcontext()
+        empty_context: AbstractContextManager[object] = (
+            torch.device("meta") if empty_init else nullcontext()
+        )
         with empty_context, self.precision_plugin.tensor_init_context():
             yield
 
@@ -204,10 +202,7 @@ class ModelParallelStrategy(DDPStrategy):
     def model_state_dict(self) -> dict[str, object]:
         if self.model is None:
             raise RuntimeError("ModelParallelStrategy has no connected model.")
-        return model_parallel_model_state(
-            self.model,
-            full_state_dict=not self._save_distributed_checkpoint
-        )
+        return self._model_parallel_checkpoint_io.model_state(self.model)
 
     @override
     def optimizer_state(
@@ -216,10 +211,9 @@ class ModelParallelStrategy(DDPStrategy):
     ) -> dict[str, object]:
         if self.model is None:
             raise RuntimeError("ModelParallelStrategy has no connected model.")
-        return model_parallel_optimizer_state(
+        return self._model_parallel_checkpoint_io.optimizer_state(
             self.model,
-            optimizer,
-            full_state_dict=not self._save_distributed_checkpoint
+            optimizer
         )
 
     @override
@@ -250,11 +244,10 @@ class ModelParallelStrategy(DDPStrategy):
                 "unsupported because the strategy does not use CheckpointIO."
             )
         path: str = normalize_path(self.broadcast(filepath))
-        save_model_parallel_checkpoint(
+        self._model_parallel_checkpoint_io.save(
             checkpoint,
             path,
-            self._save_distributed_checkpoint,
-            self.is_global_zero,
+            self.global_rank,
             self.barrier
         )
 
@@ -265,13 +258,13 @@ class ModelParallelStrategy(DDPStrategy):
         weights_only: bool | None = None
     ) -> CheckpointDict:
         path: str = normalize_path(self.broadcast(checkpoint_path))
-        checkpoint: CheckpointDict = load_model_parallel_metadata(
+        checkpoint: CheckpointDict = self._model_parallel_checkpoint_io.load_metadata(
             path,
             weights_only
         )
         if Path(path).is_file():
-            self._preloaded_checkpoint_path = path
-            self._preloaded_checkpoint = checkpoint
+            self._preloaded_checkpoint_path: str | None = path
+            self._preloaded_checkpoint: CheckpointDict | None = checkpoint
         return checkpoint
 
     @override
@@ -290,9 +283,9 @@ class ModelParallelStrategy(DDPStrategy):
             if self._preloaded_checkpoint_path == path
             else None
         )
-        self._preloaded_checkpoint_path = None
-        self._preloaded_checkpoint = None
-        return load_model_parallel_checkpoint(
+        self._preloaded_checkpoint_path: str | None = None
+        self._preloaded_checkpoint: CheckpointDict | None = None
+        return self._model_parallel_checkpoint_io.load(
             path,
             self.model,
             self.optimizers,
@@ -303,28 +296,28 @@ class ModelParallelStrategy(DDPStrategy):
 
     @override
     def is_checkpoint_path(self, checkpoint_path: CheckpointPath) -> bool:
-        return is_model_parallel_checkpoint(checkpoint_path)
+        return self._model_parallel_checkpoint_io.is_checkpoint(checkpoint_path)
 
     @override
     def remove_checkpoint(self, filepath: CheckpointPath) -> None:
         if self.is_global_zero:
-            remove_path(filepath, recursive=True)
+            self._model_parallel_checkpoint_io.remove(filepath)
 
     @override
     def on_exception(self, exception: BaseException) -> None:
-        self._device_mesh = None
+        self._device_mesh: DeviceMesh | None = None
         if isinstance(self._module, Module):
-            self._module._device_mesh = None
+            self._module._device_mesh: DeviceMesh | None = None
         super().on_exception(exception)
 
-
-def _validate_parallel_size(
-    name: str,
-    value: Literal["auto"] | int
-) -> None:
-    if value == "auto":
-        return
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"`{name}` must be 'auto' or a positive integer.")
-    if value < 1:
-        raise ValueError(f"`{name}` must be greater than zero.")
+    def _validate_parallel_size(
+        self,
+        name: str,
+        value: Literal["auto"] | int
+    ) -> None:
+        if value == "auto":
+            return
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"`{name}` must be 'auto' or a positive integer.")
+        if value < 1:
+            raise ValueError(f"`{name}` must be greater than zero.")

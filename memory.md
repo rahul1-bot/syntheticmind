@@ -158,3 +158,12 @@
     4. Fast progress is measured by accepted, verified capability slices rather than elapsed autonomous activity or the volume of changed files.
     5. Interrupted work must be labeled unverified and preserved as a review snapshot, never promoted into the verified architecture state merely because it compiles or resembles the reference.
     6. Rahul-directed checkpoints are now mandatory before resuming the model-parallel diff or opening another capability phase.
+
+| Memory | Model-Parallel Evidence and Persistence Ownership | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
+
+    1. A standalone DTensor and distributed-checkpoint probe establishes only PyTorch runtime availability; it does not establish SyntheticMind Trainer wiring, hook order, optimizer restoration, callback participation, progress continuation, or failure cleanup.
+    2. Model-parallel verification must execute the complete harness path with a real `Module`, `Trainer`, process launcher, device mesh, tensor-parallel plan, optimizer step, checkpoint callback, and resumed Trainer state on every participating rank.
+    3. Full and sharded checkpoint persistence form one cohesive model-parallel storage capability and therefore belong to one persistence owner rather than a collection of module-level functions.
+    4. A weights-only model artifact is not resumable training state; optimizer-count validation must occur before live model mutation so a rejected resume leaves the target model unchanged.
+    5. Calling `forward` directly from a default step bypasses PyTorch module hooks and compiled-call machinery even when the returned tensor is numerically correct; framework-owned forward computation must enter through the module instance.
+    6. Distributed checkpoint shards completing successfully does not prove atomic replacement. Publication requires an explicit generation-commit protocol so readers observe the previous complete generation or the next complete generation, never a deleted or partial path.
