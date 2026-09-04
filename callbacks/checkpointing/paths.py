@@ -121,11 +121,7 @@ class _CheckpointPaths:
             return False
         if not StoragePath(previous).is_local:
             return True
-        resume_path: str | Path | None = (
-            trainer.ckpt_path
-            if trainer.ckpt_path is not None
-            else trainer.resume_from_checkpoint
-        )
+        resume_path: str | Path | None = trainer.ckpt_path
         if resume_path is not None and StoragePath(previous).same_as(
             str(resume_path)
         ):

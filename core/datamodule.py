@@ -1,6 +1,7 @@
 import inspect
 from collections.abc import Callable, Iterable
-from typing import ClassVar, Self, cast, override
+from pathlib import Path
+from typing import IO, ClassVar, Self, cast, override
 
 import syntheticmind
 import torch
@@ -8,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from syntheticmind.core.hooks import DataHooks
 from syntheticmind.core.hyperparameters import HyperparametersMixin
+from syntheticmind.core.saving import _DataModuleCheckpointLoader
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.types import (
@@ -15,6 +17,7 @@ from syntheticmind.types import (
     DataLoaderSource,
     DatasetSource,
     HyperparameterValue,
+    MapLocation,
     StateDict
 )
 
@@ -74,6 +77,24 @@ class DataModule(DataHooks, HyperparametersMixin):
         if predict_dataset is not None:
             setattr(datamodule, "predict_dataloader", provider.predict_dataloader)
         return datamodule
+
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path: str | Path | IO[bytes],
+        map_location: MapLocation = None,
+        hparams_file: str | Path | None = None,
+        weights_only: bool | None = None,
+        **kwargs: HyperparameterValue
+    ) -> Self:
+        return _DataModuleCheckpointLoader.load(
+            cls,
+            checkpoint_path,
+            map_location,
+            hparams_file,
+            weights_only,
+            kwargs
+        )
 
     def state_dict(self) -> StateDict:
         state: StateDict = {}

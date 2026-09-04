@@ -17,3 +17,5 @@
 | `connectors/signal_connector.py` | Process-signal registration, propagation, interruption, and teardown. |
 
 Connector names are not a quota. A connector is admitted only when one configuration family crosses several framework components and requires a single ordering and compatibility owner. Optimizer construction remains a Strategy responsibility because distributed and model-parallel setup can change when parameters become available.
+
+Checkpoint continuation is selected explicitly through each stage's `ckpt_path` argument or the mutable `trainer.ckpt_path` policy. The obsolete constructor-level `resume_from_checkpoint` alias is not part of the current API.

@@ -151,7 +151,6 @@ class Trainer:
         reload_dataloaders_every_n_epochs: int = 0,
         default_root_dir: str | Path | None = None,
         enable_autolog_hparams: bool = True,
-        resume_from_checkpoint: str | Path | None = None,
         seed: int | None = None
     ) -> None:
         configuration: _TrainerConfiguration = _TrainerConfiguration(
@@ -261,11 +260,6 @@ class Trainer:
         )
         self.inference_mode: bool = configuration.inference_mode
         self._detect_anomaly: bool = configuration.detect_anomaly
-        self.resume_from_checkpoint: str | Path | None = (
-            StoragePath(resume_from_checkpoint).normalized
-            if resume_from_checkpoint is not None
-            else None
-        )
 
         if seed is not None:
             self._randomness.seed(seed)
@@ -402,16 +396,8 @@ class Trainer:
             )
         if weights_only is not None and type(weights_only) is not bool:
             raise TypeError("`weights_only` must be a bool or None.")
-        requested_checkpoint_path: str | Path | None = ckpt_path
-        if (
-            requested_checkpoint_path is None
-            and not self._checkpoint_connector.user_managed
-        ):
-            requested_checkpoint_path: str | Path | None = (
-                self.resume_from_checkpoint
-            )
         resume_path: str | Path | None = self._select_checkpoint_path(
-            requested_checkpoint_path,
+            ckpt_path,
             stage="fit",
             model_provided=True,
             ckpt_path_provided=ckpt_path is not None

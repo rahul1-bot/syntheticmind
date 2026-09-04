@@ -124,9 +124,9 @@
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
     7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
 
-| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
+| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
 
-    1. The Trainer checkpoint connector remains the sole full-trajectory coordinator for canonical payload construction, strict validation, Strategy state loading, scheduler and callback restoration, DataModule and precision state, loop continuation, storage dispatch, and synchronization.
+    1. The Trainer checkpoint connector remains the sole trajectory coordinator; stage `ckpt_path` and mutable `trainer.ckpt_path` are the explicit selection controls, while the unused constructor `resume_from_checkpoint` alias and connector accessor were removed.
     2. Schema version 2 records explicit `training` or `weights` artifact identity, resolved Trainer configuration, strict integer progress, typed state collections, metadata, and one canonical random-state snapshot; malformed structure fails before model or optimizer mutation where runtime construction permits.
     3. The foundational Randomness owner and immutable Pydantic snapshot now serve seeding, checkpoints, and worker transfer identically across Python, NumPy, torch CPU, and only the active CUDA or MPS backend; the duplicate launcher state and obsolete SeedManager were removed.
     4. Mid-epoch continuation now persists completed-batch coordinates and epoch-start randomness independently of dataloader-provided state, so ordinary sized dataloaders and stateful iterables both resume the exact stochastic trajectory after post-fit saves and spawned state transfer.
@@ -152,16 +152,16 @@
     4. Trainer remains responsible for composition and side effects, including accelerator selection, torch flag application, seeding, logger and profiler construction, callbacks, loops, and live stage state; four duplicate normalization methods were deleted.
     5. Defaults, invalid types and ranges, fast-development and overfit precedence, barebones policy, duration input, CPU and MPS execution, accumulated spawn, exact stateful continuation, rank-zero DDP logging, callback policy, and sharded model-parallel exact resume pass.
 
-| Architecture Decision | Core Module, Metric, and Hook Surface | Date: 04 September 2026 | Time: 05:39 PM | Name: Ghost |
+| Architecture Decision | Core Module, DataModule, Metric, and Hook Surface | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
 
     1. Rahul confirmed that established machine-learning concepts and their runtime semantics control SyntheticMind architecture before generic software decomposition rules. The three hook families therefore remain explicit framework contracts rather than being folded into one oversized model implementation.
     2. `ModelHooks`, `DataHooks`, and `CheckpointHooks` now preserve the recognized lifecycle vocabulary and no-op extension semantics used by the Trainer and loops. `Module` follows a cooperative initialization order equivalent to the proven Lightning class graph, while concrete overrides are marked only where a parent hook or PyTorch method is actually replaced.
     3. ModelHooks owns hook-level logging admissibility, Module owns metric production and request validation, and the extracted LoggedMetric owns one observation's identity, cadence, value, graph, reduction, and step or epoch computation for its independent loop and logger consumers.
-    4. `DataModule` and `DatasetDataModule` retain preparation, setup, teardown, loader construction, batch transfer, checkpoint state, and direct-dataset construction as one data concept. Dataset and loader inputs now use recursive domain aliases instead of generic `object` annotations.
-    5. Model checkpoint reconstruction remains in `core/saving.py` and accepts canonical schema v2; deployment exporters remain excluded baggage while model construction, hook mutation, strictness, hyperparameter precedence, device mapping, and state application stay executable.
+    4. DataModule and DatasetDataModule retain preparation, setup, teardown, loader construction, batch transfer, state, direct-dataset construction, and the current `load_from_checkpoint` classmethod over constructor hyperparameters plus DataModule state.
+    5. Model and DataModule reconstruction share schema-v2 payload reading and hyperparameter precedence but retain distinct private loaders because only models own configure hooks, strict parameter application, and device mapping.
     6. Every production module now contains zero future annotation imports, conditional type imports, `Any`, `object`, source comments, static methods, module functions, lambdas, and unannotated assignments; all fifty-five established public Module method signatures remain unchanged.
     7. The 1,242-line module and 1,158-line Module class retain an explicit concept-integrity exception because splitting the researcher-facing PyTorch model contract through mixins or forwarding services would destroy extension semantics; every method remains within its hard limit.
-    8. Package import, hook inheritance, log failures, scalar and TorchMetrics views, differentiable gather, runtime access, CPU, MPS, DDP, spawn, checkpoint hydration, optimization, data transfer, exact continuation, and model parallelism pass.
+    8. Package import, hook dispatch, log failures, scalar and TorchMetrics views, differentiable gather, runtime access, CPU, MPS, DDP, spawn, model and DataModule local, file-like, and remote hydration, optimization, exact continuation, and model parallelism pass.
 
 | Architecture Decision | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
 

@@ -146,12 +146,12 @@
     2. ✅ Training limits, batch limits, fast-development, overfit, barebones, gradient, validation, logging, deterministic, sampling, and reload policies have one configuration owner; four duplicate Trainer normalization methods were deleted.
     3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition, while every Trainer assignment is now explicitly annotated.
 
-| Progress Complete | Core Module and Metric Reconstruction | Date: 04 September 2026 | Time: 05:39 PM | Name: Ghost |
+| Progress Complete | Core Module, DataModule, and Metric Reconstruction | Date: 04 September 2026 | Time: 05:55 PM | Name: Ghost |
 
     1. ✅ LoggedMetric moved to its semantic core module with independent loop and logger consumers, while `core.module` explicitly re-exports the same class for compatibility and Module remains the sole public metric-production API.
     2. ✅ Module.log decomposes into request, hook context, reduction, TorchMetrics registration, scalar normalization, and observation registration transitions; all fifty-five public Module signatures remain stable and no method exceeds one hundred lines.
     3. ✅ The complete production tree has zero future imports, conditional type imports, broad `Any` or `object`, source comments, static methods, module functions, lambdas, and unannotated assignments.
-    4. ✅ CPU, MPS, DDP, spawn, scalar and TorchMetrics logging, warning and failure paths, runtime access, differentiable gather, optimizer execution, checkpoint hydration, direct and nested data, exact continuation, and model parallelism pass.
+    4. ✅ CPU, MPS, DDP, spawn, metrics, runtime access, gather, optimizers, model hydration, DataModule local, file-like, remote, override, and state reconstruction, direct and nested data, exact continuation, and model parallelism pass.
 
 | Progress Complete | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
 

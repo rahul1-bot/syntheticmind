@@ -6,7 +6,7 @@
 |---|---|
 | `module.py` | `Module`, the researcher-facing model, stage-step, optimization-access, metric-production, device, and distributed-runtime contract. |
 | `metric.py` | `LoggedMetric`, one live scalar or TorchMetrics observation with naming, cadence, reduction, graph, and distributed semantics. |
-| `datamodule.py` | `DataModule`, the data contract, and `DatasetDataModule`. |
+| `datamodule.py` | `DataModule`, dataset construction, checkpoint reconstruction, and `DatasetDataModule`. |
 | `hooks.py` | The `ModelHooks`, `DataHooks`, and `CheckpointHooks` lifecycle contracts. |
 | `optimizer.py` | Managed optimizer access, accepted `configure_optimizers` declarations, scheduler configuration, and declaration parsing. |
 | `saving.py` | Model reconstruction from canonical SyntheticMind checkpoints and explicit hyperparameter sources. |
@@ -14,7 +14,7 @@
 
 `Trainer` binds these contracts from `../trainer/trainer.py`. Its connectors own accelerator composition, callback composition, data execution, experiment observation, checkpoint trajectories, and signal lifecycle.
 
-`Module` defines forward computation, per-stage steps, optimizer declaration, manual optimization, and metric declaration. `DataModule` defines stage data ownership. `optimizer.py` normalizes live PyTorch optimizers and schedulers returned by the model; SyntheticMind does not invent optimizer or scheduler factory configurations that rename PyTorch algorithms.
+`Module` defines forward computation, per-stage steps, optimizer declaration, manual optimization, and metric declaration. `DataModule` defines stage data ownership and reconstructs constructor hyperparameters plus DataModule state from schema-v2 checkpoints. `optimizer.py` normalizes live PyTorch optimizers and schedulers returned by the model; SyntheticMind does not invent optimizer or scheduler factory configurations that rename PyTorch algorithms.
 
 ## Related Components
 

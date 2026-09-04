@@ -2,7 +2,7 @@ import ast
 import csv
 import inspect
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import IO, cast
 
@@ -10,6 +10,7 @@ import torch
 import yaml
 from torch import nn
 
+from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.storage.filesystem import StoragePath
 from syntheticmind.types import (
     CheckpointDict,
@@ -17,7 +18,8 @@ from syntheticmind.types import (
     HyperparameterDict,
     HyperparameterValue,
     MapLocation,
-    ModelState
+    ModelState,
+    StateDict
 )
 
 __all__: list[str] = []
@@ -124,9 +126,9 @@ class _CheckpointLoader:
         return cast(CheckpointDict, checkpoint_value)
 
     @classmethod
-    def _constructor_arguments[ModelT: nn.Module](
+    def _constructor_arguments[ComponentT: HyperparametersMixin](
         cls,
-        model_class: type[ModelT],
+        model_class: type[ComponentT],
         checkpoint: CheckpointDict,
         hparams_file: str | Path | None,
         overrides: _ConstructorArguments
@@ -249,9 +251,9 @@ class _CheckpointLoader:
         }
 
     @classmethod
-    def _class_key[ModelT: nn.Module](
+    def _class_key[ComponentT: HyperparametersMixin](
         cls,
-        model_class: type[ModelT],
+        model_class: type[ComponentT],
         attribute_name: str
     ) -> str:
         value: HyperparameterValue = getattr(model_class, attribute_name, None)
@@ -369,3 +371,57 @@ class _CheckpointLoader:
             return cast(HyperparameterValue, ast.literal_eval(value))
         except (SyntaxError, ValueError):
             return value
+
+
+class _DataModuleCheckpointLoader:
+    @classmethod
+    def load[DataModuleT: HyperparametersMixin](
+        cls,
+        datamodule_class: type[DataModuleT],
+        checkpoint_path: str | Path | IO[bytes],
+        map_location: MapLocation = None,
+        hparams_file: str | Path | None = None,
+        weights_only: bool | None = None,
+        constructor_overrides: _ConstructorArguments | None = None
+    ) -> DataModuleT:
+        del cls
+        _CheckpointLoader._validate_options(
+            checkpoint_path,
+            hparams_file,
+            None,
+            weights_only
+        )
+        checkpoint: CheckpointDict = _CheckpointLoader._load_payload(
+            checkpoint_path,
+            map_location,
+            weights_only
+        )
+        _CheckpointLoader._validate_schema(checkpoint)
+        overrides: _ConstructorArguments = dict(constructor_overrides or {})
+        constructor_arguments: _ConstructorArguments = (
+            _CheckpointLoader._constructor_arguments(
+                datamodule_class,
+                checkpoint,
+                hparams_file,
+                overrides
+            )
+        )
+        datamodule: DataModuleT = datamodule_class(**constructor_arguments)
+        state_value: CheckpointValue | None = checkpoint.get(
+            datamodule_class.__qualname__
+        )
+        if state_value is None:
+            return datamodule
+        if not isinstance(state_value, Mapping):
+            raise TypeError(
+                f"Checkpoint state for DataModule {datamodule_class.__qualname__!r} "
+                "must be a mapping."
+            )
+        if not all(isinstance(key, str) for key in state_value):
+            raise TypeError("DataModule checkpoint state keys must be strings.")
+        load_state: Callable[[StateDict], None] = cast(
+            Callable[[StateDict], None],
+            getattr(datamodule, "load_state_dict")
+        )
+        load_state(cast(StateDict, state_value))
+        return datamodule

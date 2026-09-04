@@ -551,10 +551,6 @@ class _CheckpointConnector:
         self._path: str | Path | None = checkpoint_path
         self._user_managed: bool = checkpoint_path is not None
 
-    @property
-    def user_managed(self) -> bool:
-        return self._user_managed
-
     def _select_best_path(self, stage: TrainerStage) -> str:
         checkpoint_callbacks: list[ModelCheckpoint] = [
             callback

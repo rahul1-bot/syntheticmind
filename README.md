@@ -18,7 +18,7 @@
 
 ## Contracts
 
-The public surface follows established PyTorch research vocabulary. Models subclass `Module`, which is itself a `torch.nn.Module`, and express behavior through `forward`, `training_step`, `validation_step`, `test_step`, `predict_step`, and `configure_optimizers`. Metrics are emitted through `Module.log` and `Module.log_dict` with explicit step and epoch reduction, logger visibility, and distributed-synchronization semantics. Data behavior is expressed through the `DataModule` methods `prepare_data`, `setup`, `teardown`, and the per-stage dataloader constructors.
+The public surface follows established PyTorch research vocabulary. Models subclass `Module`, which is itself a `torch.nn.Module`, and express behavior through `forward`, `training_step`, `validation_step`, `test_step`, `predict_step`, and `configure_optimizers`. Metrics are emitted through `Module.log` and `Module.log_dict` with explicit step and epoch reduction, logger visibility, and distributed-synchronization semantics. Data behavior is expressed through `DataModule` preparation, setup, teardown, per-stage dataloader construction, state persistence, and checkpoint reconstruction.
 
 `Trainer`, `Module`, `DataModule`, `DatasetDataModule`, and `CombinedLoader` are available from the `syntheticmind` package root. Their implementations remain owned by the semantic modules and subpackages shown above. Nested dataloader composition lives in `syntheticmind.combined_loader`, outside the Trainer connector package, because both model-facing data construction and Trainer stage execution consume it.
 

@@ -7,7 +7,7 @@
 | `callback.py` | `Callback`, the hook surface every callback selectively overrides. |
 | `checkpointing/` | The `ModelCheckpoint` lifecycle, trigger schedule, scalar top-k ranking, and artifact path policy. |
 | `early_stopping.py` | `EarlyStopping`, which stops a run on a monitored metric with patience. |
-| `timer.py` | `TimerCallback`, which enforces wall-time budgets. |
+| `timer.py` | `Timer`, which enforces resumable wall-time budgets. |
 | `finite_value_guard.py` | `FiniteValueGuard`, which rejects non-finite loss before backward and optional non-finite gradients before optimizer stepping. |
 | `weight_averaging.py` | `EMAWeightAveraging`, which tracks resumable exponential moving averages and evaluates under averaged parameters. |
 | `lr_monitor.py` | `LearningRateMonitor`, which records per-group learning rates. |
