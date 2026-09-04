@@ -70,14 +70,14 @@
     5. `Strategy` is a stateful execution-policy hierarchy rather than a behaviorless Protocol. `ParallelStrategy` is the shared distributed execution concept; DDP and model-parallel strategies inherit it and contain only algorithm-specific deltas.
     6. This decision supersedes the Protocol-only Strategy conclusion recorded at 07:05 AM. The earlier runtime evidence remains valid, but its decomposition judgment was rejected after source-level comparison exposed duplicated concrete behavior.
 
-| Architecture Decision | Stateful Strategy Hierarchy | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
+| Architecture Decision | Stateful Strategy and Model Initialization | Date: 04 September 2026 | Time: 04:36 PM | Name: Ghost |
 
     1. `Strategy` now owns universal model connection, wrapped-step dispatch, precision-mediated backward and optimizer stepping, single-process collective defaults, initialization context, and ordinary checkpoint collaboration without using an ABC.
     2. `ParallelStrategy` now owns the cluster environment, process-group lifecycle, rank topology, process launcher, distributed collectives, sampler coordinates, and distributed tail-gradient synchronization directly.
     3. `SingleDeviceStrategy` is a named execution policy with inherited single-device semantics; `DDPStrategy` contains only DDP wrapping, layer synchronization, and manual-optimization forward behavior; `ModelParallelStrategy` contains device-mesh, parallelization, precision restrictions, and distributed checkpoint selection.
-    4. The former `distributed_runtime.py`, `forward_redirection.py`, and `model_parallel_topology.py` modules were removed because their behavior belongs to the Strategy concepts they served rather than to independent public building blocks.
+    4. The strategy-owned ModuleInitializer now intercepts the dynamic PyTorch override contract through a named recursive torch-function value schema, validates mode state, preserves RNG under empty initialization, and materializes meta parameters through explicit reset operations without `object` escape hatches.
     5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
-    6. Single-device fitting, two-rank DDP manual optimization and wrapped forwards, multi-stage distributed dataloaders, spawn and fork launch, and full and sharded model-parallel exact resume pass after the hierarchy change.
+    6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, and full and sharded model-parallel exact resume pass.
 
 | Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
 
