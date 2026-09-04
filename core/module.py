@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import inspect
 import numbers
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -30,7 +31,6 @@ from syntheticmind.core.optimizer import (
 from syntheticmind.core.saving import _CheckpointLoader
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.utilities.model_helpers import is_parameter_in_hook_signature
 from syntheticmind.types import (
     Batch,
     BackwardInputs,
@@ -174,7 +174,7 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
             Callable[..., StepOutput],
             self.validation_step
         )
-        if is_parameter_in_hook_signature(
+        if self._hook_accepts_parameter(
             validation_step,
             "dataloader_idx",
             explicit=True
@@ -780,6 +780,57 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         for param in self.parameters():
             param.requires_grad: bool = True
         return self.train()
+
+    def _capture_training_modes(self) -> dict[str, bool]:
+        return {
+            name: submodule.training
+            for name, submodule in self.named_modules()
+        }
+
+    def _restore_training_modes(
+        self,
+        training_modes: dict[str, bool]
+    ) -> None:
+        name: str
+        submodule: nn.Module
+        for name, submodule in self.named_modules():
+            if name in training_modes:
+                submodule.training = training_modes[name]
+
+    @staticmethod
+    def _hook_accepts_parameter(
+        hook: Callable[..., ModelOutput | None],
+        parameter_name: str,
+        explicit: bool = False,
+        minimum_arguments: int | None = None
+    ) -> bool:
+        parameters: list[inspect.Parameter] = list(
+            inspect.signature(hook).parameters.values()
+        )
+        positional_parameters: list[inspect.Parameter] = [
+            parameter
+            for parameter in parameters
+            if parameter.kind in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD
+            }
+        ]
+        has_named_parameter: bool = any(
+            parameter.name == parameter_name
+            for parameter in positional_parameters
+        )
+        has_variable_arguments: bool = any(
+            parameter.kind is inspect.Parameter.VAR_POSITIONAL
+            for parameter in parameters
+        )
+        return (
+            has_named_parameter
+            or (not explicit and has_variable_arguments)
+            or (
+                minimum_arguments is not None
+                and len(positional_parameters) >= minimum_arguments
+            )
+        )
 
     @override
     def cuda(self, device: int | torch.device | None = None) -> Module:

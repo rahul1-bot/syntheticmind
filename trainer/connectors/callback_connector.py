@@ -10,7 +10,6 @@ from syntheticmind.callbacks.progress_bar import ProgressBarCallback
 from syntheticmind.callbacks.timer import Timer
 from syntheticmind.core.module import Module
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.types import TrainerStage
 
 __all__: list[str] = []
@@ -114,8 +113,8 @@ class _CallbackConnector:
         callback: Callback
         for callback in callback_group:
             if (
-                is_overridden("state_dict", callback, Callback)
-                or is_overridden("load_state_dict", callback, Callback)
+                type(callback).state_dict is not Callback.state_dict
+                or type(callback).load_state_dict is not Callback.load_state_dict
             ):
                 key: str = callback.state_key
                 if key in seen:

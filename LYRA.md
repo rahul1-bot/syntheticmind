@@ -141,3 +141,10 @@
     2. Metric owners declare the requested reduction but receive the selected Strategy's narrow reduction operation at computation time, preserving inward dependency direction.
     3. Callback and persistence gates use Trainer rank state instead of ambient process globals, while collective participation remains symmetric before rank-specific output decisions.
     4. The distributed utility namespace and aliases were removed; the remaining utility evacuation concerns hook inspection, module-mode restoration, and model-summary ownership.
+
+| Strategic Note | Hook and Module State Ownership | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+
+    1. Exact nested training modes now belong to Module and remain restorable both by normal loop completion and by Trainer failure cleanup.
+    2. Hook signature knowledge belongs to Module, while general override discovery belongs beside Trainer hook dispatch; narrow callback and model-parallel cases use direct contract comparison.
+    3. The generic model-helper module, its state holder, and its free functions were deleted without exporting a substitute abstraction family.
+    4. Model-summary computation and rendering are the final behaviors remaining under utilities and form the next concept-first ownership slice.

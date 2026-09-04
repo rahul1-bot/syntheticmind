@@ -8,6 +8,7 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
+from types import CodeType
 from typing import IO, Literal, Never, cast
 
 import torch
@@ -70,7 +71,6 @@ from syntheticmind.storage.filesystem import (
     modified_time,
     normalize_path
 )
-from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.trainer.seed import SeedManager
 from syntheticmind.types import (
     CheckpointDict,
@@ -89,6 +89,8 @@ from syntheticmind.types import (
 __all__: list[str] = ["Trainer"]
 
 type _TeardownFailure = tuple[str, BaseException]
+type _HookOwner = Module | DataModule | DataHooks | ModelHooks
+type _HookCallable = Callable[..., ModelOutput | DataLoaderSource | None]
 
 
 def _resolve_training_limits(
@@ -611,8 +613,7 @@ class Trainer:
         )
         module._current_epoch = 0
         module._global_step = 0
-        module_mode: ModuleMode = ModuleMode()
-        module_mode.capture(module)
+        training_modes: dict[str, bool] = module._capture_training_modes()
         fit_completed: bool = False
 
         try:
@@ -655,7 +656,7 @@ class Trainer:
 
             if (
                 self.limit_train_batches != 0
-                and is_overridden("training_step", module, Module)
+                and self._hook_is_overridden("training_step", module, Module)
             ):
                 self._request_dataloaders("train")
             else:
@@ -692,7 +693,7 @@ class Trainer:
             optimizer_parser: _OptimizerConfigurationParser = (
                 _OptimizerConfigurationParser(
                     module.automatic_optimization,
-                    is_overridden("lr_scheduler_step", module, Module)
+                    self._hook_is_overridden("lr_scheduler_step", module, Module)
                 )
             )
             optimizer_initialization: tuple[
@@ -796,7 +797,7 @@ class Trainer:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not fit_completed:
-                module_mode.restore(module)
+                module._restore_training_modes(training_modes)
             cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "fit")
             module._running_stage = None
             module._current_fx_name = None
@@ -878,8 +879,7 @@ class Trainer:
             dataloaders
         )
 
-        module_mode: ModuleMode = ModuleMode()
-        module_mode.capture(module)
+        training_modes: dict[str, bool] = module._capture_training_modes()
         stage_completed: bool = False
         metrics: list[dict[str, float]] = []
         try:
@@ -910,7 +910,7 @@ class Trainer:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
-                module_mode.restore(module)
+                module._restore_training_modes(training_modes)
             cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "validate")
             module._running_stage = None
             module._current_fx_name = None
@@ -994,8 +994,7 @@ class Trainer:
             dataloaders
         )
 
-        module_mode: ModuleMode = ModuleMode()
-        module_mode.capture(module)
+        training_modes: dict[str, bool] = module._capture_training_modes()
         stage_completed: bool = False
         metrics: list[dict[str, float]] = []
         try:
@@ -1026,7 +1025,7 @@ class Trainer:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
-                module_mode.restore(module)
+                module._restore_training_modes(training_modes)
             cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "test")
             module._running_stage = None
             module._current_fx_name = None
@@ -1108,8 +1107,7 @@ class Trainer:
             dataloaders
         )
 
-        module_mode: ModuleMode = ModuleMode()
-        module_mode.capture(module)
+        training_modes: dict[str, bool] = module._capture_training_modes()
         stage_completed: bool = False
         predictions: list[ModelOutput] | list[list[ModelOutput]] | None = None
         try:
@@ -1145,7 +1143,7 @@ class Trainer:
             self._handle_exception(module, datamodule, exception)
         finally:
             if not stage_completed:
-                module_mode.restore(module)
+                module._restore_training_modes(training_modes)
             cleanup_exception: BaseException | None = self._teardown_stage(module, datamodule, "predict")
             module._running_stage = None
             module._current_fx_name = None
@@ -1235,7 +1233,7 @@ class Trainer:
                 "prepare_data",
                 datamodule.prepare_data
             )
-        if self.is_global_zero and is_overridden(
+        if self.is_global_zero and self._hook_is_overridden(
             "prepare_data",
             module,
             DataHooks
@@ -1292,13 +1290,13 @@ class Trainer:
         )
         source_is_defined: bool = source is not None
         if isinstance(source, DataModule):
-            source_is_defined = is_overridden(
+            source_is_defined = self._hook_is_overridden(
                 "val_dataloader",
                 source,
                 DataModule
             )
         elif isinstance(source, Module):
-            source_is_defined = is_overridden(
+            source_is_defined = self._hook_is_overridden(
                 "val_dataloader",
                 source,
                 DataHooks
@@ -1306,7 +1304,7 @@ class Trainer:
         validation_enabled: bool = (
             self.limit_val_batches != 0
             and module is not None
-            and is_overridden("validation_step", module, Module)
+            and self._hook_is_overridden("validation_step", module, Module)
             and source_is_defined
         )
         if validation_enabled and self._data_connector.total_val_batches is not None:
@@ -1493,8 +1491,63 @@ class Trainer:
         with self.profiler.profile(action_name):
             return hook(*args, **kwargs)
 
+    def _hook_is_overridden(
+        self,
+        method_name: str,
+        instance: _HookOwner,
+        parent: type[_HookOwner]
+    ) -> bool:
+        instance_attribute: _HookCallable | None = cast(
+            _HookCallable | None,
+            getattr(instance, method_name, None)
+        )
+        if instance_attribute is None:
+            return False
+        parent_attribute: _HookCallable | None = cast(
+            _HookCallable | None,
+            getattr(parent, method_name, None)
+        )
+        if parent_attribute is None:
+            raise ValueError(f"{parent.__name__} does not define {method_name}().")
+        instance_callable: _HookCallable = self._unwrap_hook(instance_attribute)
+        parent_callable: _HookCallable = self._unwrap_hook(parent_attribute)
+        instance_code: CodeType | None = cast(
+            CodeType | None,
+            getattr(instance_callable, "__code__", None)
+        )
+        parent_code: CodeType | None = cast(
+            CodeType | None,
+            getattr(parent_callable, "__code__", None)
+        )
+        if instance_code is None or parent_code is None:
+            return instance_callable is not parent_callable
+        return instance_code is not parent_code
+
+    @staticmethod
+    def _unwrap_hook(hook: _HookCallable) -> _HookCallable:
+        unwrapped_hook: _HookCallable = hook
+        while True:
+            wrapped_hook: _HookCallable | None = cast(
+                _HookCallable | None,
+                getattr(unwrapped_hook, "__wrapped__", None)
+            )
+            if wrapped_hook is not None:
+                unwrapped_hook = wrapped_hook
+                continue
+            mock_wrap: _HookCallable | None = cast(
+                _HookCallable | None,
+                getattr(unwrapped_hook, "_mock_wraps", None)
+            )
+            if mock_wrap is not None:
+                unwrapped_hook = mock_wrap
+                continue
+            if isinstance(unwrapped_hook, partial):
+                unwrapped_hook = cast(_HookCallable, unwrapped_hook.func)
+                continue
+            return unwrapped_hook
+
     def _configure_model(self, module: Module) -> None:
-        if not is_overridden("configure_model", module, ModelHooks):
+        if not self._hook_is_overridden("configure_model", module, ModelHooks):
             return
         self._call_module_hook(
             module,

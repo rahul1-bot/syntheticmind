@@ -4,7 +4,6 @@
 
 | Module | Contents |
 |---|---|
-| `model_helpers.py` | Transitional hook inspection and module-mode behavior pending ownership by their lifecycle concepts. |
 | `model_summary.py` | Transitional model inspection behavior pending ownership by the model-summary callback family. |
 
 New optimizer and scheduler construction utilities are prohibited. Research modules return real PyTorch optimizers and schedulers through `configure_optimizers`; core normalizes that declaration and loops execute it.

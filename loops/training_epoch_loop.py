@@ -23,7 +23,6 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
-from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.types import (
     Batch,
     BackwardInputs,
@@ -219,7 +218,11 @@ class TrainingEpochLoop(Loop):
                 self._resume_checkpoint_rng_state = None
 
             dm: DataModule | None = trainer.datamodule
-            if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
+            if dm is not None and self.trainer._hook_is_overridden(
+                "on_before_batch_transfer",
+                dm,
+                DataModule
+            ):
                 batch: Batch = trainer._call_datamodule_hook(
                     dm,
                     "on_before_batch_transfer",
@@ -235,7 +238,11 @@ class TrainingEpochLoop(Loop):
                     batch,
                     dataloader_idx=0
                 )
-            if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
+            if dm is not None and self.trainer._hook_is_overridden(
+                "transfer_batch_to_device",
+                dm,
+                DataModule
+            ):
                 batch = trainer._call_datamodule_hook(
                     dm,
                     "transfer_batch_to_device",
@@ -253,7 +260,11 @@ class TrainingEpochLoop(Loop):
                     device,
                     dataloader_idx=0
                 )
-            if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
+            if dm is not None and self.trainer._hook_is_overridden(
+                "on_after_batch_transfer",
+                dm,
+                DataModule
+            ):
                 batch = trainer._call_datamodule_hook(
                     dm,
                     "on_after_batch_transfer",

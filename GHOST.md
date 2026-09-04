@@ -107,16 +107,6 @@
     5. Model-parallel checkpoint internals now occupy the semantic `strategies/model_parallel_checkpointing/` subpackage, preserving the established `ModelParallelStrategy` import and class identity while reducing the top-level strategy package from the topology-review threshold to five direct modules.
     6. Full and sharded uninterrupted-versus-resumed runs produce bit-identical three-step model state, and distributed failure injection confirms that shard, metadata, and pointer failures preserve the previously published generation on both ranks.
 
-| Architecture Decision | Structural Strategy and Launcher Contracts | Date: 04 September 2026 | Time: 07:05 AM | Name: Ghost |
-
-    1. The complete current root workspace `code-guidelines.md` was reread before the strategy rewrite, and the abandoned ABC-based draft was rejected before commit because it combined contract, shared state, and default lifecycle behavior.
-    2. `Strategy`, `ParallelStrategy`, `StrategyCheckpoint`, `CheckpointIO`, and the launcher-facing `LaunchStrategy` are structural Protocol contracts with current multiple implementations or consumers. Concrete project implementations inherit their contracts explicitly and mark implemented methods with `@override`.
-    3. `ModelParallelStrategy` no longer inherits `DDPStrategy`. DDP owns replica wrapping, model parallelism owns device-mesh topology and distributed state, and both compose the process-group resource and wrapped-step redirection algorithm without a generic mutable strategy context.
-    4. Checkpoint reading, state restoration, optimizer restoration, storage selection, and teardown now cross one strategy-owned checkpoint capability. Local storage uses the selected `CheckpointIO`; model-parallel storage owns full or sharded distributed state and atomic generation publication.
-    5. Process groups are process-scoped resources and therefore survive individual fit, validation, test, and prediction teardown. Failure handling and process exit release the owned resource, preventing both sequential-stage rendezvous failure and invalidation of live DTensor meshes.
-    6. The complete `strategies/` Python package now contains no `Any`, generic `object`, ABC, `abstractmethod`, module-level function, custom `__call__`, source comment, docstring, or terminal trailing comma. Existing `TYPE_CHECKING` blocks remain exactly preserved as required by the governing guideline.
-    7. Two-rank automatic and manual optimization, all-rank and any-rank decisions, validation, test, prediction, forward-hook traversal, checkpoint selection, full and sharded exact resume, failure injection, subprocess, spawn, fork, signal propagation, asynchronous checkpoint snapshots, Python compilation, and direct diff review establish the accepted runtime path without a linter or static type checker.
-
 | Architecture Decision | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
 
     1. `Accelerator`, `ClusterEnvironment`, and `LayerSync` are now contract-only runtime-checkable Protocols because each is a current Trainer plugin or substitution boundary. CPU, CUDA, MPS, local-cluster, and synchronized-batch-normalization implementations inherit their contracts explicitly and mark all implementations with `@override`.
@@ -291,3 +281,11 @@
     3. Logged metrics and metric accumulators receive the Strategy's bound reduction operation at their computation boundary. This supplies only the required capability and avoids a circular core-to-Strategy dependency or a synthetic host Protocol.
     4. The former `DistributedUtils` namespace and its seven duplicate free-function entrypoints were deleted without a replacement utility module. Process-group teardown remains exclusively owned by `ParallelStrategy`.
     5. Local reduction validation, two-rank sum and mean, standard distributed mean, sum, minimum and maximum metrics, TorchMetrics, tensor graph state, progress rendering, checkpoint selection, callback artifacts, spawned metric views, and sharded model parallelism pass through Strategy ownership.
+
+| Architecture Decision | Hook Inspection and Module Mode Ownership | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+
+    1. Exact recursive train and evaluation mode snapshots now belong to `Module`, the object whose nested PyTorch state is captured and restored by Trainer stages, evaluation and prediction loops, and model-summary forwarding.
+    2. Step-signature inspection now belongs to `Module` because it adapts the recognized validation, test, and prediction hook contracts. Trainer owns inherited-hook override discovery beside centralized hook dispatch and preserves wrapped, mocked, and partial callable semantics.
+    3. Callback persistence admission uses direct class-contract comparison, while model parallelism compares the concrete `configure_model` implementation against `ModelHooks`; neither narrow case requires the complete generic inspection algorithm.
+    4. The former `ModuleMode` data holder and three module-level helper functions were deleted with `utilities/model_helpers.py`. No new class, Protocol, module, public entrypoint, conditional import, or generic annotation replaced them.
+    5. Inherited and overridden hooks, decorated and partial callables, DataModule transfer precedence, batch-index adaptation, exact mixed child modes on success and failure, model-summary forwarding, callback state, spawned DDP, and sharded model parallelism pass after consolidation.

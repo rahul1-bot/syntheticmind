@@ -53,13 +53,6 @@
     5. ✅ Ordinary checkpoint loading, callback composition, DDP multiple-loader execution, distributed metric reduction, local or MPS gathering, meta-parameter materialization, and default prediction forward-hook dispatch pass after the change.
     6. ✅ Existing source comments remain byte-for-byte preserved in every modified surviving file, and no linter or static type checker was invoked.
 
-| Progress Active | Atomic Sharded Checkpoint Publication | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
-
-    1. Sharded checkpoint overwrite still deletes the previous directory before all new shards and metadata are durably committed.
-    2. The next bounded implementation must stage a complete generation, publish it through one atomic commit point, retain the previous generation until publication succeeds, reject incomplete generations, and clean failed staging data without corrupting the readable checkpoint.
-    3. Verification must cover first publication, overwrite, concurrent-reader visibility at the commit boundary, injected shard or metadata failure, recovery of the previous generation, full-checkpoint compatibility, and two-rank resume.
-    4. Model-parallel strategy inheritance, broader dependency direction, and remaining Trainer capability parity remain queued after the durability contract is accepted.
-
 | Progress Complete | Atomic Sharded Checkpoint Publication | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
 
     1. ✅ Sharded checkpoint writes use immutable UUIDv7 generations and a strict versioned pointer as the only publication boundary.
@@ -69,13 +62,6 @@
     5. ✅ Full and sharded two-rank baseline, interrupted, and resumed runs reach the same global step and produce bit-identical final model state.
     6. ✅ Two-rank injected distributed shard, Trainer-metadata, and pointer-publication failures preserve the active generation and causal error on the failing rank.
     7. ✅ The checkpoint-generation schema rejects unknown versions, malformed UUIDs, and extra fields; all new classes and modules remain within hard structural budgets with no module-level functions, terminal trailing commas, new comments, or static-analysis execution.
-
-| Progress Active | Strategy Ownership and Distributed Execution | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
-
-    1. `ModelParallelStrategy` currently inherits `DDPStrategy` even though tensor or fully sharded model parallelism does not satisfy the DDP wrapping contract; shared process-launch and collective behavior requires an honest parallel-strategy owner.
-    2. DDP duplicates forward-redirection logic and bypasses the wrapper during validation, testing, and prediction, while boolean decision reduction exposes logical-OR semantics where the standard contract distinguishes all-rank and any-rank consensus.
-    3. The next bounded phase must establish the shared parallel strategy boundary, preserve the public DDP and model-parallel classes, route every stage through the correct wrapper call path, and retain launcher, collective, checkpoint, precision, and failure behavior.
-    4. Verification must include two-rank automatic and manual optimization, validation, test, prediction, buffer and forward-hook participation, all-rank and any-rank decisions, signal propagation, full and sharded model-parallel resume, and existing launcher modes.
 
 | Progress Complete | Strategy Ownership and Distributed Execution | Date: 04 September 2026 | Time: 07:05 AM | Name: Ghost |
 
@@ -88,13 +74,6 @@
     7. ✅ Subprocess, spawn, fork, and direct external launch modes pass; SIGTERM reaches the local worker group and leaves no surviving probe process.
     8. ✅ Full and sharded model-parallel baseline, interrupted, and resumed runs remain bit-identical, distributed failure injection preserves the active generation, asynchronous storage snapshots preserve pre-mutation tensors, and Python compilation and diff review pass without static-analysis tools.
 
-| Progress Active | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 07:05 AM | Name: Ghost |
-
-    1. Accelerator, precision, cluster-environment, and layer-synchronization modules remain the immediate inward dependencies of the reconstructed strategy boundary and still contain historical abstract bases, broad annotations, duplicated defaults, or inheritance-driven coupling.
-    2. The next bounded phase must trace device discovery and setup, precision conversion and optimization, cluster topology mutation, and layer synchronization through Trainer and Strategy before changing their contracts.
-    3. Any Protocol must have current interchangeable implementations or current unrelated consumers; concrete behavior must remain on the natural accelerator or plugin owner rather than migrating into another generic runtime object.
-    4. Verification must cover CPU and MPS device resolution, unavailable CUDA rejection, true and mixed precision contexts, optimizer scaling and clipping, plugin conflict detection, cluster rank topology, synchronized batch normalization, launch modes, checkpoints, and strategy regressions.
-
 | Progress Complete | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
 
     1. ✅ Accelerator, cluster-environment, layer-synchronization, and checkpoint storage extension points use earned structural Protocols with explicit concrete implementations and no shared placeholder lifecycle.
@@ -105,13 +84,6 @@
     6. ✅ CPU topology, explicit and all-device GPU parsing, MPS training, unavailable CUDA rejection, CPU true and mixed precision, layer-sync state round trip, plugin conflicts, direct DDP, spawn DDP, and local model-parallel execution pass.
     7. ✅ Accelerator, plugin, and precision modules remain within hard class and module limits and contain no `Any`, generic `object`, ABC, abstract method, module-level function, custom `__call__`, source prose, or terminal trailing comma.
 
-| Progress Queued | Optimizer and Training Closure Ownership | Date: 04 September 2026 | Time: 07:21 AM | Name: Ghost |
-
-    1. `core/optimizer.py`, the training epoch loop, and manual-optimization entry points still contain a module-level no-op closure, a custom callable closure object, broad closure and keyword annotations, dynamic optimizer-class mutation, and duplicated step ownership.
-    2. The next bounded phase must preserve PyTorch optimizer and scheduler vocabulary while assigning closure execution, hook order, gradient scaling, manual stepping, scheduler compilation, and managed optimizer state to explicit natural owners.
-    3. Callable-object removal must not replace optimizer closures with raw functions; bound verb methods must satisfy PyTorch closure inputs while the owning object retains outputs and lifecycle state.
-    4. Verification must cover automatic and manual optimization, multiple optimizers, accumulation tails, gradient clipping, mixed precision, closure return semantics, scheduler intervals and plateau monitoring, checkpoint resume, DDP synchronization, and launcher transfer.
-
 | Progress Complete | Concept-First Strategy Reconstruction | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
 
     1. ✅ Rahul authorized SyntheticMind-specific concept integrity to control topology ahead of generic structural budgets, and the rejected uncommitted optimizer split was removed before reconstruction.
@@ -119,13 +91,6 @@
     3. ✅ `SingleDeviceStrategy`, `DDPStrategy`, and `ModelParallelStrategy` now express only their selected training-policy deltas, eliminating three implementation-oriented strategy modules and the former concrete-method duplication.
     4. ✅ Single-device fitting, two-rank DDP manual optimization, wrapped forward-hook execution, all-rank and any-rank consensus, multi-stage distributed dataloaders, spawn, fork, and full and sharded model-parallel uninterrupted-versus-resumed trajectories pass.
     5. ✅ Python compilation, whitespace validation, inheritance inspection, assignment review, and direct source review pass without invoking a linter or static type checker.
-
-| Progress Active | Trainer Connector Reconstruction | Date: 04 September 2026 | Time: 09:00 AM | Name: Ghost |
-
-    1. Trainer construction and stage execution currently mix accelerator, strategy, precision, plugin, data, callback, checkpoint, metric, signal, profiler, and teardown composition inside one oversized `core/trainer.py` module.
-    2. The next bounded phase must create the semantic `trainer/` package and extract only complete connector responsibilities, beginning with accelerator topology because `DeviceTopology`, `PluginResolver`, `PrecisionResolver`, and Trainer resolution methods currently fragment one compatibility decision.
-    3. The public `Trainer` identity and stage entrypoints must remain stable while internal imports migrate from `core.trainer`; transitional re-export façades are prohibited because compatibility preservation is not required for this private ground-up refactor.
-    4. Verification must cover accelerator and strategy selection, plugin conflicts, CPU and MPS placement, unavailable CUDA rejection, direct and launched distributed execution, precision compatibility, checkpoint plugin injection, and existing stage regressions.
 
 | Progress Complete | Accelerator Connector Reconstruction | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
 
@@ -147,26 +112,12 @@
     2. ✅ Conditional type imports and generic object state were removed while nested handler registration, restoration, worker termination, and serialization behavior remained intact.
     3. ✅ Spawn execution and a live SIGTERM probe confirm propagation, expected interruption completion, and owned-process cleanup.
 
-| Progress Active | Data Connector Reconstruction | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
-
-    1. Trainer currently owns data source attachment, DataModule binding, data preparation, dataloader requests, limits, distributed and unrepeated sampler replacement, overfit behavior, loader reconstruction, and reload cadence across one large method region.
-    2. The next bounded phase must move this vertical runtime slice into `trainer/connectors/data_connector.py` without changing direct-dataloader, model-owned, DataModule-owned, multiple-loader, stateful-loader, distributed, or prediction-order behavior.
-    3. `CombinedLoader` and batch-limit placement must be decided from the resulting data-flow concept rather than moved mechanically during the connector extraction.
-    4. Verification must cover all three data ownership sources, nested loaders, combination modes, worker settings, batch limits, overfit batches, reload cadence, stateful continuation, DDP sampler partitioning, and unrepeated distributed prediction.
-
 | Progress Complete | Data Connector Reconstruction | Date: 04 September 2026 | Time: 09:26 AM | Name: Ghost |
 
     1. ✅ One data connector now owns source selection, factory invocation, nested combination, limits, reload state, overfit determinism, distributed sampler injection, unrepeated prediction partitioning, and DataLoader reconstruction.
     2. ✅ Loops, progress reporting, launcher result transfer, checkpoint continuation, and Trainer public loader views consume connector-owned prepared loaders and totals without duplicate Trainer storage.
     3. ✅ The rewritten connector contains no broad annotations, free functions, source prose, custom callable object, or unannotated assignment; its explicit concept-integrity size exception is documented.
     4. ✅ Module, DataModule, direct, nested, stateful, persistent-worker, overfit, limited, reloaded, DDP, spawn, fork, prediction, and model-parallel execution paths pass.
-
-| Progress Active | Logger Connector Reconstruction | Date: 04 September 2026 | Time: 09:26 AM | Name: Ghost |
-
-    1. Metric routing currently spans Module logging buffers, Trainer callback and logger mappings, loop dispatch methods, metric accumulators, progress callbacks, and logger emission without one explicit composition owner.
-    2. The next bounded phase must preserve tensor-versus-scalar boundaries, step and epoch routing, distributed reduction, multiple-dataloader identity, sanity isolation, progress views, callback monitoring, and logger cadence while establishing the logger connector.
-    3. Metric computation remains with the metric owner and loop lifecycle; the connector owns collection views, reset boundaries, and external logger emission rather than inventing a second logging API.
-    4. Verification must cover standard logging, TorchMetrics, distributed reduction, multiple loaders, launcher transfer, checkpoint monitors, progress views, tensor state, and logger output.
 
 | Progress Complete | Logger Connector Reconstruction | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
 
@@ -175,26 +126,12 @@
     3. ✅ Callback, logger, and progress views retain distinct tensor or scalar contracts and survive worker-to-parent state transfer without sanity-stage leakage.
     4. ✅ Local, CSV, hyperparameter, distributed, TorchMetrics, DDP, spawn, fork, progress, and launcher-transfer verification passes.
 
-| Progress Active | Checkpoint Connector Reconstruction | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
-
-    1. Checkpoint path selection, full-trajectory assembly, hook sequencing, restoration, callback policy, Strategy state representation, storage I/O, and continuation state are currently divided across Trainer, `CheckpointState`, Strategy checkpoint components, callbacks, and plugins.
-    2. The next bounded phase must establish the Trainer checkpoint connector as the only full-trajectory coordinator while preserving Strategy-specific model and optimizer state semantics and `CheckpointIO` storage ownership.
-    3. The behavior-rich `state/checkpoint_state.py` and the Strategy-local class named `_CheckpointConnector` must lose their competing connector identities; model-parallel sharded publication remains an independent persistence mechanism only where distributed state requires it.
-    4. Verification must cover full and weights-only save, best and last selection, strict and relaxed restore, optimizer and scheduler continuation, callbacks, DataModule, precision, loops, random state, stateful loaders, async I/O, full and sharded model parallelism, failure atomicity, and launchers.
-
 | Progress Complete | Checkpoint Connector Reconstruction | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
 
     1. ✅ One Trainer connector now owns checkpoint selection, schema, payload assembly, component restoration, random streams, loop and loader continuation, storage dispatch, and synchronization.
     2. ✅ The former checkpoint state namespace and Strategy checkpoint-connector identity were removed; Strategy checkpoint representation and storage I/O remain subordinate boundaries with distinct semantics.
     3. ✅ Checkpoints use one strict schema version and canonical field set without duplicated legacy aliases, while weights-only artifacts omit optimizer, scheduler, callback, precision, and random state.
     4. ✅ Best, last, user-managed, asynchronous, stateful-loader, DDP launcher, full model-parallel, sharded model-parallel, invalid-schema, and failure-atomic publication paths pass.
-
-| Progress Active | Optimization Execution Reconstruction | Date: 04 September 2026 | Time: 09:51 AM | Name: Ghost |
-
-    1. `core/optimizer.py` still mixes model-facing optimizer vocabulary, configuration parsing, a managed wrapper, mock optimizer behavior, module functions, a callable closure dependency, dynamic class mutation, and broad annotations.
-    2. The training epoch loop still owns automatic closure construction, manual backward, gradient accumulation, optimizer stepping, clipping, and scheduler cadence in one oversized class rather than recognized automatic and manual optimization modes.
-    3. The next phase must keep `core/optimizer.py` as the model-facing optimizer contract and place execution under `loops/optimization/automatic.py` and `manual.py`, with Strategy controlling setup order and precision controlling numerical stepping.
-    4. Verification must cover closure semantics, automatic and manual optimization, multiple optimizers, accumulation tails, clipping, mixed precision, step and plateau schedulers, checkpoint continuation, DDP synchronization, spawn, fork, and model parallelism.
 
 | Progress Complete | Optimization Execution Reconstruction | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
 
@@ -203,25 +140,11 @@
     3. ✅ Dynamic optimizer subclassing, generic attribute forwarding, free optimizer functions, dead factory configurations, utility builders, broad closure values, custom callable objects, and optimizer-only Trainer Protocols were removed.
     4. ✅ Automatic, managed manual, multiple optimizer, DDP manual, LBFGS closure, accumulation tail, clipping, bf16 mixed precision, step scheduler, plateau scheduler, invalid configuration, spawn, fork, and exact full or sharded model-parallel resume paths pass.
 
-| Progress Active | Canonical Trainer Package Migration | Date: 04 September 2026 | Time: 10:09 AM | Name: Ghost |
-
-    1. The public Trainer remains physically located in `core/trainer.py` even though its accelerator, callback, data, logger, checkpoint, and signal composition boundaries now live under `trainer/connectors/`.
-    2. The next phase must move Trainer to `trainer/trainer.py`, move `TrainerState` to `trainer/states.py`, update all production dependency directions, and remove the top-level `state/` package without leaving a compatibility re-export façade.
-    3. Existing conditional annotation blocks may update their Trainer import path under the explicit project topology authority, but no new `TYPE_CHECKING` occurrence may be introduced.
-    4. Verification must cover production imports, Module and DataModule back-references, callbacks, loops, launchers, serialization, subprocess, spawn, fork, checkpoints, logging, and model parallelism through the canonical path.
-
 | Progress Complete | Canonical Trainer Package Migration | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
 
     1. ✅ Trainer and Trainer state moved to their canonical `trainer/` modules, while the former core Trainer module and top-level state package were removed without compatibility façades.
     2. ✅ All production and verification imports now use the canonical paths, including every existing conditional annotation block and serialized launcher dependency.
     3. ✅ Direct imports, callbacks, metrics, subprocess DDP, spawn, fork, stateful checkpoint continuation, and sharded model parallelism pass after relocation.
-
-| Progress Active | Core Research Surface Reconstruction | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
-
-    1. `core/` still contains standalone checkpoint reconstruction, TorchScript and ONNX export services, TensorRT compiler services, a wide multiple-inheritance Module, broad data contracts, and oversized hook and hyperparameter implementations.
-    2. The next phase must preserve only researcher-facing model, data, optimizer, saving, hook, and hyperparameter concepts and remove deployment or compatibility baggage that is not part of the training harness objective.
-    3. Standalone `load_from_checkpoint` remains only if its model-hydration semantics justify residence in `saving.py`; TorchScript, ONNX, and TensorRT convenience surfaces are removed unless an active training requirement proves otherwise.
-    4. Verification must cover Module inheritance and `forward`, all stage steps, DataModule ownership, hook dispatch, optimizer declarations, checkpoint hydration if retained, batch transfer, logging, callbacks, launchers, and model parallelism.
 
 | Progress Complete | Core Research Surface Reconstruction | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
 
@@ -287,9 +210,17 @@
     4. ✅ `utilities/distributed.py`, its classmethod namespace, and all free aliases were deleted; no old production or ignored verification import remains.
     5. ✅ Local validation, direct two-rank Strategy reduction, standard distributed scalar reductions, TorchMetrics, graph state, callback artifacts, progress rendering, checkpoint selection, spawned metric views, and sharded model parallelism pass.
 
-| Progress Active | Hook Inspection and Module Mode Ownership | Date: 04 September 2026 | Time: 12:04 PM | Name: Ghost |
+| Progress Complete | Hook Inspection and Module Mode Ownership | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
 
-    1. `utilities/model_helpers.py` still combines inherited-hook detection, signature inspection, callable unwrapping, and recursive model-mode capture under one generic helper name.
-    2. The next bounded phase must determine whether hook inspection belongs with the hook lifecycle and whether exact nested module-mode restoration belongs with evaluation and prediction loops.
-    3. Relocation must remove module-level functions and generic naming without fabricating stateless wrapper classes, duplicating hook entrypoints, or altering override discovery for user subclasses.
-    4. Verification must cover inherited and direct overrides, wrapped callables, required hook parameters, exact mixed child-module mode restoration, failure cleanup, callbacks, and every stage transition.
+    1. ✅ Module now owns exact nested training-mode capture and restoration plus step-hook signature adaptation; Trainer owns general inherited-hook discovery beside hook dispatch.
+    2. ✅ Callback persistence and model-parallel configuration use direct narrow contract comparisons rather than importing the general discovery algorithm.
+    3. ✅ `utilities/model_helpers.py`, `ModuleMode`, and all module-level inspection functions were deleted without a replacement class, Protocol, module, compatibility alias, or generic annotation.
+    4. ✅ Inherited, overridden, decorated, partial, and absent hooks; DataModule transfer precedence; batch-index adaptation; mixed child modes; success and failure cleanup; callback state; and model-summary forwarding pass locally.
+    5. ✅ Spawned DDP callback configuration and runtime state plus sharded model-parallel configuration pass through the consolidated owners.
+    6. ✅ Stale Active and Queued ledger entries whose matching Complete records already existed were removed during mandatory ledger consolidation.
+
+| Progress Active | Model Summary Ownership | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+
+    1. `utilities/model_summary.py` is the final executable utility module and mixes layer inspection, forward-hook measurement, formatting, terminal output, count conversion, and public free functions.
+    2. The next bounded phase must preserve model introspection and callback extension semantics while moving computation and rendering to the model-summary callback family without creating a generic formatting or utility package.
+    3. The public `ModelSummary` callback, `RichModelSummary`, forward-shape capture, parameter accounting, FLOP accounting, exact model and random state restoration, and rank-zero presentation require direct verification before deleting `utilities/`.

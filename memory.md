@@ -242,33 +242,12 @@
     3. Launcher policy and launcher mechanisms form one distributed-systems concept. Keeping the policy module beside Strategy while its subprocess and multiprocessing implementations live in `launchers/` makes ownership harder to infer and creates an artificial package boundary.
     4. Relocation verification must include importable spawned workers, subprocess workers, Strategy serialization, optional precision adapters, and checkpoint wrappers because local construction cannot expose stale serialized module paths.
 
-| Memory | Utility Modules Conceal Framework Ownership | Date: 04 September 2026 | Time: 11:14 AM | Name: Ghost |
+| Memory | Utility Evacuation Ownership Test | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
 
-    1. Randomness configuration changes with Trainer run construction, console rendering changes with Trainer lifecycle observation, metric accumulation changes with logger reduction semantics, and model materialization changes with Strategy topology. None is a generic utility concern.
-    2. A one-consumer helper module should be deleted when it duplicates a native framework operation, or moved beside its natural owner when it carries reusable state or a complete mechanism used by that owner.
-    3. Import relocation is incomplete until spawned workers and distributed strategies deserialize the moved class successfully. Compilation and local unit behavior alone cannot prove a process-boundary move.
-
-| Memory | Tensor Traversal Belongs With Its Operation | Date: 04 September 2026 | Time: 11:18 AM | Name: Ghost |
-
-    1. Generic recursive traversal is not automatically an independent concept. When one operation is the sole consumer, the traversal remains a private method on that operation's natural owner.
-    2. Batch device placement is shared by the data-hook contract and prediction collection, so it earns a precise core data-transfer module. Collective input conversion is used only by `Module.all_gather` and therefore does not earn a parallel module.
-    3. Nested collection preservation must be verified across local and distributed execution because named tuples, process groups, scalar tensorization, and worker serialization can fail independently.
-
-| Memory | Execution Context Is Loop State | Date: 04 September 2026 | Time: 11:19 AM | Name: Ghost |
-
-    1. Inference-mode selection is not a generic context-manager utility when its choice depends on evaluation lifecycle and distributed backend constraints. The shared Loop owner is the narrowest concept serving validation, testing, and prediction.
-    2. Process-wide PyTorch determinism and benchmark flags are run configuration side effects. Trainer construction must validate and apply them before model execution so there is one visible owner and no alternate function entrypoint.
-
-| Memory | Checkpoint Transport Owns Serialization | Date: 04 September 2026 | Time: 11:22 AM | Name: Ghost |
-
-    1. Atomic file replacement, remote transaction boundaries, map location, weights-only loading, and payload validation are checkpoint transport behavior and belong on `TorchCheckpointIO` rather than free persistence functions.
-    2. Model-parallel metadata may reuse the ordinary checkpoint transport while distributed tensor shards retain their specialized store. Composition preserves the difference between metadata serialization and distributed state publication without duplicating either lifecycle.
-    3. Failure injection must prove that a metadata write or active-generation publication failure cannot replace the preceding durable sharded generation.
-
-| Memory | Filesystem Is Infrastructure, Not Utility | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
-
-    1. Protocol-aware paths, binary and text resources, artifact staging, and remote transactions constitute one external storage boundary even when many framework concepts consume it.
-    2. A shared boundary belongs in a precise top-level package when no single checkpoint, logger, profiler, or Trainer consumer owns its complete lifecycle.
+    1. A generic helper must move to the narrowest existing owner whose lifecycle, state, or external boundary gives the behavior meaning; one-consumer traversals remain private methods and dead native-operation façades are deleted.
+    2. Run configuration belongs to Trainer, loop execution contexts belong to Loop, topology-sensitive materialization belongs to Strategy, metric routing belongs to the logger connector, and recursive batch placement belongs to the data-transfer hook boundary.
+    3. Checkpoint serialization and atomic transport belong to `CheckpointIO`, distributed shards belong to model-parallel checkpointing, and protocol-aware paths shared by several artifact owners justify the explicit storage infrastructure package.
+    4. Compilation and local behavior cannot prove relocation across a process boundary; spawned workers, distributed strategies, persistence reload, and failure recovery are selected according to the moved concept.
 
 | Memory | Dependency-Neutral Framework Contracts | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
 
@@ -292,3 +271,11 @@
     3. Passing one bound reduction method into inward metric code avoids both a circular dependency on concrete Strategy and an oversized host contract containing unrelated Trainer behavior.
     4. Rank-zero presentation and persistence gates should read the Trainer's selected Strategy, while collective participation must remain symmetric across ranks before any rank-specific return.
     5. A utility namespace that duplicates Strategy ranks and collectives creates two authorities and free-function aliases; deletion is safer than relocation once every real consumer already carries Trainer or Strategy.
+
+| Memory | Hook Knowledge Belongs With Lifecycle Owners | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+
+    1. Recursive model mode is live `Module` state, not an independent value object; capture and restore operations belong on Module and preserve each nested submodule's exact training flag rather than only the root mode.
+    2. Signature inspection belongs with the model hook being adapted, while override discovery belongs with Trainer's centralized dispatch decisions. A global helper creates a second hidden hook authority.
+    3. Narrow contract checks should stay narrow: callback persistence can compare concrete class methods and model parallelism can compare `configure_model` against its established hook base without importing a generic inspection subsystem.
+    4. Wrapped and partial callable unwrapping remains necessary for general Trainer dispatch, but it does not justify a public function, stateless inspector class, Protocol, or utility module.
+    5. Mode restoration requires both loop-level normal completion and Trainer-level failure recovery because stage setup can fail before a loop gains control.

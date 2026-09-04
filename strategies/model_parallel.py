@@ -19,7 +19,6 @@ from syntheticmind.strategies.model_parallel_checkpointing.checkpoint import (
 )
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.exceptions import MisconfigurationError
-from syntheticmind.utilities.model_helpers import is_overridden
 from syntheticmind.strategies.model_initialization import _ModuleInitializer
 
 __all__: list[str] = ["ModelParallelStrategy"]
@@ -68,7 +67,7 @@ class ModelParallelStrategy(ParallelStrategy):
     def setup(self, model: nn.Module, device: torch.device) -> nn.Module:
         if not isinstance(model, Module):
             raise TypeError("ModelParallelStrategy requires a SyntheticMind Module.")
-        if not is_overridden("configure_model", model, ModelHooks):
+        if type(model).configure_model is ModelHooks.configure_model:
             raise TypeError(
                 "ModelParallelStrategy requires Module.configure_model() to apply "
                 "its parallelization plan."

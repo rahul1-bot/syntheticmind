@@ -51,11 +51,6 @@ from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
-from syntheticmind.utilities.model_helpers import (
-    ModuleMode,
-    is_overridden,
-    is_parameter_in_hook_signature
-)
 from syntheticmind.types import Batch, RunningStage, StepOutput
 
 if TYPE_CHECKING:
@@ -164,8 +159,7 @@ class EvaluationLoop(Loop):
         include_dataloader_idx: bool = sequential and num_dataloaders > 1
         self._verify_dataloader_idx_requirements(module, include_dataloader_idx)
 
-        module_mode: ModuleMode = ModuleMode()
-        module_mode.capture(module)
+        training_modes: dict[str, bool] = module._capture_training_modes()
 
         if self.stage == "validate":
             trainer._call_module_hook(
@@ -261,7 +255,11 @@ class EvaluationLoop(Loop):
             )
             batch: Batch = trainer.precision_plugin.convert_input(batch)
             dm: DataModule | None = trainer.datamodule
-            if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
+            if dm is not None and trainer._hook_is_overridden(
+                "on_before_batch_transfer",
+                dm,
+                DataModule
+            ):
                 batch: Batch = trainer._call_datamodule_hook(
                     dm,
                     "on_before_batch_transfer",
@@ -277,7 +275,11 @@ class EvaluationLoop(Loop):
                     batch,
                     dataloader_idx=dataloader_idx
                 )
-            if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
+            if dm is not None and trainer._hook_is_overridden(
+                "transfer_batch_to_device",
+                dm,
+                DataModule
+            ):
                 batch = trainer._call_datamodule_hook(
                     dm,
                     "transfer_batch_to_device",
@@ -295,7 +297,11 @@ class EvaluationLoop(Loop):
                     device,
                     dataloader_idx=dataloader_idx
                 )
-            if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
+            if dm is not None and trainer._hook_is_overridden(
+                "on_after_batch_transfer",
+                dm,
+                DataModule
+            ):
                 batch = trainer._call_datamodule_hook(
                     dm,
                     "on_after_batch_transfer",
@@ -320,13 +326,13 @@ class EvaluationLoop(Loop):
                 if hook_dataloader_idx is None
                 else (batch, batch_idx, hook_dataloader_idx)
             )
-            step_hook: object = (
+            step_hook: Callable[..., StepOutput] = (
                 module.validation_step
                 if self.stage == "validate"
                 else module.test_step
             )
             step_arguments: tuple[object, ...] = batch_hook_arguments
-            if not is_parameter_in_hook_signature(
+            if not module._hook_accepts_parameter(
                 step_hook,
                 "batch_idx",
                 minimum_arguments=2
@@ -492,14 +498,18 @@ class EvaluationLoop(Loop):
                 "on_validation_end",
                 module.on_validation_end
             )
-            if is_overridden("on_validation_model_train", module, Module):
+            if trainer._hook_is_overridden(
+                "on_validation_model_train",
+                module,
+                Module
+            ):
                 trainer._call_module_hook(
                     module,
                     "on_validation_model_train",
                     module.on_validation_model_train
                 )
             else:
-                module_mode.restore(module)
+                module._restore_training_modes(training_modes)
         else:
             self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
@@ -532,14 +542,18 @@ class EvaluationLoop(Loop):
                 "on_test_end",
                 module.on_test_end
             )
-            if is_overridden("on_test_model_train", module, Module):
+            if trainer._hook_is_overridden(
+                "on_test_model_train",
+                module,
+                Module
+            ):
                 trainer._call_module_hook(
                     module,
                     "on_test_model_train",
                     module.on_test_model_train
                 )
             else:
-                module_mode.restore(module)
+                module._restore_training_modes(training_modes)
 
         module._reset_logged_metrics()
         trainer._raise_if_sigterm()

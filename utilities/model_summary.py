@@ -16,7 +16,6 @@ from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.hooks import RemovableHandle
 
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.model_helpers import ModuleMode
 from syntheticmind.types import Batch
 
 if TYPE_CHECKING:
@@ -246,8 +245,7 @@ class ModelSummary:
     def _forward_example_input(self) -> None:
         example_input: Batch = cast(Batch, self._model.example_input_array)
         trainer: Trainer | None = self._model._trainer
-        module_mode: ModuleMode = ModuleMode()
-        module_mode.capture(self._model)
+        training_modes: dict[str, bool] = self._model._capture_training_modes()
         python_rng_state: object = random.getstate()
         numpy_rng_state: object = np.random.get_state()
         cpu_rng_state: torch.Tensor = torch.random.get_rng_state()
@@ -284,7 +282,7 @@ class ModelSummary:
                 else:
                     self._model(example_input)
         finally:
-            module_mode.restore(self._model)
+            self._model._restore_training_modes(training_modes)
             random.setstate(python_rng_state)
             np.random.set_state(cast(Any, numpy_rng_state))
             torch.random.set_rng_state(cpu_rng_state)

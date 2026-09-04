@@ -36,11 +36,6 @@ from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.core.data_transfer import move_data_to_device
-from syntheticmind.utilities.model_helpers import (
-    ModuleMode,
-    is_overridden,
-    is_parameter_in_hook_signature
-)
 from syntheticmind.types import Batch, ModelOutput
 
 if TYPE_CHECKING:
@@ -101,8 +96,7 @@ class PredictionLoop(Loop):
         include_dataloader_idx: bool = num_dataloaders > 1
         self._verify_dataloader_idx_requirements(module, include_dataloader_idx)
 
-        module_mode: ModuleMode = ModuleMode()
-        module_mode.capture(module)
+        training_modes: dict[str, bool] = module._capture_training_modes()
         trainer._call_module_hook(
             module,
             "on_predict_model_eval",
@@ -164,7 +158,11 @@ class PredictionLoop(Loop):
             batch: Batch = cast(Batch, fetched_batch)
             batch: Batch = trainer.precision_plugin.convert_input(batch)
             dm: DataModule | None = trainer.datamodule
-            if dm is not None and is_overridden("on_before_batch_transfer", dm, DataModule):
+            if dm is not None and trainer._hook_is_overridden(
+                "on_before_batch_transfer",
+                dm,
+                DataModule
+            ):
                 batch: Batch = trainer._call_datamodule_hook(
                     dm,
                     "on_before_batch_transfer",
@@ -180,7 +178,11 @@ class PredictionLoop(Loop):
                     batch,
                     dataloader_idx=dataloader_idx
                 )
-            if dm is not None and is_overridden("transfer_batch_to_device", dm, DataModule):
+            if dm is not None and trainer._hook_is_overridden(
+                "transfer_batch_to_device",
+                dm,
+                DataModule
+            ):
                 batch = trainer._call_datamodule_hook(
                     dm,
                     "transfer_batch_to_device",
@@ -198,7 +200,11 @@ class PredictionLoop(Loop):
                     device,
                     dataloader_idx=dataloader_idx
                 )
-            if dm is not None and is_overridden("on_after_batch_transfer", dm, DataModule):
+            if dm is not None and trainer._hook_is_overridden(
+                "on_after_batch_transfer",
+                dm,
+                DataModule
+            ):
                 batch = trainer._call_datamodule_hook(
                     dm,
                     "on_after_batch_transfer",
@@ -224,7 +230,7 @@ class PredictionLoop(Loop):
                 else (batch, batch_idx, hook_dataloader_idx)
             )
             step_arguments: tuple[object, ...] = batch_hook_arguments
-            if not is_parameter_in_hook_signature(
+            if not module._hook_accepts_parameter(
                 module.predict_step,
                 "batch_idx",
                 minimum_arguments=2
@@ -299,7 +305,7 @@ class PredictionLoop(Loop):
             "on_predict_end",
             module.on_predict_end
         )
-        module_mode.restore(module)
+        module._restore_training_modes(training_modes)
 
         module._reset_logged_metrics()
         trainer._raise_if_sigterm()
