@@ -36,7 +36,6 @@ from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.core.data_transfer import move_data_to_device
-from syntheticmind.utilities.evaluation import evaluation_context
 from syntheticmind.utilities.model_helpers import (
     ModuleMode,
     is_overridden,
@@ -65,7 +64,7 @@ class PredictionLoop(Loop):
         self.inference_mode: bool = inference_mode
 
     def run(self) -> list[ModelOutput] | list[list[ModelOutput]] | None:
-        with evaluation_context(self.inference_mode):
+        with self._evaluation_context(self.inference_mode):
             return self._run()
 
     def _run(self) -> list[ModelOutput] | list[list[ModelOutput]] | None:

@@ -287,3 +287,8 @@
     1. Generic recursive traversal is not automatically an independent concept. When one operation is the sole consumer, the traversal remains a private method on that operation's natural owner.
     2. Batch device placement is shared by the data-hook contract and prediction collection, so it earns a precise core data-transfer module. Collective input conversion is used only by `Module.all_gather` and therefore does not earn a parallel module.
     3. Nested collection preservation must be verified across local and distributed execution because named tuples, process groups, scalar tensorization, and worker serialization can fail independently.
+
+| Memory | Execution Context Is Loop State | Date: 04 September 2026 | Time: 11:19 AM | Name: Ghost |
+
+    1. Inference-mode selection is not a generic context-manager utility when its choice depends on evaluation lifecycle and distributed backend constraints. The shared Loop owner is the narrowest concept serving validation, testing, and prediction.
+    2. Process-wide PyTorch determinism and benchmark flags are run configuration side effects. Trainer construction must validate and apply them before model execution so there is one visible owner and no alternate function entrypoint.

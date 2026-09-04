@@ -73,7 +73,6 @@ from syntheticmind.utilities.filesystem import (
 )
 from syntheticmind.utilities.model_helpers import ModuleMode, is_overridden
 from syntheticmind.trainer.seed import SeedManager
-from syntheticmind.utilities.torch_flags import configure_torch_flags
 from syntheticmind.utilities.types import (
     CheckpointDict,
     CheckpointValue,
@@ -418,7 +417,7 @@ class Trainer:
             raise TypeError(
                 f"`inference_mode` must be a bool, got {inference_mode!r}."
             )
-        configure_torch_flags(deterministic, benchmark)
+        self._configure_torch_flags(deterministic, benchmark)
 
         self.deterministic: bool | Literal["warn"] | None = deterministic
         self.inference_mode: bool = inference_mode
@@ -1503,6 +1502,38 @@ class Trainer:
             "configure_model",
             module.configure_model
         )
+
+    def _configure_torch_flags(
+        self,
+        deterministic: bool | Literal["warn"] | None,
+        benchmark: bool | None
+    ) -> None:
+        if deterministic is not None and type(deterministic) is not bool and not (
+            isinstance(deterministic, str) and deterministic == "warn"
+        ):
+            raise MisconfigurationError(
+                "`deterministic` must be True, False, 'warn', or None."
+            )
+        if benchmark is not None and type(benchmark) is not bool:
+            raise TypeError(f"`benchmark` must be a bool or None, got {benchmark!r}.")
+        resolved_benchmark: bool | None = benchmark
+        if deterministic:
+            if resolved_benchmark is None:
+                resolved_benchmark = False
+            elif resolved_benchmark:
+                warnings.warn(
+                    "`deterministic` and `benchmark=True` were both requested. "
+                    "cuDNN benchmark selection can prevent deterministic execution.",
+                    stacklevel=3
+                )
+        if resolved_benchmark is not None:
+            torch.backends.cudnn.benchmark = resolved_benchmark
+        if deterministic == "warn":
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        elif type(deterministic) is bool:
+            torch.use_deterministic_algorithms(deterministic)
+        if deterministic:
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
     def _setup_model(self, module: Module, device: torch.device) -> Module:
         self.accelerator.setup_device(device)

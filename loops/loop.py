@@ -13,9 +13,11 @@
 # - The per-loop stop flag is separate from the trainer-level stop state so an
 #   individual loop can be reset without touching global run control
 #
-# Author: Rahul Sawhney
-
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING
+
+import torch
+import torch.distributed as dist
 
 if TYPE_CHECKING:
     from syntheticmind.trainer.trainer import Trainer
@@ -63,6 +65,16 @@ class Loop:
         # Lowers the stop flag so the loop instance can be reused for another
         # run without carrying over a stale stop request.
         self._should_stop: bool = False
+
+    def _evaluation_context(
+        self,
+        inference_mode: bool
+    ) -> AbstractContextManager[None]:
+        if dist.is_available() and dist.is_initialized() and dist.get_backend() == "gloo":
+            return torch.no_grad()
+        if inference_mode:
+            return torch.inference_mode()
+        return torch.no_grad()
 
     def __repr__(self) -> str:
         # Compact identity line for logs and interactive debugging.

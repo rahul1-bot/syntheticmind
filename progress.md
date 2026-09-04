@@ -278,3 +278,8 @@
 
     1. ✅ Batch placement moved to the core data-transfer boundary and the one-consumer tensor-collection utility was absorbed into `Module.all_gather` as private behavior.
     2. ✅ Local prediction transfer, local nested gather, spawned two-rank gather, subgroup ordering, and spawned multi-stage loader execution pass without compatibility façades.
+
+| Progress Complete | Loop Context and Torch Flag Ownership | Date: 04 September 2026 | Time: 11:19 AM | Name: Ghost |
+
+    1. ✅ Evaluation context selection moved to Loop and process-wide deterministic or benchmark configuration moved to Trainer; both one-function utility modules were removed.
+    2. ✅ Local stage execution, deterministic flag transitions, and spawned distributed evaluation pass after the ownership change.

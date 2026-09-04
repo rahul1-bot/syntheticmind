@@ -51,7 +51,6 @@ from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
-from syntheticmind.utilities.evaluation import evaluation_context
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
 from syntheticmind.utilities.model_helpers import (
     ModuleMode,
@@ -94,7 +93,7 @@ class EvaluationLoop(Loop):
         use_inference_mode: bool = (
             self.inference_mode and self.trainer.state.stage != "fit"
         )
-        with evaluation_context(use_inference_mode):
+        with self._evaluation_context(use_inference_mode):
             return self._run()
 
     def _run(self) -> list[dict[str, float]]:

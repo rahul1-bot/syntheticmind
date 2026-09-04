@@ -286,3 +286,9 @@
     2. The separate tensor-collection transformation module was removed because `Module.all_gather` was its only consumer. Tensor conversion, nested-structure preservation, and gather application now form one private Module operation beside the public collective entrypoint.
     3. No wrapper class, public alias, or compatibility module was introduced. Named tuples, mappings, lists, tuples, NumPy arrays, scalar conversion, devices, process groups, and differentiable gather semantics remain preserved.
     4. Local CPU and MPS placement, local prediction output collection, nested local gather, spawned two-rank gather, subgroup gather, and spawned multi-stage data transfer pass after the ownership change.
+
+| Architecture Decision | Loop Context and Torch Flag Ownership | Date: 04 September 2026 | Time: 11:19 AM | Name: Ghost |
+
+    1. Evaluation and prediction gradient context selection moved onto the shared `Loop` base because inference mode, no-gradient fallback, and Gloo compatibility are execution-loop semantics used by both non-training stages.
+    2. Deterministic-algorithm mode, warning mode, cuDNN benchmarking, and the required cuBLAS workspace setting moved into Trainer construction because they configure the complete run rather than expose a reusable utility operation.
+    3. The two former one-function utility modules were deleted without wrappers or aliases. Local validation, prediction, deterministic configuration, and spawned two-rank TorchMetrics evaluation pass through the new owners.
