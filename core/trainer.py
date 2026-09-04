@@ -61,9 +61,6 @@ from torch.utils.data import (
 
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.accelerators.cpu import CPUAccelerator
-from syntheticmind.accelerators.cuda import CUDAAccelerator
-from syntheticmind.accelerators.mps import MPSAccelerator
-from syntheticmind.accelerators.topology import DeviceTopology
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.callbacks.checkpoint import Checkpoint
 from syntheticmind.callbacks.early_stopping import EarlyStopping
@@ -96,8 +93,7 @@ from syntheticmind.loops.prediction_loop import PredictionLoop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.loops.validation_schedule import ValidationSchedule
 from syntheticmind.precision.precision import Precision
-from syntheticmind.precision.resolver import PrecisionResolver
-from syntheticmind.plugins import Plugin, PluginConfiguration, PluginResolver
+from syntheticmind.plugins import Plugin
 from syntheticmind.plugins.io import CheckpointStorageOptions
 from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
@@ -106,8 +102,10 @@ from syntheticmind.state.trainer_state import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.launcher import _ProcessLauncher
 from syntheticmind.strategies.parallel import ParallelStrategy
-from syntheticmind.strategies.single_device import SingleDeviceStrategy
 from syntheticmind.strategies.strategy import Strategy
+from syntheticmind.trainer.connectors.accelerator_connector import (
+    _AcceleratorConnector
+)
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import is_rank_zero
@@ -526,9 +524,23 @@ class Trainer:
                     f"`Trainer(barebones=True, profiler={profiler!r})` was passed. "
                     "Profiling can impact raw speed and is disabled in barebones mode."
                 )
-        plugin_configuration: PluginConfiguration = PluginResolver.resolve(
+        self._accelerator_connector: _AcceleratorConnector = _AcceleratorConnector(
+            accelerator,
+            strategy,
+            devices,
+            num_nodes,
+            precision,
             plugins,
             sync_batchnorm
+        )
+        self.accelerator: Accelerator = self._accelerator_connector.accelerator
+        self.devices: int | list[int] = self._accelerator_connector.devices
+        self.parallel_devices: list[torch.device] = (
+            self._accelerator_connector.parallel_devices
+        )
+        self.strategy: Strategy = self._accelerator_connector.strategy
+        self._precision_plugin: Precision = (
+            self._accelerator_connector.precision_plugin
         )
         if callbacks is None:
             resolved_callbacks: list[Callback] = []
@@ -662,93 +674,6 @@ class Trainer:
             raise MisconfigurationError("accumulate_grad_batches must be >= 1")
         if seed is not None:
             SeedManager.seed(seed)
-
-        configured_parallel_devices: list[torch.device] | None = None
-        resolved_accelerator_input: str | Accelerator = accelerator
-        accelerator_is_auto: bool = (
-            isinstance(accelerator, str) and accelerator.lower() == "auto"
-        )
-        if isinstance(strategy, Strategy):
-            if strategy.accelerator is not None:
-                if not accelerator_is_auto:
-                    raise MisconfigurationError(
-                        "Set the accelerator through either Trainer or the strategy instance, not both."
-                    )
-                resolved_accelerator_input = strategy.accelerator
-            if strategy.parallel_devices:
-                configured_parallel_devices = strategy.parallel_devices
-                if accelerator_is_auto and strategy.accelerator is None:
-                    resolved_accelerator_input = configured_parallel_devices[0].type
-
-        self.accelerator: Accelerator = self._resolve_accelerator(
-            resolved_accelerator_input
-        )
-        device_topology: DeviceTopology = DeviceTopology.resolve(
-            self.accelerator,
-            devices,
-            num_nodes,
-            configured_parallel_devices
-        )
-        self.devices: int | list[int] = (
-            device_topology.devices
-            if isinstance(device_topology.devices, int)
-            else list(device_topology.devices)
-        )
-        self.parallel_devices: list[torch.device] = list(
-            device_topology.parallel_devices
-        )
-        self.strategy: Strategy = self._resolve_strategy(
-            strategy,
-            self.accelerator,
-            self.parallel_devices,
-            device_topology.num_nodes
-        )
-        self.strategy.configure_topology(
-            self.accelerator,
-            self.parallel_devices,
-            device_topology.num_nodes
-        )
-        if (
-            plugin_configuration.checkpoint_io is not None
-            and self.strategy.checkpoint.configured_checkpoint_io is not None
-        ):
-            raise MisconfigurationError(
-                "CheckpointIO was configured through both Trainer(plugins=...) and the strategy. "
-                "Configure it in exactly one place."
-            )
-        if plugin_configuration.checkpoint_io is not None:
-            self.strategy.checkpoint.attach_checkpoint_io(
-                plugin_configuration.checkpoint_io
-            )
-        if plugin_configuration.cluster_environment is not None:
-            if not isinstance(self.strategy, ParallelStrategy):
-                raise MisconfigurationError(
-                    "ClusterEnvironment requires a parallel strategy."
-                )
-            if self.strategy.configured_cluster_environment is not None:
-                raise MisconfigurationError(
-                    "ClusterEnvironment was configured through both Trainer(plugins=...) and the strategy. "
-                    "Configure it in exactly one place."
-                )
-            self.strategy.attach_cluster_environment(
-                plugin_configuration.cluster_environment
-            )
-        if plugin_configuration.layer_sync is not None:
-            if not isinstance(self.strategy, DDPStrategy):
-                raise MisconfigurationError("LayerSync requires DDPStrategy.")
-            if self.strategy.configured_layer_sync is not None:
-                raise MisconfigurationError(
-                    "LayerSync was configured through both Trainer(plugins=...) and the strategy. "
-                    "Configure it in exactly one place."
-                )
-            self.strategy.attach_layer_sync(plugin_configuration.layer_sync)
-        self._precision_plugin: Precision = PrecisionResolver.resolve(
-            precision,
-            self.accelerator.name(),
-            plugin_configuration.precision,
-            self.strategy.configured_precision_plugin
-        )
-        self.strategy.attach_precision_plugin(self._precision_plugin)
 
         self.callbacks: list[Callback] = resolved_callbacks
         configured_checkpoint_callbacks: list[Checkpoint] = [
@@ -2438,114 +2363,6 @@ class Trainer:
             "on_validation_model_zero_grad",
             module.on_validation_model_zero_grad
         )
-
-    def _resolve_accelerator(self, accelerator: str | Accelerator) -> Accelerator:
-        # Resolves the accelerator argument: a live instance passes through
-        # unchanged, a backend name constructs the matching accelerator, and
-        # "auto" prefers CUDA, then MPS, then CPU by availability.
-        resolved_accelerator: Accelerator
-        if isinstance(accelerator, Accelerator):
-            resolved_accelerator = accelerator
-        elif not isinstance(accelerator, str):
-            raise TypeError(
-                f"`accelerator` must be a string or Accelerator instance, got {accelerator!r}."
-            )
-        else:
-            normalized_accelerator: str = accelerator.lower()
-            match normalized_accelerator:
-                case "cuda":
-                    resolved_accelerator = CUDAAccelerator()
-                case "mps":
-                    resolved_accelerator = MPSAccelerator()
-                case "cpu":
-                    resolved_accelerator = CPUAccelerator()
-                case "gpu":
-                    if MPSAccelerator.is_available():
-                        resolved_accelerator = MPSAccelerator()
-                    elif CUDAAccelerator.is_available():
-                        resolved_accelerator = CUDAAccelerator()
-                    else:
-                        raise MisconfigurationError(
-                            "No supported GPU accelerator is available."
-                        )
-                case "auto":
-                    if CUDAAccelerator.is_available():
-                        resolved_accelerator = CUDAAccelerator()
-                    elif MPSAccelerator.is_available():
-                        resolved_accelerator = MPSAccelerator()
-                    else:
-                        resolved_accelerator = CPUAccelerator()
-                case _:
-                    raise ValueError(
-                        f"Unknown accelerator {accelerator!r}. Available choices are "
-                        "'auto', 'gpu', 'cpu', 'cuda', and 'mps'."
-                    )
-        if not type(resolved_accelerator).is_available():
-            available_accelerators: list[str] = ["cpu"]
-            if CUDAAccelerator.is_available():
-                available_accelerators.append("cuda")
-            if MPSAccelerator.is_available():
-                available_accelerators.append("mps")
-            raise MisconfigurationError(
-                f"{type(resolved_accelerator).__name__} is not available on this system. "
-                f"Available accelerators: {available_accelerators}."
-            )
-        return resolved_accelerator
-
-    def _resolve_strategy(
-        self,
-        strategy: str | Strategy,
-        accelerator: Accelerator,
-        parallel_devices: list[torch.device],
-        num_nodes: int
-    ) -> Strategy:
-        # Resolves the strategy argument: a live instance passes through
-        # unchanged, a strategy name constructs the matching strategy, and
-        # "auto" selects distributed data parallel only for multi-device CUDA
-        # configurations, defaulting to single-device execution otherwise.
-        resolved_strategy: Strategy
-        if isinstance(strategy, Strategy):
-            resolved_strategy = strategy
-        elif not isinstance(strategy, str):
-            raise TypeError(
-                f"`strategy` must be a string or Strategy instance, got {strategy!r}."
-            )
-        else:
-            normalized_strategy: str = strategy.lower()
-            match normalized_strategy:
-                case "ddp":
-                    resolved_strategy = DDPStrategy()
-                case "ddp_spawn":
-                    resolved_strategy = DDPStrategy(start_method="spawn")
-                case "ddp_fork" | "ddp_notebook":
-                    resolved_strategy = DDPStrategy(start_method="fork")
-                case "single_device":
-                    resolved_strategy = SingleDeviceStrategy()
-                case "auto":
-                    if len(parallel_devices) > 1 or num_nodes > 1:
-                        resolved_strategy = DDPStrategy()
-                    else:
-                        resolved_strategy = SingleDeviceStrategy()
-                case _:
-                    raise ValueError(
-                        f"Unknown strategy {strategy!r}. Available choices are "
-                        "'auto', 'single_device', 'ddp', 'ddp_spawn', "
-                        "'ddp_fork', and 'ddp_notebook'."
-                    )
-        requires_distributed_strategy: bool = (
-            len(parallel_devices) > 1 or num_nodes > 1
-        )
-        if isinstance(accelerator, MPSAccelerator) and resolved_strategy.is_distributed:
-            raise MisconfigurationError(
-                "Distributed strategies are not supported with the MPS accelerator. "
-                "Use accelerator='cpu' or a single-device strategy."
-            )
-        if requires_distributed_strategy and not resolved_strategy.is_distributed:
-            raise MisconfigurationError(
-                f"{type(resolved_strategy).__name__} cannot manage num_devices="
-                f"{len(parallel_devices)} and num_nodes={num_nodes}. Use strategy='ddp'."
-            )
-        return resolved_strategy
 
     def _resolve_device(self) -> torch.device:
         # Resolves the concrete device for this process. Distributed CUDA

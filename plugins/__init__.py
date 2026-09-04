@@ -7,7 +7,7 @@ from syntheticmind.plugins.io import (
     TorchCheckpointIO
 )
 from syntheticmind.plugins.layer_sync import LayerSync, TorchSyncBatchNorm
-from syntheticmind.plugins.resolver import Plugin, PluginConfiguration, PluginResolver
+from syntheticmind.precision.precision import Precision
 
 __all__: list[str] = [
     "AsyncCheckpointIO",
@@ -18,8 +18,8 @@ __all__: list[str] = [
     "LayerSync",
     "LocalEnvironment",
     "Plugin",
-    "PluginConfiguration",
-    "PluginResolver",
     "TorchCheckpointIO",
     "TorchSyncBatchNorm"
 ]
+
+type Plugin = Precision | CheckpointIO | ClusterEnvironment | LayerSync

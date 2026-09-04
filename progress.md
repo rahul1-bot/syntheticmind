@@ -158,3 +158,17 @@
     2. The next bounded phase must create the semantic `trainer/` package and extract only complete connector responsibilities, beginning with accelerator topology because `DeviceTopology`, `PluginResolver`, `PrecisionResolver`, and Trainer resolution methods currently fragment one compatibility decision.
     3. The public `Trainer` identity and stage entrypoints must remain stable while internal imports migrate from `core.trainer`; transitional re-export façades are prohibited because compatibility preservation is not required for this private ground-up refactor.
     4. Verification must cover accelerator and strategy selection, plugin conflicts, CPU and MPS placement, unavailable CUDA rejection, direct and launched distributed execution, precision compatibility, checkpoint plugin injection, and existing stage regressions.
+
+| Progress Complete | Accelerator Connector Reconstruction | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
+
+    1. ✅ One Trainer accelerator connector now resolves and connects accelerator, devices, nodes, Strategy, precision, cluster environment, checkpoint I/O, and layer synchronization.
+    2. ✅ Three stateless resolver surfaces and the temporary live-device Pydantic topology model were deleted, while public Trainer accelerator, device, Strategy, and precision behavior remained stable.
+    3. ✅ Duplicate plugin categories, conflicting Trainer and Strategy configuration, invalid synchronized-layer combinations, unavailable accelerators, unsupported distributed MPS execution, and invalid precision combinations fail at construction.
+    4. ✅ CPU, MPS, DDP subprocess, spawn, fork, checkpoint-plugin injection, precision fallback, and full and sharded model-parallel execution pass with production-package compilation and source review.
+
+| Progress Active | Data Connector Reconstruction | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
+
+    1. Trainer currently owns data source attachment, DataModule binding, data preparation, dataloader requests, limits, distributed and unrepeated sampler replacement, overfit behavior, loader reconstruction, and reload cadence across one large method region.
+    2. The next bounded phase must move this vertical runtime slice into `trainer/connectors/data_connector.py` without changing direct-dataloader, model-owned, DataModule-owned, multiple-loader, stateful-loader, distributed, or prediction-order behavior.
+    3. `CombinedLoader` and batch-limit placement must be decided from the resulting data-flow concept rather than moved mechanically during the connector extraction.
+    4. Verification must cover all three data ownership sources, nested loaders, combination modes, worker settings, batch limits, overfit batches, reload cadence, stateful continuation, DDP sampler partitioning, and unrepeated distributed prediction.

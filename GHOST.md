@@ -181,3 +181,12 @@
     4. The former `distributed_runtime.py`, `forward_redirection.py`, and `model_parallel_topology.py` modules were removed because their behavior belongs to the Strategy concepts they served rather than to independent public building blocks.
     5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
     6. Single-device fitting, two-rank DDP manual optimization and wrapped forwards, multi-stage distributed dataloaders, spawn and fork launch, and full and sharded model-parallel exact resume pass after the hierarchy change.
+
+| Architecture Decision | Accelerator Connector Ownership | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
+
+    1. Trainer accelerator composition now belongs to one internal `AcceleratorConnector` covering backend selection, device parsing, node count, Strategy selection, precision, cluster environment, checkpoint I/O, and layer synchronization.
+    2. The former `DeviceTopology`, `PluginConfiguration`, `PluginResolver`, and `PrecisionResolver` surfaces were removed because they fragmented one compatibility decision and used temporary runtime records instead of an owning lifecycle component.
+    3. Accelerators retain only backend-specific discovery, parsing, and binding. Strategies retain execution semantics, while the connector validates their combined topology and injects the selected plugins in deterministic order.
+    4. Precision construction remains dependent on accelerator and Strategy compatibility, including CPU float16 fallback, explicitly supplied precision plugins, and model-parallel precision restrictions.
+    5. The connector is internal and creates no alternate stage entrypoint; Trainer remains the public orchestration surface and retains direct properties for the resolved runtime graph.
+    6. Configuration matrices, CPU and MPS execution, unavailable CUDA rejection, checkpoint-plugin injection, DDP subprocess, spawn and fork launch, and model-parallel full and sharded execution pass after the migration.

@@ -203,3 +203,11 @@
     4. The strongest topology test is whether an ML researcher can identify the concept, its lifecycle, and its algorithmic variants without referring to code size. DDP, FSDP, precision, dataloaders, and checkpoints pass; generic runtime, resolver, forwarding, and state-container names require stronger internal evidence.
     5. Package width is harmless when each file is a selectable recognized implementation, as with callbacks or strategies. The same width is architectural debt when files are fragments created to satisfy numeric budgets.
     6. Concept-first decomposition still requires directed dependencies, bounded public surface, explicit state ownership, and runtime evidence; it overrides mechanical splitting, not correctness or maintainability review.
+
+| Memory | Accelerator Connector Admission Evidence | Date: 04 September 2026 | Time: 09:07 AM | Name: Ghost |
+
+    1. Accelerator, device count, node count, Strategy, precision, cluster environment, checkpoint I/O, and synchronized-layer policy form one compatibility matrix during Trainer construction; resolving them independently permits contradictory intermediate states.
+    2. A resolved device list containing live `torch.device` objects is runtime composition state, not a portable Pydantic data model and not an independent topology concept.
+    3. Precision selection cannot be owned by a standalone resolver because validity and fallback depend on the chosen accelerator, Strategy, and explicitly supplied plugin.
+    4. Strategy instances that already configure accelerators or devices must conflict with explicit Trainer values rather than silently choosing one source, while default `auto` values permit Strategy-owned configuration.
+    5. A connector earns its class and module through cross-component ordering and compatibility invariants; deleting several stateless resolvers is evidence that the connector consolidates a real boundary rather than renaming utility code.
