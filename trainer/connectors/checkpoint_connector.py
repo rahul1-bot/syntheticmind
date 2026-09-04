@@ -588,6 +588,8 @@ class _CheckpointConnector:
         identity: _LoggedMetricCheckpoint = LoggedMetric._parse_checkpoint_state(
             cast(StateDict, identity_value)
         )
+        if not identity.on_epoch:
+            raise ValueError("Checkpoint epoch metric identity must enable on_epoch.")
         accumulator: _MetricAccumulatorCheckpoint = (
             MetricAccumulator._parse_checkpoint_state(
                 cast(StateDict, accumulator_value)

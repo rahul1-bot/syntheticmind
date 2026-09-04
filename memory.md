@@ -161,12 +161,12 @@
     6. CSV schema widening is a commit operation: adopt the existing header, serialize all prior rows under the union, atomically replace the file, and roll back live field state if promotion fails.
     7. A 200-line live observation with several independent consumers earns a semantic module; Module logging remains one public operation decomposed into private transitions rather than a service, manager, Pydantic request family, or 228-line god method.
 
-| Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
+| Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 07:39 PM | Name: Ghost |
 
     1. A resumable checkpoint is a trajectory aggregate: model, optimizer, scheduler, callbacks, DataModule, precision, configuration, loader cursor, random streams, epoch, step, and partial metric windows must share one coordinator.
     2. Strategy owns the representation of model and optimizer state because sharding depends on execution topology; the Trainer connector owns when that representation joins the remaining trajectory and in which order it restores.
     3. `CheckpointIO` owns transport, ModelCheckpoint owns cadence and retention, and CheckpointPaths owns formatting, containment, versions, removal safety, and link publication directly; forwarding aliases create duplicate checkpoint verbs without a boundary.
-    4. A run ceiling is not an epoch boundary. Exact continuation retains per-rank scalar accumulators and non-persistent TorchMetrics tensor or list state with update counts, while graph-retaining and custom-process-group metric windows fail instead of claiming serialization.
+    4. A run ceiling is not an epoch boundary. Exact continuation retains per-rank scalar or TorchMetrics state with strict kind and epoch-cadence invariants, while empty scalar, graph-retaining, custom-process-group, mixed-kind, and changed-world windows fail explicitly.
     5. Random state must use one immutable validated schema across checkpoint and process boundaries and capture only active accelerators; probing MPS during a CPU fork can initialize unsafe native runtime state.
     6. Effective run configuration is provenance and a compatibility boundary; bounded time makes epochs unbounded unless the user supplies another ceiling, while a higher ceiling may continue a run and trajectory-defining accumulation, data, validation, precision, and synchronization settings must not drift silently.
     7. Multiprocessing parents require transferred optimizer, scheduler, metric, loader, random, callback, and precision payloads because they own no live worker optimizers; post-fit saves must use these snapshots without fabricating runtime objects.

@@ -311,6 +311,14 @@ class MetricAccumulator:
             raise ValueError("A populated epoch accumulator requires complete scalar state.")
         if (checkpoint.total_weight > 0.0) != (checkpoint.weighted_sum is not None):
             raise ValueError("Epoch accumulator weight state is inconsistent.")
+        if checkpoint.is_metric and (
+            checkpoint.count != 0
+            or any(value is not None for value in checkpoint_values)
+            or checkpoint.total_weight != 0.0
+        ):
+            raise ValueError("A TorchMetric accumulator cannot contain scalar state.")
+        if not checkpoint.is_metric and checkpoint.count == 0:
+            raise ValueError("A scalar epoch accumulator cannot be empty.")
 
     def _checkpoint_tensor(self, value: torch.Tensor | None) -> torch.Tensor | None:
         if value is None:

@@ -239,11 +239,11 @@
     4. DataConnector still applies resolved batch limits because loader cardinality is known only at the data boundary, while Trainer retains side-effectful torch flags, seeding, and runtime construction.
     5. Trainer runtime construction now follows explicit accelerator, policy, connector, loop, and live-state phases, while checkpoint restoration separately applies resumed trajectory coordinates after participant state exists; this preserves order without introducing public builders or pseudo-domain classes.
 
-| Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
+| Strategic Note | Checkpoint Schema V2 and Random State | Date: 04 September 2026 | Time: 07:39 PM | Name: Ghost |
 
     1. A training checkpoint carries optimizer, scheduler, callback, DataModule, precision, loop, configuration, randomness, and rank-local partial metric state; a weights-only artifact carries none of the continuation claim.
     2. One immutable random-state snapshot covers Python, NumPy, torch CPU, and only the active CUDA or MPS backend across checkpoint and multiprocessing boundaries.
-    3. A run ceiling pauses rather than completes an epoch; scalar and non-persistent TorchMetrics windows, loader position, and schedulers resume together without duplicate epoch hooks or steps.
+    3. A run ceiling pauses rather than completes an epoch; strictly separated scalar and TorchMetrics epoch windows, loader position, and schedulers resume together without duplicate epoch hooks or steps.
     4. Resolved configuration provenance permits a larger run ceiling while rejecting trajectory-changing accumulation, data, validation, clipping, determinism, sampler, synchronization, reload, or precision drift.
     5. Strict corruption and world-size rejection plus exact local, differing-rank DDP, spawned post-fit, accumulated, plateau, validation, stateful-data, tensor-parallel, and sharded FSDP2 trajectories control acceptance.
 

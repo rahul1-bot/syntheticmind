@@ -124,10 +124,10 @@
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
     7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
 
-| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:36 PM | Name: Ghost |
+| Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 07:39 PM | Name: Ghost |
 
     1. The Trainer checkpoint connector remains the sole trajectory coordinator; stage `ckpt_path` and mutable `trainer.ckpt_path` are the explicit selection controls, while the unused constructor `resume_from_checkpoint` alias and connector accessor were removed.
-    2. Schema version 2 records artifact identity, resolved configuration, progress, participant state, randomness, and strict per-rank partial-epoch scalar or TorchMetrics accumulator schemas; malformed identity, accumulator, rank count, or world-size state fails before model mutation.
+    2. Schema version 2 records artifact identity, configuration, progress, participant state, randomness, and strict per-rank partial-epoch schemas; entries require epoch cadence, scalar and TorchMetrics accumulators cannot mix state kinds, and malformed identity, rank count, or world size fails before model mutation.
     3. The foundational Randomness owner and immutable Pydantic snapshot now serve seeding, checkpoints, and worker transfer identically across Python, NumPy, torch CPU, and only the active CUDA or MPS backend; the duplicate launcher state and obsolete SeedManager were removed.
     4. A partial `max_steps` or stop boundary preserves the current epoch instead of fabricating epoch-end hooks or scheduler steps; loader cursor, rank-local scalar accumulators, non-persistent TorchMetrics tensor or list state, update counts, and metric identity resume together.
     5. A persisted effective configuration snapshot permits larger run ceilings while rejecting drift in accumulation, training and validation limits, cadence, clipping, determinism, sampler policy, barebones state, synchronization, reload cadence, and precision before restoration; bounded Timer runs record their actual unbounded epoch ceiling.
