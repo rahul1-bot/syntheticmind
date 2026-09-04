@@ -64,7 +64,7 @@ class _WorkerStateTransfer:
         progress_metrics: dict[RunningStage, dict[str, float]] = {}
         running_stage: RunningStage
         running_metrics: dict[str, float]
-        for running_stage, running_metrics in trainer._progress_bar_metrics_by_stage.items():
+        for running_stage, running_metrics in trainer._logger_connector.progress_bar_metrics_by_stage.items():
             progress_metrics[running_stage]: dict[str, float] = dict(running_metrics)
         callback_states: list[StateDict] = []
         callback: Callback
@@ -78,7 +78,7 @@ class _WorkerStateTransfer:
             callback_metrics=callback_metrics,
             logged_metrics=logged_metrics,
             progress_bar_metrics_by_stage=progress_metrics,
-            last_progress_bar_stage=trainer._last_progress_bar_stage,
+            last_progress_bar_stage=trainer._logger_connector.last_progress_bar_stage,
             callback_states=callback_states,
             datamodule_state=(
                 datamodule.state_dict() if datamodule is not None else None
@@ -130,10 +130,10 @@ class _WorkerStateTransfer:
         module._device: torch.device = (
             parameter.device if parameter is not None else torch.device("cpu")
         )
-        trainer._callback_metrics.clear()
-        trainer._callback_metrics.update(worker_output.callback_metrics)
-        trainer._logged_metrics.clear()
-        trainer._logged_metrics.update(worker_output.logged_metrics)
+        trainer._logger_connector.callback_metrics.clear()
+        trainer._logger_connector.callback_metrics.update(worker_output.callback_metrics)
+        trainer._logger_connector.logged_metrics.clear()
+        trainer._logger_connector.logged_metrics.update(worker_output.logged_metrics)
         restored_progress_metrics: dict[RunningStage, dict[str, float]] = {}
         running_stage: RunningStage
         running_metrics: dict[str, float]
@@ -141,11 +141,11 @@ class _WorkerStateTransfer:
             restored_progress_metrics[running_stage]: dict[str, float] = dict(
                 running_metrics
             )
-        trainer._progress_bar_metrics_by_stage: dict[
+        trainer._logger_connector.progress_bar_metrics_by_stage: dict[
             RunningStage,
             dict[str, float]
         ] = restored_progress_metrics
-        trainer._last_progress_bar_stage: RunningStage | None = (
+        trainer._logger_connector.last_progress_bar_stage: RunningStage | None = (
             worker_output.last_progress_bar_stage
         )
         callback: Callback

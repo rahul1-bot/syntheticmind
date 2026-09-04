@@ -216,3 +216,12 @@
     5. The connector's cohesive class exceeds the generic 500-line module budget under Rahul's explicit SyntheticMind concept-integrity authority. Splitting source resolution, combination, limits, sampler policy, and reconstruction would fracture one data-composition lifecycle and is therefore rejected.
     6. The connector contains no `Any`, generic `object`, module-level function, source comment, custom callable object, or unannotated assignment; Trainer source comments were removed from the rewritten module rather than retained as stale architecture.
     7. Direct, module-owned, and DataModule-owned execution, nested loaders, spawn and fork transfer, two-rank DDP, model parallelism, stateful checkpoint continuation, overfit batches, reload cadence, batch limits, persistent workers, and unrepeated prediction all pass.
+
+| Architecture Decision | Logger Connector Ownership | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
+
+    1. Logger selection, default run-version allocation, callback metrics, logger metrics, progress metrics, stage reset boundaries, scalar conversion, hyperparameter merging, and external logger emission now belong to the Trainer logger connector.
+    2. Modules retain metric declaration and computation, loops retain step and epoch reduction cadence, and concrete loggers retain backend persistence. The connector owns routing among these concepts without adding a parallel logging API.
+    3. The former `loggers/configuration.py` free-function module was removed because logger selection and destination identity are part of connector composition rather than a standalone utility surface.
+    4. Callback, logged, and progress views remain distinct; sanity results do not leak into live views, public properties return defensive mappings, and launcher transfer preserves the selected worker's observable state.
+    5. The connector contains no broad annotation, free function, source prose, custom callable object, or unannotated assignment and remains below the project class threshold without artificial fragments.
+    6. Local metric views, CSV metrics and hyperparameters, distributed reductions, TorchMetrics, DDP stage transitions, spawn, fork, progress rendering, and launcher state transfer pass after the migration.

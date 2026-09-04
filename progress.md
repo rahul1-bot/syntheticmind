@@ -199,3 +199,17 @@
     2. The next bounded phase must preserve tensor-versus-scalar boundaries, step and epoch routing, distributed reduction, multiple-dataloader identity, sanity isolation, progress views, callback monitoring, and logger cadence while establishing the logger connector.
     3. Metric computation remains with the metric owner and loop lifecycle; the connector owns collection views, reset boundaries, and external logger emission rather than inventing a second logging API.
     4. Verification must cover standard logging, TorchMetrics, distributed reduction, multiple loaders, launcher transfer, checkpoint monitors, progress views, tensor state, and logger output.
+
+| Progress Complete | Logger Connector Reconstruction | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
+
+    1. ✅ Logger selection, metric views, scalar conversion, hyperparameter merging, progress routing, reset boundaries, and external emission now belong to one Trainer logger connector.
+    2. ✅ Metric computation remains on Module-owned records and reduction cadence remains on loops, while the removed logger configuration module leaves no free-function selection path.
+    3. ✅ Callback, logger, and progress views retain distinct tensor or scalar contracts and survive worker-to-parent state transfer without sanity-stage leakage.
+    4. ✅ Local, CSV, hyperparameter, distributed, TorchMetrics, DDP, spawn, fork, progress, and launcher-transfer verification passes.
+
+| Progress Active | Checkpoint Connector Reconstruction | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
+
+    1. Checkpoint path selection, full-trajectory assembly, hook sequencing, restoration, callback policy, Strategy state representation, storage I/O, and continuation state are currently divided across Trainer, `CheckpointState`, Strategy checkpoint components, callbacks, and plugins.
+    2. The next bounded phase must establish the Trainer checkpoint connector as the only full-trajectory coordinator while preserving Strategy-specific model and optimizer state semantics and `CheckpointIO` storage ownership.
+    3. The behavior-rich `state/checkpoint_state.py` and the Strategy-local class named `_CheckpointConnector` must lose their competing connector identities; model-parallel sharded publication remains an independent persistence mechanism only where distributed state requires it.
+    4. Verification must cover full and weights-only save, best and last selection, strict and relaxed restore, optimizer and scheduler continuation, callbacks, DataModule, precision, loops, random state, stateful loaders, async I/O, full and sharded model parallelism, failure atomicity, and launchers.

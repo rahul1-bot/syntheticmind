@@ -458,7 +458,7 @@ class EvaluationLoop(Loop):
             trainer._log_metrics(self._logger_epoch_metrics, step=state.global_step)
 
         if self.stage == "validate":
-            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
+            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_validation_epoch_end",
@@ -478,7 +478,7 @@ class EvaluationLoop(Loop):
             }
             for result in self.results:
                 result.update(hook_epoch_metrics)
-            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
+            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_validation_epoch_end",
@@ -503,7 +503,7 @@ class EvaluationLoop(Loop):
             else:
                 module_mode.restore(module)
         else:
-            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
+            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_test_epoch_end",
@@ -523,7 +523,7 @@ class EvaluationLoop(Loop):
             }
             for result in self.results:
                 result.update(hook_epoch_metrics)
-            self.trainer._callback_metrics.update(self._callback_epoch_metrics)
+            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
                 "on_test_end",

@@ -227,3 +227,11 @@
     4. Sampler replacement must reconstruct DataLoader subclasses with their required constructor attributes. Replacing only the sampler on a generic base DataLoader can silently discard stateful-loader behavior and checkpoint continuation.
     5. Multiprocessing result transfer must serialize connector-owned loader totals rather than reaching for obsolete Trainer fields; worker transfer failures expose hidden ownership remnants after an otherwise successful local refactor.
     6. A cohesive connector may exceed a generic size threshold when every retained method participates in one lifecycle and extraction would produce one-consumer implementation fragments. Runtime breadth and conceptual unity control the exception.
+
+| Memory | Metric Production, Routing, and Persistence | Date: 04 September 2026 | Time: 09:33 AM | Name: Ghost |
+
+    1. Metric production belongs to Module hooks, reduction cadence belongs to loops, view routing belongs to the logger connector, and durable output belongs to concrete loggers; merging these phases creates hidden state and inconsistent consumers.
+    2. Callback metrics may include monitoring values that are intentionally absent from external logs, while progress metrics are scalar presentation state and logged metrics retain tensors for programmatic inspection.
+    3. Sanity validation must clear every observable metric view after execution so early diagnostic batches cannot alter checkpoint ranking, early stopping, progress output, or experiment records.
+    4. Logger selection, default version discovery, and hyperparameter emission share destination identity and therefore belong to the connector rather than a free configuration module.
+    5. Multiprocessing launch must transfer all three metric views and the last displayed stage as one observation snapshot; transferring only public logged metrics loses callback and progress semantics.

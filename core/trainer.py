@@ -29,10 +29,7 @@ from syntheticmind.core.optimizer import (
     _init_optimizers_and_lr_schedulers,
 )
 from syntheticmind.core.protocols import OptimizerTrainerProtocol
-from syntheticmind.loggers.configuration import resolve_loggers
-from syntheticmind.loggers.csv_logger import CSVLogger
 from syntheticmind.loggers.logger import Logger
-from syntheticmind.loggers.tensorboard import TensorBoardLogger
 from syntheticmind.loops.batch_limits import (
     normalize_batch_limit,
     normalize_fast_dev_run,
@@ -60,6 +57,9 @@ from syntheticmind.trainer.connectors.accelerator_connector import (
 )
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
 from syntheticmind.trainer.connectors.data_connector import _DataConnector
+from syntheticmind.trainer.connectors.logger_connector.logger_connector import (
+    _LoggerConnector
+)
 from syntheticmind.trainer.connectors.signal_connector import _SignalConnector
 from syntheticmind.utilities.console import ConsoleRenderer
 from syntheticmind.utilities.combined_loader import CombinedLoader
@@ -340,11 +340,6 @@ class Trainer:
                 raise TypeError("`default_root_dir` must resolve to a string path.")
             configured_root_dir: str = configured_root_value
             self._default_root_dir: str = configured_root_dir or os.getcwd()
-        resolved_loggers: list[Logger] = resolve_loggers(
-            logger,
-            self.default_root_dir,
-            fast_dev_run_enabled
-        )
         resolved_min_epochs, resolved_max_epochs = _resolve_training_limits(
             effective_max_epochs,
             min_epochs,
@@ -449,7 +444,13 @@ class Trainer:
             max_time
         )
 
-        self._loggers: list[Logger] = resolved_loggers
+        self._logger_connector: _LoggerConnector = _LoggerConnector(
+            self.strategy,
+            logger,
+            self.default_root_dir,
+            fast_dev_run_enabled,
+            enable_autolog_hparams
+        )
         self.profiler: Profiler = _resolve_profiler(profiler)
         self._data_connector: _DataConnector = _DataConnector(
             self.strategy,
@@ -517,16 +518,6 @@ class Trainer:
         self._train_dataloader_state_active: bool = False
         self._last_train_dataloader_batches_completed: int = 0
         self._last_train_total_batch_idx: int = -1
-        self._callback_metrics: dict[str, torch.Tensor] = {}
-        self._logged_metrics: dict[str, torch.Tensor] = {}
-        self._progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]] = {
-            "training": {},
-            "validating": {},
-            "testing": {},
-            "predicting": {},
-            "sanity_checking": {}
-        }
-        self._last_progress_bar_stage: RunningStage | None = None
         self._dataloader_fetch_time_seconds: dict[RunningStage, float] = {}
         self._dataloader_iterator_creation_time_seconds: dict[RunningStage, float] = {}
         self._active_exception: BaseException | None = None
@@ -600,8 +591,7 @@ class Trainer:
         self._active_exception = None
         self.state.reset_on_run()
         self._is_mid_epoch_validation = False
-        self._callback_metrics.clear()
-        self._logged_metrics.clear()
+        self._logger_connector.clear_metric_views()
         module._reset_logging_state()
         self._reset_progress_bar_metrics()
         self._data_connector.reset_fit()
@@ -870,8 +860,7 @@ class Trainer:
                 self.state.finish()
         self.state.set_stage("validate")
         self._active_exception = None
-        self._callback_metrics.clear()
-        self._logged_metrics.clear()
+        self._logger_connector.clear_metric_views()
         module._reset_logging_state()
         self._reset_progress_bar_metrics("validating")
         self._data_connector.reset_stage("val")
@@ -986,8 +975,7 @@ class Trainer:
                 self.state.finish()
         self.state.set_stage("test")
         self._active_exception = None
-        self._callback_metrics.clear()
-        self._logged_metrics.clear()
+        self._logger_connector.clear_metric_views()
         module._reset_logging_state()
         self._reset_progress_bar_metrics("testing")
         self._data_connector.total_test_batches: list[int | None] | None = None
@@ -1102,8 +1090,7 @@ class Trainer:
                 self.state.finish()
         self.state.set_stage("predict")
         self._active_exception = None
-        self._callback_metrics.clear()
-        self._logged_metrics.clear()
+        self._logger_connector.clear_metric_views()
         module._reset_logging_state()
         self._reset_progress_bar_metrics("predicting")
         self._data_connector.reset_stage("predict")
@@ -1332,61 +1319,31 @@ class Trainer:
         self._dataloader_fetch_time_seconds[running_stage] = max(0.0, duration_seconds)
 
     def _reset_progress_bar_metrics(self, running_stage: RunningStage | None = None) -> None:
-        if running_stage is None:
-            self._progress_bar_metrics_by_stage: dict[RunningStage, dict[str, float]] = {
-                "training": {},
-                "validating": {},
-                "testing": {},
-                "predicting": {},
-                "sanity_checking": {}
-            }
-            self._last_progress_bar_stage: RunningStage | None = None
-            return
-        self._progress_bar_metrics_by_stage[running_stage] = {}
-        self._last_progress_bar_stage: RunningStage | None = running_stage
+        self._logger_connector.reset(running_stage)
 
     def _update_progress_bar_metrics(
         self,
         running_stage: RunningStage,
         metrics: dict[str, float]
     ) -> None:
-        if not metrics:
-            return
-        self._progress_bar_metrics_by_stage[running_stage].update(metrics)
-        self._last_progress_bar_stage: RunningStage | None = running_stage
+        self._logger_connector.update_progress_bar_metrics(running_stage, metrics)
 
     def _update_logged_metrics(self, metrics: dict[str, torch.Tensor]) -> None:
-        self._logged_metrics.update(metrics)
+        self._logger_connector.update_logged_metrics(metrics)
 
     def _preview_logged_metrics(
         self,
         module: Module,
         running_stage: RunningStage
     ) -> None:
-        callback_metrics: dict[str, torch.Tensor] = {}
-        logged_metrics: dict[str, torch.Tensor] = {}
-        progress_bar_metrics: dict[str, float] = {}
-        for metric in module.logged_metrics:
-            if not metric.on_step:
-                continue
-            value: torch.Tensor | None = metric.compute_step(self.strategy.root_device)
-            if value is None:
-                continue
-            metric_name: str = metric.output_name(on_step=True)
-            if running_stage == "training":
-                callback_metrics[metric.base_name()] = value
-                callback_metrics[metric_name] = value
-            if metric.logger:
-                logged_metrics[metric_name] = value
-            if metric.progress_bar:
-                progress_bar_metrics[metric_name] = self._metric_to_float(value)
-        self._callback_metrics.update(callback_metrics)
-        if not self.sanity_checking:
-            self._update_logged_metrics(logged_metrics)
-            self._update_progress_bar_metrics(running_stage, progress_bar_metrics)
+        self._logger_connector.preview_logged_metrics(
+            module,
+            running_stage,
+            self.sanity_checking
+        )
 
     def _get_progress_bar_metrics(self, running_stage: RunningStage) -> dict[str, float]:
-        return dict(self._progress_bar_metrics_by_stage[running_stage])
+        return self._logger_connector.progress_bar_metrics(running_stage)
 
     def _get_dataloader_fetch_time(self, running_stage: RunningStage) -> float | None:
         return self._dataloader_fetch_time_seconds.get(running_stage)
@@ -1665,8 +1622,7 @@ class Trainer:
             self._validation_schedule.mark_validation_end()
             self.validate_loop.epoch_metrics = {}
             module._reset_logging_state()
-            self._callback_metrics.clear()
-            self._logged_metrics.clear()
+            self._logger_connector.clear_metric_views()
             self._reset_progress_bar_metrics("validating")
             self._call_callback_hooks(module, "on_sanity_check_end")
         finally:
@@ -2326,108 +2282,25 @@ class Trainer:
             return self.max_steps
         return self.max_epochs
 
-    @staticmethod
-    def _metric_to_float(value: torch.Tensor | float) -> float:
-        if isinstance(value, torch.Tensor):
-            if value.numel() != 1:
-                raise ValueError("Logged metric tensors must contain exactly one element.")
-            return float(value.detach().cpu().item())
-        return float(value)
+    def _metric_to_float(self, value: torch.Tensor | float) -> float:
+        return self._logger_connector.metric_to_float(value)
 
     def _log_metrics(
         self,
         metrics: Mapping[str, torch.Tensor | float],
         step: int
     ) -> None:
-        scalar_metrics: dict[str, float] = {
-            name: self._metric_to_float(value)
-            for name, value in metrics.items()
-        }
-        for configured_logger in self._loggers:
-            configured_logger.log_metrics(scalar_metrics, step=step)
+        self._logger_connector.log_metrics(metrics, step)
 
     def _log_hyperparams(self, params: HyperparameterDict) -> None:
-        for configured_logger in self._loggers:
-            configured_logger.log_hyperparams(params)
+        self._logger_connector.log_hyperparams(params)
 
     def _autolog_hyperparameters(
         self,
         module: Module,
         datamodule: DataModule | None
     ) -> None:
-        if (
-            not self.enable_autolog_hparams
-            or not self.loggers
-            or self.fast_dev_run
-        ):
-            return
-        module_hyperparameters: HyperparameterDict | None = (
-            dict(module.hparams_initial) if module._log_hyperparams else None
-        )
-        datamodule_hyperparameters: HyperparameterDict | None = (
-            dict(datamodule.hparams_initial)
-            if datamodule is not None and datamodule._log_hyperparams
-            else None
-        )
-        merged_hyperparameters: HyperparameterDict | None = None
-        if (
-            module_hyperparameters is not None
-            and datamodule_hyperparameters is not None
-        ):
-            inconsistent_keys: list[object] = []
-            key: object
-            for key in module_hyperparameters.keys() & datamodule_hyperparameters.keys():
-                if key == "_class_path":
-                    continue
-                if not self._hyperparameters_equal(
-                    module_hyperparameters[key],
-                    datamodule_hyperparameters[key]
-                ):
-                    inconsistent_keys.append(key)
-            if inconsistent_keys:
-                raise RuntimeError(
-                    "Cannot merge model and datamodule hyperparameters because "
-                    f"the shared keys {inconsistent_keys!r} have different values."
-                )
-            merged_hyperparameters: HyperparameterDict | None = {
-                **module_hyperparameters,
-                **datamodule_hyperparameters
-            }
-        elif module_hyperparameters is not None:
-            merged_hyperparameters: HyperparameterDict | None = (
-                module_hyperparameters
-            )
-        elif datamodule_hyperparameters is not None:
-            merged_hyperparameters: HyperparameterDict | None = (
-                datamodule_hyperparameters
-            )
-        if merged_hyperparameters is None:
-            return
-        filtered_hyperparameters: HyperparameterDict = {
-            key: value
-            for key, value in merged_hyperparameters.items()
-            if key != "_class_path"
-        }
-        if is_rank_zero():
-            self._log_hyperparams(filtered_hyperparameters)
-
-    def _hyperparameters_equal(self, first: object, second: object) -> bool:
-        if type(first) is not type(second):
-            return False
-        if isinstance(first, torch.Tensor) and isinstance(second, torch.Tensor):
-            return first is second
-        if first is second:
-            return True
-        try:
-            comparison: object = first == second
-        except Exception:
-            return False
-        if isinstance(comparison, bool):
-            return comparison
-        try:
-            return bool(comparison)
-        except (RuntimeError, TypeError, ValueError):
-            return False
+        self._logger_connector.autolog_hyperparameters(module, datamodule)
 
     @property
     def callbacks(self) -> list[Callback]:
@@ -2487,24 +2360,19 @@ class Trainer:
 
     @property
     def logger(self) -> Logger | None:
-        return self._loggers[0] if self._loggers else None
+        return self._logger_connector.logger
 
     @logger.setter
     def logger(self, logger: Logger | None) -> None:
-        if logger is not None and not isinstance(logger, Logger):
-            raise TypeError("`logger` must be a Logger or None.")
-        self._loggers = [] if logger is None else [logger]
+        self._logger_connector.logger = logger
 
     @property
     def loggers(self) -> list[Logger]:
-        return self._loggers
+        return self._logger_connector.loggers
 
     @loggers.setter
     def loggers(self, loggers: list[Logger] | None) -> None:
-        resolved_loggers: list[Logger] = [] if loggers is None else list(loggers)
-        if not all(isinstance(logger, Logger) for logger in resolved_loggers):
-            raise TypeError("`loggers` must contain only Logger instances.")
-        self._loggers = resolved_loggers
+        self._logger_connector.loggers = loggers
 
     @property
     def default_root_dir(self) -> str:
@@ -2512,14 +2380,7 @@ class Trainer:
 
     @property
     def log_dir(self) -> str:
-        logger: Logger | None = self.logger
-        if isinstance(logger, CSVLogger | TensorBoardLogger):
-            dirpath: str = logger.log_dir
-        elif logger is not None:
-            dirpath: str = logger.save_dir
-        else:
-            dirpath: str = self.default_root_dir
-        return self.strategy.broadcast(dirpath)
+        return self._logger_connector.log_dir
 
     @property
     def current_epoch(self) -> int:
@@ -2619,11 +2480,11 @@ class Trainer:
 
     @property
     def callback_metrics(self) -> dict[str, torch.Tensor]:
-        return dict(self._callback_metrics)
+        return dict(self._logger_connector.callback_metrics)
 
     @property
     def logged_metrics(self) -> dict[str, torch.Tensor]:
-        return dict(self._logged_metrics)
+        return dict(self._logger_connector.logged_metrics)
 
     @property
     def progress_bar_metrics(self) -> dict[str, float]:
@@ -2631,7 +2492,7 @@ class Trainer:
         if running_stage == "sanity_checking":
             return {}
         resolved_stage: RunningStage | None = (
-            running_stage if running_stage is not None else self._last_progress_bar_stage
+            running_stage if running_stage is not None else self._logger_connector.last_progress_bar_stage
         )
         if resolved_stage is None:
             return {}

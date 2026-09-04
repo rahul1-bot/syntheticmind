@@ -245,7 +245,7 @@ class FitLoop(Loop):
                 reset: object = getattr(metric.value, "reset")
                 if callable(reset):
                     reset()
-        trainer._callback_metrics.update(callback_metrics)
+        trainer._logger_connector.callback_metrics.update(callback_metrics)
         trainer._update_logged_metrics(log_metrics)
         trainer._update_progress_bar_metrics("training", progress_bar_metrics)
         if log_metrics and trainer.loggers and DistributedUtils.is_rank_zero():

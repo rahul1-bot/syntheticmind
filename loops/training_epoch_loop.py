@@ -1029,7 +1029,7 @@ class TrainingEpochLoop(Loop):
                         batch_size=resolved_batch_size
                     )
 
-        self.trainer._callback_metrics.update(callback_step_metrics)
+        self.trainer._logger_connector.callback_metrics.update(callback_step_metrics)
         self.trainer._update_logged_metrics(step_metrics)
         self.trainer._update_progress_bar_metrics("training", progress_bar_step_metrics)
         if (
@@ -1074,7 +1074,7 @@ class TrainingEpochLoop(Loop):
                 progress_bar_reduced[epoch_name] = self.trainer._metric_to_float(value)
         for _, accumulator in epoch_accum.values():
             accumulator.reset()
-        self.trainer._callback_metrics.update(callback_reduced)
+        self.trainer._logger_connector.callback_metrics.update(callback_reduced)
         self.trainer._update_logged_metrics(logger_reduced)
         self.trainer._update_progress_bar_metrics("training", progress_bar_reduced)
         if not self.trainer.loggers:
