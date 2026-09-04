@@ -1,37 +1,7 @@
-# This module:
-# 1. Orchestrates the epoch sequence of a fit run: per-epoch dataloader
-#    management, the train-epoch hook pairs, delegation to the training epoch
-#    loop, epoch-end validation, epoch-interval scheduler stepping, and epoch
-#    counter advancement
-# 2. Propagates cooperative stop requests raised during an epoch into
-#    termination of the epoch sequence
-#
-# Design decisions:
-# - The epoch range starts at the trainer state's current epoch rather than
-#   zero, so a run restored from a checkpoint resumes at the correct epoch
-#   without additional bookkeeping here
-# - When dataloader reloading is configured, the dataloaders are rebuilt from
-#   the datamodule at the configured epoch interval and re-wrapped with a
-#   DistributedSampler where distributed execution requires one, and the
-#   trainer's cached batch totals are refreshed to match
-# - DistributedSampler.set_epoch is called before each epoch because the
-#   sampler derives its shuffling permutation from the epoch number; omitting
-#   the call would repeat the first epoch's shuffle order indefinitely
-# - The module's on_train_epoch_end hook runs before the callback epoch-end
-#   hooks, and metrics logged inside it are flushed to the logger first, so
-#   callbacks observe a fully updated metric state at their epoch boundary
-# - Epoch-interval schedulers advance after epoch-end validation because the
-#   plateau scheduler consumes a monitored validation metric; a missing
-#   monitor key raises a configuration error that lists the available metric
-#   names instead of silently skipping the scheduler step
-# - Gradients are cleared before epoch-end validation so validation never
-#   observes stale training gradients, and the module is returned to training
-#   mode afterwards
-#
-# Author: Rahul Sawhney
+from collections.abc import Callable, Iterable
+from typing import cast
 
-from typing import TYPE_CHECKING
-
+import syntheticmind
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
 
@@ -43,36 +13,20 @@ from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.combined_loader import CombinedLoader
-from syntheticmind.types import RunningStage
-
-if TYPE_CHECKING:
-    from syntheticmind.trainer.trainer import Trainer
+from syntheticmind.types import Batch, RunningStage
 
 __all__: list[str] = ["FitLoop"]
 
 
 class FitLoop(Loop):
-    # Loop that drives the full fit run. The trainer constructs it with the
-    # epoch budget and attaches the configured TrainingEpochLoop before
-    # execution; each run() invocation then iterates epochs until the budget
-    # is exhausted or a cooperative stop is raised.
     def __init__(self, min_epochs: int, max_epochs: int) -> None:
-        # Binds the epoch budget. The epoch-loop slot is populated by the
-        # trainer during its own construction, after the epoch loop has been
-        # configured from the trainer arguments.
         super().__init__()
         self.min_epochs: int = min_epochs
         self.max_epochs: int = max_epochs
         self.epoch_loop: TrainingEpochLoop | None = None
 
     def run(self) -> None:
-        # Executes the epoch sequence. Each iteration performs: the optional
-        # dataloader reload, distributed-sampler epoch seeding, the
-        # train-epoch-start hook pair, one full training epoch through the
-        # epoch loop, the train-epoch-end hook pair with hook-metric flushing,
-        # optional epoch-end validation, epoch-interval scheduler stepping,
-        # and the epoch counter advancement with stop-flag propagation.
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         module: Module | None = trainer.module
         assert module is not None
         state: TrainerState = trainer.state
@@ -94,6 +48,29 @@ class FitLoop(Loop):
         ):
             return
 
+        self._run_training_start(trainer, module, callbacks)
+
+        while not self._max_epochs_reached(state) and not self._max_steps_reached(state):
+            trainer._raise_if_sigterm()
+            if self.should_stop or (trainer.should_stop and self._can_stop_early(state)):
+                break
+            self._run_epoch(
+                trainer,
+                module,
+                state,
+                callbacks,
+                monitoring_callbacks,
+                non_monitoring_callbacks
+            )
+
+        self._run_training_end(trainer, module, callbacks)
+
+    def _run_training_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback]
+    ) -> None:
         trainer._call_callback_hooks(
             module,
             "on_train_start",
@@ -105,95 +82,115 @@ class FitLoop(Loop):
             module.on_train_start
         )
 
-        while not self._max_epochs_reached(state) and not self._max_steps_reached(state):
-            trainer._raise_if_sigterm()
-            if self.should_stop or (trainer.should_stop and self._can_stop_early(state)):
-                break
-            epoch: int = state.current_epoch
-
-            # Optional dataloader reload: rebuild from the datamodule at the
-            # configured epoch interval, re-wrap for distributed execution,
-            # and refresh the trainer's cached batch totals to match.
-            trainer._ensure_train_dataloader()
-
-            # DistributedSampler derives its shuffle permutation from the
-            # epoch number; seeding it every epoch prevents repeating the
-            # first epoch's shuffle order indefinitely.
-            combined_loader: CombinedLoader | None = trainer._data_connector.train_combined_loader
-            if combined_loader is not None:
-                for train_dl in combined_loader.flattened:
-                    if (
-                        isinstance(train_dl, DataLoader)
-                        and isinstance(train_dl.sampler, DistributedSampler)
-                    ):
-                        train_dl.sampler.set_epoch(epoch)
-
-            state.set_running_stage("training")
-            module._running_stage: RunningStage | None = "training"
-            trainer._reset_progress_bar_metrics("training")
-            trainer._reset_progress_bar_metrics("validating")
-            module.train()
-            self.epoch_loop.is_last_batch: bool = False
-
-            trainer._call_callback_hooks(
+    def _run_epoch(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState,
+        callbacks: list[Callback],
+        monitoring_callbacks: list[Callback],
+        non_monitoring_callbacks: list[Callback]
+    ) -> None:
+        assert self.epoch_loop is not None
+        epoch: int = state.current_epoch
+        trainer._ensure_train_dataloader()
+        self._set_sampler_epoch(trainer, epoch)
+        state.set_running_stage("training")
+        module._running_stage: RunningStage | None = "training"
+        trainer._reset_progress_bar_metrics("training")
+        trainer._reset_progress_bar_metrics("validating")
+        module.train()
+        self.epoch_loop.is_last_batch: bool = False
+        self._run_epoch_start(trainer, module, callbacks)
+        with trainer.profiler.profile("run_training_epoch"):
+            self.epoch_loop.run()
+        self._run_epoch_end(
+            trainer,
+            module,
+            state,
+            monitoring_callbacks,
+            non_monitoring_callbacks
+        )
+        if module.automatic_optimization:
+            self.epoch_loop.update_plateau_schedulers(
+                trainer,
                 module,
-                "on_train_epoch_start",
-                callback_group=callbacks
+                "epoch",
+                state.current_epoch + 1
             )
-            trainer._call_module_hook(
-                module,
-                "on_train_epoch_start",
-                module.on_train_epoch_start
-            )
+        state.increment_epoch()
+        module._current_epoch: int = state.current_epoch
+        trainer._raise_if_sigterm()
+        if trainer.should_stop and self._can_stop_early(state):
+            self.should_stop: bool = True
 
-            with trainer.profiler.profile("run_training_epoch"):
-                self.epoch_loop.run()
+    def _set_sampler_epoch(
+        self,
+        trainer: syntheticmind.Trainer,
+        epoch: int
+    ) -> None:
+        combined_loader: CombinedLoader | None = (
+            trainer._data_connector.train_combined_loader
+        )
+        if combined_loader is None:
+            return
+        train_dataloader: DataLoader | Iterable[Batch]
+        for train_dataloader in combined_loader.flattened:
+            if isinstance(
+                train_dataloader,
+                DataLoader
+            ) and isinstance(train_dataloader.sampler, DistributedSampler):
+                train_dataloader.sampler.set_epoch(epoch)
 
-            trainer._call_callback_hooks(
-                module,
-                "on_train_epoch_end",
-                callback_group=non_monitoring_callbacks
-            )
-            trainer._call_module_hook(
-                module,
-                "on_train_epoch_end",
-                module.on_train_epoch_end
-            )
-            self._flush_hook_metrics(module, trainer, state)
-            trainer._call_callback_hooks(
-                module,
-                "on_train_epoch_end",
-                callback_group=monitoring_callbacks
-            )
+    def _run_epoch_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback]
+    ) -> None:
+        trainer._call_callback_hooks(
+            module,
+            "on_train_epoch_start",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_train_epoch_start",
+            module.on_train_epoch_start
+        )
 
-            module._reset_logged_metrics()
+    def _run_epoch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState,
+        monitoring_callbacks: list[Callback],
+        non_monitoring_callbacks: list[Callback]
+    ) -> None:
+        trainer._call_callback_hooks(
+            module,
+            "on_train_epoch_end",
+            callback_group=non_monitoring_callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_train_epoch_end",
+            module.on_train_epoch_end
+        )
+        self._flush_hook_metrics(module, trainer, state)
+        trainer._call_callback_hooks(
+            module,
+            "on_train_epoch_end",
+            callback_group=monitoring_callbacks
+        )
+        module._reset_logged_metrics()
 
-            # Epoch-end validation runs with cleared gradients so it never
-            # observes stale training gradients, and the module returns to
-            # training mode afterwards.
-
-            # Epoch-interval schedulers advance after epoch-end validation
-            # because the plateau family consumes a monitored validation
-            # metric; a missing monitor key is a configuration error, never a
-            # silent skip.
-            if module.automatic_optimization:
-                self.epoch_loop.update_plateau_schedulers(
-                    trainer,
-                    module,
-                    "epoch",
-                    state.current_epoch + 1
-                )
-
-            state.increment_epoch()
-            module._current_epoch: int = state.current_epoch
-            trainer._raise_if_sigterm()
-
-            # A stop raised at trainer level (early stopping, strategies)
-            # propagates to the loop-local flag, ending the epoch sequence
-            # cooperatively at the epoch boundary.
-            if trainer.should_stop and self._can_stop_early(state):
-                self.should_stop: bool = True
-
+    def _run_training_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback]
+    ) -> None:
         trainer._call_callback_hooks(
             module,
             "on_train_end",
@@ -219,11 +216,7 @@ class FitLoop(Loop):
             )
         )
 
-    def _flush_hook_metrics(self, module: Module, trainer: Trainer, state: TrainerState) -> None:
-        # Emits metrics logged inside the module's on_train_epoch_end hook.
-        # These arrive after the epoch loop has already dispatched its epoch
-        # metrics, so they are flushed here directly to the logger from rank
-        # zero and the module's logging buffer is cleared afterwards.
+    def _flush_hook_metrics(self, module: Module, trainer: syntheticmind.Trainer, state: TrainerState) -> None:
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return
@@ -244,12 +237,14 @@ class FitLoop(Loop):
             if metric.progress_bar:
                 progress_bar_metrics[metric_name] = trainer._metric_to_float(val)
             if metric.is_metric:
-                reset: object = getattr(metric.value, "reset")
-                if callable(reset):
-                    reset()
+                reset: Callable[[], None] = cast(
+                    Callable[[], None],
+                    getattr(metric.value, "reset")
+                )
+                reset()
         trainer._logger_connector.callback_metrics.update(callback_metrics)
         trainer._update_logged_metrics(log_metrics)
         trainer._update_progress_bar_metrics("training", progress_bar_metrics)
-        if log_metrics and trainer.loggers and trainer.is_global_zero:
+        if log_metrics and trainer.loggers:
             trainer._log_metrics(log_metrics, step=state.global_step)
         module._reset_logged_metrics()

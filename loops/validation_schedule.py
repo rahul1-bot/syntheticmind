@@ -8,45 +8,6 @@ __all__: list[str] = ["ValidationSchedule"]
 type _ValidationInterval = int | float | str | timedelta | dict[str, int]
 
 
-def _parse_time_interval(interval: str | timedelta | dict[str, int]) -> float:
-    if isinstance(interval, timedelta):
-        seconds: float = interval.total_seconds()
-    elif isinstance(interval, dict):
-        try:
-            seconds = timedelta(**interval).total_seconds()
-        except (TypeError, OverflowError) as exception:
-            raise MisconfigurationError(
-                f"Invalid time-based `val_check_interval`: {interval!r}."
-            ) from exception
-    else:
-        parts: list[str] = interval.split(":")
-        if len(parts) != 4:
-            raise MisconfigurationError(
-                f"Invalid time format for `val_check_interval`: {interval!r}. "
-                "Expected 'DD:HH:MM:SS'."
-            )
-        try:
-            days, hours, minutes, seconds_component = (
-                int(component) for component in parts
-            )
-        except ValueError as exception:
-            raise MisconfigurationError(
-                f"Non-integer component in `val_check_interval`: {interval!r}. "
-                "Use 'DD:HH:MM:SS'."
-            ) from exception
-        seconds = timedelta(
-            days=days,
-            hours=hours,
-            minutes=minutes,
-            seconds=seconds_component
-        ).total_seconds()
-    if seconds < 0.0:
-        raise MisconfigurationError(
-            f"Time-based `val_check_interval` must be non-negative, got {seconds}."
-        )
-    return seconds
-
-
 class ValidationSchedule:
     def __init__(
         self,
@@ -87,7 +48,9 @@ class ValidationSchedule:
                     "Float `val_check_interval` must be in [0.0, 1.0]."
                 )
         elif isinstance(self.val_check_interval, (str, timedelta, dict)):
-            self.time_interval_seconds = _parse_time_interval(self.val_check_interval)
+            self.time_interval_seconds: float | None = self._parse_time_interval(
+                self.val_check_interval
+            )
         else:
             raise MisconfigurationError(
                 f"Unsupported type for `val_check_interval`: {type(self.val_check_interval)!r}."
@@ -102,11 +65,11 @@ class ValidationSchedule:
         validation_enabled: bool,
         reset_time: bool
     ) -> None:
-        self._validation_enabled = validation_enabled
+        self._validation_enabled: bool = validation_enabled
         if self.time_interval_seconds is not None:
-            self.batch_interval = None
+            self.batch_interval: int | None = None
         elif isinstance(self.val_check_interval, int):
-            self.batch_interval = self.val_check_interval
+            self.batch_interval: int | None = self.val_check_interval
             if (
                 validation_enabled
                 and max_batches is not None
@@ -125,12 +88,15 @@ class ValidationSchedule:
                     "An unsized training dataloader requires a time-based interval, an integer "
                     "interval, or `val_check_interval=1.0`."
                 )
-            self.batch_interval = None
+            self.batch_interval: int | None = None
         else:
             assert isinstance(self.val_check_interval, float)
-            self.batch_interval = max(1, int(max_batches * self.val_check_interval))
+            self.batch_interval: int | None = max(
+                1,
+                int(max_batches * self.val_check_interval)
+            )
         if reset_time:
-            self._last_validation_time = time.monotonic()
+            self._last_validation_time: float = time.monotonic()
 
     def is_epoch_eligible(self, current_epoch: int) -> bool:
         return (
@@ -164,7 +130,7 @@ class ValidationSchedule:
 
     def mark_validation_end(self) -> None:
         if self.time_interval_seconds is not None:
-            self._last_validation_time = time.monotonic()
+            self._last_validation_time: float = time.monotonic()
 
     @property
     def enabled(self) -> bool:
@@ -177,3 +143,55 @@ class ValidationSchedule:
             and self.time_interval_seconds is None
             and self.batch_interval is None
         )
+
+    def _parse_time_interval(
+        self,
+        interval: str | timedelta | dict[str, int]
+    ) -> float:
+        if isinstance(interval, timedelta):
+            seconds: float = interval.total_seconds()
+        elif isinstance(interval, dict):
+            try:
+                seconds: float = timedelta(**interval).total_seconds()
+            except (TypeError, OverflowError) as exception:
+                raise MisconfigurationError(
+                    f"Invalid time-based `val_check_interval`: {interval!r}."
+                ) from exception
+        else:
+            parts: list[str] = interval.split(":")
+            if len(parts) != 4:
+                raise MisconfigurationError(
+                    f"Invalid time format for `val_check_interval`: {interval!r}. "
+                    "Expected 'DD:HH:MM:SS'."
+                )
+            try:
+                components: list[int] = [int(component) for component in parts]
+            except ValueError as exception:
+                raise MisconfigurationError(
+                    f"Non-integer component in `val_check_interval`: {interval!r}. "
+                    "Use 'DD:HH:MM:SS'."
+                ) from exception
+            days: int = components[0]
+            hours: int = components[1]
+            minutes: int = components[2]
+            seconds_component: int = components[3]
+            if (
+                days < 0
+                or not 0 <= hours <= 23
+                or not 0 <= minutes <= 59
+                or not 0 <= seconds_component <= 59
+            ):
+                raise MisconfigurationError(
+                    f"Invalid `val_check_interval` clock fields: {interval!r}."
+                )
+            seconds: float = timedelta(
+                days=days,
+                hours=hours,
+                minutes=minutes,
+                seconds=seconds_component
+            ).total_seconds()
+        if seconds < 0.0:
+            raise MisconfigurationError(
+                f"Time-based `val_check_interval` must be non-negative, got {seconds}."
+            )
+        return seconds

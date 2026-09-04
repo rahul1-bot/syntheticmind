@@ -1,40 +1,9 @@
-# This module:
-# 1. Executes one complete validation or test pass under torch.inference_mode:
-#    stage-specific lifecycle hooks, the batch-transfer hook chain, step
-#    execution, and metric accumulation with epoch-level reduction
-# 2. Serves both the standalone validate and test entry points and the
-#    validation passes scheduled by the fit loop
-#
-# Design decisions:
-# - One loop class serves both evaluation stages. The stage field selects the
-#    dataloader, the running-stage marker, and the hook family, keeping the
-#    execution skeleton identical for validation and test
-# - The entire batch loop runs inside torch.inference_mode, which disables
-#   gradient tracking and version-counter bookkeeping entirely, since no
-#   evaluation path may mutate training state
-# - The module's epoch-end hook executes before the callback epoch-end hooks,
-#   and metrics logged inside that hook are folded into the epoch-metric
-#   mapping first, so monitoring callbacks such as early stopping and model
-#   checkpointing observe every epoch-level metric, including those produced
-#   at epoch end
-# - The batch-transfer hook chain applies the same datamodule-over-module
-#   precedence rule as the training epoch loop, decided per hook by comparing
-#   bound implementations against the DataModule base attributes
-# - Step-scoped logger metrics are emitted immediately per batch from rank
-#   zero; epoch-scoped metrics accumulate under each metric's declared
-#   reduction and reach the logger only from rank zero, while the trainer's
-#   callback metrics are updated on every rank
-# - The reduced epoch metrics are returned to the caller and also stored on
-#   the loop, because the fit loop reads them for monitored-metric resolution
-#   after each validation pass
-#
-# Author: Rahul Sawhney
-
 import inspect
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, cast
 
+import syntheticmind
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, DistributedSampler
@@ -46,33 +15,35 @@ from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.trainer.states import TrainerState
-from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import MetricAccumulator, extract_batch_size
-from syntheticmind.types import Batch, RunningStage, StepOutput
-
-if TYPE_CHECKING:
-    from syntheticmind.trainer.trainer import Trainer
+from syntheticmind.types import Batch, RunningStage, StepArgument, StepOutput
 
 __all__: list[str] = ["EvaluationLoop"]
 
+type _EvaluationStage = Literal["validate", "test"]
+type _EvaluationSetup = tuple[
+    CombinedLoader,
+    RunningStage,
+    int | None,
+    bool,
+    int,
+    bool
+]
+type _EpochAccumulator = dict[str, tuple[LoggedMetric, MetricAccumulator]]
+type _BatchHookArguments = tuple[StepArgument, ...]
+type _EvaluationStepHook = Callable[..., StepOutput]
+type _EvaluationHook = Callable[..., StepOutput | None]
+
 
 class EvaluationLoop(Loop):
-    # Loop that executes one evaluation pass over the stage's dataloader each
-    # time run() is invoked. The trainer owns two instances, one per stage:
-    # the validate instance additionally serves mid-epoch and epoch-end
-    # validation during fit, and its reduced epoch metrics feed the monitored
-    # values consumed by checkpointing and early stopping.
     def __init__(
         self,
-        stage: Literal["validate", "test"] = "validate",
+        stage: _EvaluationStage = "validate",
         inference_mode: bool = True
     ) -> None:
-        # Binds the evaluation stage and the optional batch ceiling, and
-        # initializes the epoch-metric mapping that run() repopulates on every
-        # invocation.
         super().__init__()
-        self.stage: Literal["validate", "test"] = stage
+        self.stage: _EvaluationStage = stage
         self.inference_mode: bool = inference_mode
         self.verbose: bool = True
         self.epoch_metrics: dict[str, float] = {}
@@ -89,23 +60,11 @@ class EvaluationLoop(Loop):
             return self._run()
 
     def _run(self) -> list[dict[str, float]]:
-        # Executes one full evaluation pass. The sequence is: switch the module
-        # to evaluation mode through its stage hook, fire the stage-start and
-        # epoch-start hook pairs, iterate batches under inference mode with the
-        # batch-start hooks, the batch-transfer chain, the strategy step, and
-        # the batch-end hooks, then reduce epoch accumulators, fire the
-        # epoch-end and stage-end hook pairs, and publish the reduced metrics
-        # to the trainer's callback metrics.
-        self.epoch_metrics: dict[str, float] = {}
-        self._callback_epoch_metrics: dict[str, torch.Tensor] = {}
-        self._logger_epoch_metrics: dict[str, torch.Tensor] = {}
-        self._progress_bar_epoch_metrics: dict[str, float] = {}
-        self.results: list[dict[str, float]] = []
+        self._reset_results()
 
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         module: Module | None = trainer.module
         assert module is not None
-        strategy: Strategy = trainer.strategy
         state: TrainerState = trainer.state
         callbacks: list[Callback] = trainer.callbacks
         monitoring_callbacks: list[Callback] = [
@@ -114,20 +73,267 @@ class EvaluationLoop(Loop):
         non_monitoring_callbacks: list[Callback] = [
             callback for callback in callbacks if not isinstance(callback, (EarlyStopping, Checkpoint))
         ]
-        device: torch.device = strategy.root_device
-        model: nn.Module | None = strategy.model
-        assert model is not None
+        evaluation_setup: _EvaluationSetup = self._prepare_evaluation(
+            trainer,
+            module,
+            state
+        )
+        combined_loader: CombinedLoader = evaluation_setup[0]
+        running_stage: RunningStage = evaluation_setup[1]
+        max_batches: int | None = evaluation_setup[2]
+        sequential: bool = evaluation_setup[3]
+        num_dataloaders: int = evaluation_setup[4]
+        include_dataloader_idx: bool = evaluation_setup[5]
+        if max_batches == 0:
+            module._reset_logged_metrics()
+            return self.results
+        self._verify_dataloader_idx_requirements(module, include_dataloader_idx)
 
-        running_stage: RunningStage = "validating" if self.stage == "validate" else "testing"
+        training_modes: dict[str, bool] = module._capture_training_modes()
+        self._set_evaluation_mode(trainer, module)
+        self._run_stage_start(trainer, module, callbacks)
+        result_count: int = num_dataloaders if sequential else 1
+        epoch_accumulators: list[_EpochAccumulator] = [
+            {} for _ in range(result_count)
+        ]
+        self._run_batches(
+            trainer,
+            module,
+            callbacks,
+            combined_loader,
+            max_batches,
+            sequential,
+            include_dataloader_idx,
+            running_stage,
+            epoch_accumulators
+        )
+
+        self._publish_epoch_metrics(
+            trainer,
+            state,
+            running_stage,
+            epoch_accumulators
+        )
+
+        self._run_stage_end(
+            trainer,
+            module,
+            state,
+            running_stage,
+            callbacks,
+            monitoring_callbacks,
+            non_monitoring_callbacks,
+            training_modes
+        )
+
+        module._reset_logged_metrics()
+        trainer._raise_if_sigterm()
+        return self.results
+
+    def _reset_results(self) -> None:
+        self.epoch_metrics: dict[str, float] = {}
+        self._callback_epoch_metrics: dict[str, torch.Tensor] = {}
+        self._logger_epoch_metrics: dict[str, torch.Tensor] = {}
+        self._progress_bar_epoch_metrics: dict[str, float] = {}
+        self.results: list[dict[str, float]] = []
+
+    def _publish_epoch_metrics(
+        self,
+        trainer: syntheticmind.Trainer,
+        state: TrainerState,
+        running_stage: RunningStage,
+        epoch_accumulators: list[_EpochAccumulator]
+    ) -> None:
+        self.results: list[dict[str, float]] = [
+            self._reduce_epoch_metrics(epoch_accumulator)
+            for epoch_accumulator in epoch_accumulators
+        ]
+        self.epoch_metrics: dict[str, float] = {
+            name: value
+            for result in self.results
+            for name, value in result.items()
+        }
+        if not trainer.sanity_checking:
+            trainer._update_progress_bar_metrics(
+                running_stage,
+                self._progress_bar_epoch_metrics
+            )
+            trainer._update_logged_metrics(self._logger_epoch_metrics)
+        if trainer.loggers and self._logger_epoch_metrics:
+            trainer._log_metrics(
+                self._logger_epoch_metrics,
+                step=state.global_step
+            )
+
+    def _run_stage_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState,
+        running_stage: RunningStage,
+        callbacks: list[Callback],
+        monitoring_callbacks: list[Callback],
+        non_monitoring_callbacks: list[Callback],
+        training_modes: dict[str, bool]
+    ) -> None:
+        if self.stage == "validate":
+            self._run_validation_end(
+                trainer,
+                module,
+                state,
+                running_stage,
+                callbacks,
+                monitoring_callbacks,
+                non_monitoring_callbacks,
+                training_modes
+            )
+            return
+        self._run_test_end(
+            trainer,
+            module,
+            state,
+            running_stage,
+            callbacks,
+            training_modes
+        )
+
+    def _run_validation_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState,
+        running_stage: RunningStage,
+        callbacks: list[Callback],
+        monitoring_callbacks: list[Callback],
+        non_monitoring_callbacks: list[Callback],
+        training_modes: dict[str, bool]
+    ) -> None:
+        trainer._logger_connector.callback_metrics.update(
+            self._callback_epoch_metrics
+        )
+        trainer._call_callback_hooks(
+            module,
+            "on_validation_epoch_end",
+            callback_group=non_monitoring_callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_validation_epoch_end",
+            module.on_validation_epoch_end
+        )
+        self._merge_epoch_end_hook_metrics(module, state, running_stage)
+        trainer._call_callback_hooks(
+            module,
+            "on_validation_epoch_end",
+            callback_group=monitoring_callbacks
+        )
+        trainer._call_callback_hooks(
+            module,
+            "on_validation_end",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_validation_end",
+            module.on_validation_end
+        )
+        if trainer._hook_is_overridden(
+            "on_validation_model_train",
+            module,
+            Module
+        ):
+            trainer._call_module_hook(
+                module,
+                "on_validation_model_train",
+                module.on_validation_model_train
+            )
+        else:
+            module._restore_training_modes(training_modes)
+
+    def _run_test_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState,
+        running_stage: RunningStage,
+        callbacks: list[Callback],
+        training_modes: dict[str, bool]
+    ) -> None:
+        trainer._logger_connector.callback_metrics.update(
+            self._callback_epoch_metrics
+        )
+        trainer._call_callback_hooks(
+            module,
+            "on_test_epoch_end",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_test_epoch_end",
+            module.on_test_epoch_end
+        )
+        self._merge_epoch_end_hook_metrics(module, state, running_stage)
+        trainer._call_callback_hooks(
+            module,
+            "on_test_end",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_test_end",
+            module.on_test_end
+        )
+        if trainer._hook_is_overridden(
+            "on_test_model_train",
+            module,
+            Module
+        ):
+            trainer._call_module_hook(
+                module,
+                "on_test_model_train",
+                module.on_test_model_train
+            )
+        else:
+            module._restore_training_modes(training_modes)
+
+    def _merge_epoch_end_hook_metrics(
+        self,
+        module: Module,
+        state: TrainerState,
+        running_stage: RunningStage
+    ) -> None:
+        batch_epoch_metrics: dict[str, float] = dict(self.epoch_metrics)
+        self._consume_epoch_end_hook_metrics(module, state, running_stage)
+        hook_epoch_metrics: dict[str, float] = {
+            name: value
+            for name, value in self.epoch_metrics.items()
+            if name not in batch_epoch_metrics or batch_epoch_metrics[name] != value
+        }
+        result: dict[str, float]
+        for result in self.results:
+            result.update(hook_epoch_metrics)
+        self.trainer._logger_connector.callback_metrics.update(
+            self._callback_epoch_metrics
+        )
+
+    def _prepare_evaluation(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState
+    ) -> _EvaluationSetup:
+        running_stage: RunningStage = (
+            "validating" if self.stage == "validate" else "testing"
+        )
         active_running_stage: RunningStage = (
             "sanity_checking" if trainer.sanity_checking else running_stage
         )
         state.set_running_stage(active_running_stage)
-        module._running_stage = active_running_stage
+        module._running_stage: RunningStage | None = active_running_stage
         if not trainer.sanity_checking:
             trainer._reset_progress_bar_metrics(running_stage)
-
         combined_loader: CombinedLoader = self._get_combined_loader()
+        dataloader: Iterable[Batch]
         for dataloader in combined_loader.flattened:
             if (
                 isinstance(dataloader, DataLoader)
@@ -140,38 +346,49 @@ class EvaluationLoop(Loop):
             else trainer.num_test_batches
         )
         if trainer.sanity_checking:
-            num_batches = [
+            num_batches: list[int | float] = [
                 min(trainer.num_sanity_val_steps, batches)
                 for batches in num_batches
             ]
-        combined_loader.limits = num_batches
-        total_batches: int | None = combined_loader._length()
-        max_batches: int | None = total_batches
+        combined_loader.limits: list[int | float | None] | None = num_batches
+        max_batches: int | None = combined_loader._length()
         trainer._raise_if_sigterm()
-        if max_batches == 0:
-            module._reset_logged_metrics()
-            return self.results
-
         sequential: bool = combined_loader.mode == "sequential"
         num_dataloaders: int = len(combined_loader.flattened)
         include_dataloader_idx: bool = sequential and num_dataloaders > 1
-        self._verify_dataloader_idx_requirements(module, include_dataloader_idx)
+        return (
+            combined_loader,
+            running_stage,
+            max_batches,
+            sequential,
+            num_dataloaders,
+            include_dataloader_idx
+        )
 
-        training_modes: dict[str, bool] = module._capture_training_modes()
-
+    def _set_evaluation_mode(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
         if self.stage == "validate":
             trainer._call_module_hook(
                 module,
                 "on_validation_model_eval",
                 module.on_validation_model_eval
             )
-        else:
-            trainer._call_module_hook(
-                module,
-                "on_test_model_eval",
-                module.on_test_model_eval
-            )
+            return
+        trainer._call_module_hook(
+            module,
+            "on_test_model_eval",
+            module.on_test_model_eval
+        )
 
+    def _run_stage_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback]
+    ) -> None:
         if self.stage == "validate":
             trainer._call_callback_hooks(
                 module,
@@ -193,302 +410,266 @@ class EvaluationLoop(Loop):
                 "on_validation_epoch_start",
                 module.on_validation_epoch_start
             )
-        else:
-            trainer._call_callback_hooks(
-                module,
-                "on_test_start",
-                callback_group=callbacks
-            )
-            trainer._call_module_hook(
-                module,
-                "on_test_start",
-                module.on_test_start
-            )
-            trainer._call_callback_hooks(
-                module,
-                "on_test_epoch_start",
-                callback_group=callbacks
-            )
-            trainer._call_module_hook(
-                module,
-                "on_test_epoch_start",
-                module.on_test_epoch_start
-            )
-        result_count: int = num_dataloaders if sequential else 1
-        epoch_accumulators: list[dict[str, tuple[LoggedMetric, MetricAccumulator]]] = [
-            {} for _ in range(result_count)
-        ]
+            return
+        trainer._call_callback_hooks(
+            module,
+            "on_test_start",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_test_start",
+            module.on_test_start
+        )
+        trainer._call_callback_hooks(
+            module,
+            "on_test_epoch_start",
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_test_epoch_start",
+            module.on_test_epoch_start
+        )
 
+    def _run_batches(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback],
+        combined_loader: CombinedLoader,
+        max_batches: int | None,
+        sequential: bool,
+        include_dataloader_idx: bool,
+        running_stage: RunningStage,
+        epoch_accumulators: list[_EpochAccumulator]
+    ) -> None:
         with trainer.profiler.profile(f"setup_{self.stage}_dataloader"):
-            data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
+            data_fetcher: _DataFetcher[tuple[Batch, int, int]] = _DataFetcher(
                 combined_loader,
                 max_batches,
                 sized=combined_loader._has_sized_iterables()
             )
-            dataloader_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
+            dataloader_iterator: Iterator[tuple[Batch, int, int]] = iter(
+                data_fetcher
+            )
         while not data_fetcher.done:
             trainer._raise_if_sigterm()
             try:
-                dataloader_prefix: str = "val" if self.stage == "validate" else "test"
+                dataloader_prefix: str = (
+                    "val" if self.stage == "validate" else "test"
+                )
                 with trainer.profiler.profile(
                     f"[{type(self).__name__}].{dataloader_prefix}_next"
                 ):
-                    fetched_batch: object
-                    fetched_batch, batch_idx, dataloader_idx = next(dataloader_iterator)
+                    fetched: tuple[Batch, int, int] = next(dataloader_iterator)
             except StopIteration:
                 break
-            batch: Batch = cast(Batch, fetched_batch)
-            module._current_dataloader_idx = (
-                dataloader_idx if include_dataloader_idx else None
-            )
-            batch: Batch = trainer.precision_plugin.convert_input(batch)
-            batch: Batch = trainer._transfer_batch(
+            self._advance_batch(
+                trainer,
                 module,
-                batch,
-                device,
-                dataloader_idx
-            )
-
-            hook_dataloader_idx: int | None = (
-                dataloader_idx if include_dataloader_idx else None
-            )
-            batch_hook_arguments: tuple[object, ...] = (
-                (batch, batch_idx)
-                if hook_dataloader_idx is None
-                else (batch, batch_idx, hook_dataloader_idx)
-            )
-            step_hook: Callable[..., StepOutput] = (
-                module.validation_step
-                if self.stage == "validate"
-                else module.test_step
-            )
-            step_arguments: tuple[object, ...] = batch_hook_arguments
-            if not module._hook_accepts_parameter(
-                step_hook,
-                "batch_idx",
-                minimum_arguments=2
-            ):
-                step_arguments = (
-                    tuple([batch])
-                    if hook_dataloader_idx is None
-                    else (batch, hook_dataloader_idx)
-                )
-
-            if self.stage == "validate":
-                trainer._call_callback_hooks(
-                    module,
-                    "on_validation_batch_start",
-                    *batch_hook_arguments,
-                    callback_group=callbacks
-                )
-                trainer._call_module_hook(
-                    module,
-                    "on_validation_batch_start",
-                    cast(Callable[..., object], module.on_validation_batch_start),
-                    *batch_hook_arguments
-                )
-            else:
-                trainer._call_callback_hooks(
-                    module,
-                    "on_test_batch_start",
-                    *batch_hook_arguments,
-                    callback_group=callbacks
-                )
-                trainer._call_module_hook(
-                    module,
-                    "on_test_batch_start",
-                    cast(Callable[..., object], module.on_test_batch_start),
-                    *batch_hook_arguments
-                )
-
-            step_context: AbstractContextManager[None] = (
-                trainer.precision_plugin.val_step_context()
-                if self.stage == "validate"
-                else trainer.precision_plugin.test_step_context()
-            )
-            with step_context:
-                if self.stage == "validate":
-                    with module._hook_context("validation_step"):
-                        outputs: StepOutput = trainer._call_strategy_hook(
-                            "validation_step",
-                            strategy.validation_step,
-                            model,
-                            *step_arguments
-                        )
-                else:
-                    with module._hook_context("test_step"):
-                        outputs = trainer._call_strategy_hook(
-                            "test_step",
-                            strategy.test_step,
-                            model,
-                            *step_arguments
-                        )
-
-            trainer._preview_logged_metrics(
-                module,
-                running_stage
-            )
-            if self.stage == "validate":
-                trainer._call_callback_hooks(
-                    module,
-                    "on_validation_batch_end",
-                    outputs,
-                    *batch_hook_arguments,
-                    callback_group=callbacks
-                )
-                trainer._call_module_hook(
-                    module,
-                    "on_validation_batch_end",
-                    cast(Callable[..., object], module.on_validation_batch_end),
-                    outputs,
-                    *batch_hook_arguments
-                )
-            else:
-                trainer._call_callback_hooks(
-                    module,
-                    "on_test_batch_end",
-                    outputs,
-                    *batch_hook_arguments,
-                    callback_group=callbacks
-                )
-                trainer._call_module_hook(
-                    module,
-                    "on_test_batch_end",
-                    cast(Callable[..., object], module.on_test_batch_end),
-                    outputs,
-                    *batch_hook_arguments
-                )
-
-            result_idx: int = dataloader_idx if sequential else 0
-            self._accumulate_metrics(
-                module,
-                epoch_accumulators[result_idx],
-                state,
+                callbacks,
+                fetched,
+                sequential,
+                include_dataloader_idx,
                 running_stage,
-                batch
+                epoch_accumulators
             )
 
-        self.results: list[dict[str, float]] = [
-            self._reduce_epoch_metrics(epoch_accumulator)
-            for epoch_accumulator in epoch_accumulators
-        ]
-        self.epoch_metrics: dict[str, float] = {
-            name: value
-            for result in self.results
-            for name, value in result.items()
-        }
-        if not trainer.sanity_checking:
-            trainer._update_progress_bar_metrics(
-                running_stage,
-                self._progress_bar_epoch_metrics
-            )
+    def _advance_batch(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback],
+        fetched: tuple[Batch, int, int],
+        sequential: bool,
+        include_dataloader_idx: bool,
+        running_stage: RunningStage,
+        epoch_accumulators: list[_EpochAccumulator]
+    ) -> None:
+        batch: Batch = trainer.precision_plugin.convert_input(fetched[0])
+        batch_idx: int = fetched[1]
+        dataloader_idx: int = fetched[2]
+        hook_dataloader_idx: int | None = (
+            dataloader_idx if include_dataloader_idx else None
+        )
+        module._current_dataloader_idx: int | None = hook_dataloader_idx
+        batch: Batch = trainer._transfer_batch(
+            module,
+            batch,
+            trainer.strategy.root_device,
+            dataloader_idx
+        )
+        hook_arguments: _BatchHookArguments = self._batch_hook_arguments(
+            batch,
+            batch_idx,
+            hook_dataloader_idx
+        )
+        step_hook: _EvaluationStepHook = (
+            module.validation_step
+            if self.stage == "validate"
+            else module.test_step
+        )
+        step_arguments: _BatchHookArguments = self._step_arguments(
+            module,
+            step_hook,
+            batch,
+            batch_idx,
+            hook_dataloader_idx
+        )
+        self._run_batch_start(trainer, module, callbacks, hook_arguments)
+        outputs: StepOutput = self._run_evaluation_step(
+            trainer,
+            module,
+            step_arguments
+        )
+        trainer._preview_logged_metrics(module, running_stage)
+        self._run_batch_end(
+            trainer,
+            module,
+            callbacks,
+            outputs,
+            hook_arguments
+        )
+        result_idx: int = dataloader_idx if sequential else 0
+        self._accumulate_metrics(
+            module,
+            epoch_accumulators[result_idx],
+            trainer.state,
+            running_stage,
+            batch
+        )
 
-        if not trainer.sanity_checking:
-            trainer._update_logged_metrics(self._logger_epoch_metrics)
-        if (
-            trainer.loggers
-            and self._logger_epoch_metrics
-            and trainer.is_global_zero
+    def _batch_hook_arguments(
+        self,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int | None
+    ) -> _BatchHookArguments:
+        if dataloader_idx is None:
+            return batch, batch_idx
+        return batch, batch_idx, dataloader_idx
+
+    def _step_arguments(
+        self,
+        module: Module,
+        step_hook: _EvaluationStepHook,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int | None
+    ) -> _BatchHookArguments:
+        if module._hook_accepts_parameter(
+            step_hook,
+            "batch_idx",
+            minimum_arguments=2
         ):
-            trainer._log_metrics(self._logger_epoch_metrics, step=state.global_step)
+            return self._batch_hook_arguments(batch, batch_idx, dataloader_idx)
+        if dataloader_idx is None:
+            return tuple([batch])
+        return batch, dataloader_idx
 
+    def _run_batch_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback],
+        hook_arguments: _BatchHookArguments
+    ) -> None:
         if self.stage == "validate":
-            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
             trainer._call_callback_hooks(
                 module,
-                "on_validation_epoch_end",
-                callback_group=non_monitoring_callbacks
-            )
-            trainer._call_module_hook(
-                module,
-                "on_validation_epoch_end",
-                module.on_validation_epoch_end
-            )
-            batch_epoch_metrics: dict[str, float] = dict(self.epoch_metrics)
-            self._consume_epoch_end_hook_metrics(module, state, running_stage)
-            hook_epoch_metrics: dict[str, float] = {
-                name: value
-                for name, value in self.epoch_metrics.items()
-                if name not in batch_epoch_metrics or batch_epoch_metrics[name] != value
-            }
-            for result in self.results:
-                result.update(hook_epoch_metrics)
-            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
-            trainer._call_callback_hooks(
-                module,
-                "on_validation_epoch_end",
-                callback_group=monitoring_callbacks
-            )
-            trainer._call_callback_hooks(
-                module,
-                "on_validation_end",
+                "on_validation_batch_start",
+                *hook_arguments,
                 callback_group=callbacks
             )
             trainer._call_module_hook(
                 module,
-                "on_validation_end",
-                module.on_validation_end
+                "on_validation_batch_start",
+                module.on_validation_batch_start,
+                *hook_arguments
             )
-            if trainer._hook_is_overridden(
-                "on_validation_model_train",
-                module,
-                Module
-            ):
-                trainer._call_module_hook(
-                    module,
-                    "on_validation_model_train",
-                    module.on_validation_model_train
-                )
-            else:
-                module._restore_training_modes(training_modes)
-        else:
-            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
-            trainer._call_callback_hooks(
-                module,
-                "on_test_epoch_end",
-                callback_group=callbacks
-            )
-            trainer._call_module_hook(
-                module,
-                "on_test_epoch_end",
-                module.on_test_epoch_end
-            )
-            batch_epoch_metrics = dict(self.epoch_metrics)
-            self._consume_epoch_end_hook_metrics(module, state, running_stage)
-            hook_epoch_metrics = {
-                name: value
-                for name, value in self.epoch_metrics.items()
-                if name not in batch_epoch_metrics or batch_epoch_metrics[name] != value
-            }
-            for result in self.results:
-                result.update(hook_epoch_metrics)
-            self.trainer._logger_connector.callback_metrics.update(self._callback_epoch_metrics)
-            trainer._call_callback_hooks(
-                module,
-                "on_test_end",
-                callback_group=callbacks
-            )
-            trainer._call_module_hook(
-                module,
-                "on_test_end",
-                module.on_test_end
-            )
-            if trainer._hook_is_overridden(
-                "on_test_model_train",
-                module,
-                Module
-            ):
-                trainer._call_module_hook(
-                    module,
-                    "on_test_model_train",
-                    module.on_test_model_train
-                )
-            else:
-                module._restore_training_modes(training_modes)
+            return
+        trainer._call_callback_hooks(
+            module,
+            "on_test_batch_start",
+            *hook_arguments,
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_test_batch_start",
+            module.on_test_batch_start,
+            *hook_arguments
+        )
 
-        module._reset_logged_metrics()
-        trainer._raise_if_sigterm()
-        return self.results
+    def _run_evaluation_step(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        step_arguments: _BatchHookArguments
+    ) -> StepOutput:
+        model: nn.Module | None = trainer.strategy.model
+        assert model is not None
+        step_context: AbstractContextManager[None] = (
+            trainer.precision_plugin.val_step_context()
+            if self.stage == "validate"
+            else trainer.precision_plugin.test_step_context()
+        )
+        with step_context:
+            if self.stage == "validate":
+                with module._hook_context("validation_step"):
+                    return trainer._call_strategy_hook(
+                        "validation_step",
+                        trainer.strategy.validation_step,
+                        model,
+                        *step_arguments
+                    )
+            with module._hook_context("test_step"):
+                return trainer._call_strategy_hook(
+                    "test_step",
+                    trainer.strategy.test_step,
+                    model,
+                    *step_arguments
+                )
+
+    def _run_batch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback],
+        outputs: StepOutput,
+        hook_arguments: _BatchHookArguments
+    ) -> None:
+        if self.stage == "validate":
+            trainer._call_callback_hooks(
+                module,
+                "on_validation_batch_end",
+                outputs,
+                *hook_arguments,
+                callback_group=callbacks
+            )
+            trainer._call_module_hook(
+                module,
+                "on_validation_batch_end",
+                module.on_validation_batch_end,
+                outputs,
+                *hook_arguments
+            )
+            return
+        trainer._call_callback_hooks(
+            module,
+            "on_test_batch_end",
+            outputs,
+            *hook_arguments,
+            callback_group=callbacks
+        )
+        trainer._call_module_hook(
+            module,
+            "on_test_batch_end",
+            module.on_test_batch_end,
+            outputs,
+            *hook_arguments
+        )
 
     def _verify_dataloader_idx_requirements(
         self,
@@ -501,8 +682,11 @@ class EvaluationLoop(Loop):
             f"on_{prefix}_batch_start",
             f"on_{prefix}_batch_end"
         ):
-            hook: object = getattr(module, hook_name)
-            if not callable(hook):
+            hook: _EvaluationHook | None = cast(
+                _EvaluationHook | None,
+                getattr(module, hook_name, None)
+            )
+            if hook is None or not callable(hook):
                 continue
             parameters: dict[str, inspect.Parameter] = dict(
                 inspect.signature(hook).parameters
@@ -535,10 +719,7 @@ class EvaluationLoop(Loop):
                 )
 
     def _get_combined_loader(self) -> CombinedLoader:
-        # Selects the dataloader belonging to the configured stage. The
-        # assertions document that the trainer entry points guarantee the
-        # corresponding dataloader exists before this loop runs.
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         if self.stage == "validate":
             if trainer.state.stage == "fit":
                 trainer._ensure_val_dataloader()
@@ -555,12 +736,6 @@ class EvaluationLoop(Loop):
         running_stage: RunningStage,
         batch: Batch
     ) -> None:
-        # Drains the module's logged-metric buffer after each batch. Metrics
-        # marked for distributed synchronization are mean-reduced across ranks
-        # first. Step-scoped logger metrics are emitted immediately from rank
-        # zero; epoch-scoped metrics feed per-name accumulators under their
-        # declared reduction and batch-size weighting, with logger visibility
-        # tracked separately from callback visibility.
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             module._reset_logged_metrics()
@@ -600,7 +775,7 @@ class EvaluationLoop(Loop):
                 else:
                     resolved_batch_size: int | None = metric.batch_size
                     if resolved_batch_size is None and metric.reduction == "mean":
-                        resolved_batch_size = extract_batch_size(batch)
+                        resolved_batch_size: int | None = extract_batch_size(batch)
                     accumulator.update(
                         metric.local_value(),
                         batch_size=resolved_batch_size
@@ -627,11 +802,6 @@ class EvaluationLoop(Loop):
         state: TrainerState,
         running_stage: RunningStage
     ) -> None:
-        # Drains metrics logged inside the module's epoch-end hook, which runs
-        # after the batch accumulators have already been reduced. Epoch-scoped
-        # values are folded directly into the epoch-metric mapping so the
-        # callback epoch-end hooks observe them, and logger-visible values are
-        # emitted from rank zero.
         logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
             return
@@ -668,8 +838,6 @@ class EvaluationLoop(Loop):
         self,
         epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]]
     ) -> dict[str, float]:
-        # Reduces every per-name accumulator to its final epoch value under the
-        # reduction mode each metric declared when it was logged.
         reduced: dict[str, float] = {}
         for metric, accumulator in epoch_accum.values():
             value: torch.Tensor = accumulator.compute(
@@ -677,7 +845,7 @@ class EvaluationLoop(Loop):
                 self.trainer.strategy.reduce
             )
             if not metric.enable_graph:
-                value = value.detach()
+                value: torch.Tensor = value.detach()
             epoch_name: str = metric.output_name(on_step=False)
             self._callback_epoch_metrics[metric.base_name()] = value
             self._callback_epoch_metrics[epoch_name] = value

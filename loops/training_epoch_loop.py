@@ -2,8 +2,9 @@
 import warnings
 from collections.abc import Callable, Iterator
 from functools import partial
-from typing import TYPE_CHECKING, Literal, cast, override
+from typing import Literal, cast, override
 
+import syntheticmind
 import torch
 from torch import nn
 
@@ -33,9 +34,6 @@ from syntheticmind.types import (
     StepOutput,
     TrainingStepOutput
 )
-
-if TYPE_CHECKING:
-    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = ["TrainingEpochLoop"]
 
@@ -100,7 +98,7 @@ class TrainingEpochLoop(Loop):
     def run(self) -> None:
         self._start_epoch()
 
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         module: Module | None = trainer.module
         assert module is not None
         strategy: Strategy = trainer.strategy
@@ -156,7 +154,7 @@ class TrainingEpochLoop(Loop):
 
     def _prepare_batch_iteration(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         combined_loader: CombinedLoader
     ) -> _BatchIteration:
         total_batches: int | None = combined_loader._length()
@@ -204,7 +202,7 @@ class TrainingEpochLoop(Loop):
 
     def _run_batches(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         combined_loader: CombinedLoader,
         epoch_accum: dict[str, tuple[LoggedMetric, MetricAccumulator]]
@@ -259,7 +257,7 @@ class TrainingEpochLoop(Loop):
 
     def _advance_batch(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         batch: Batch,
         batch_idx: int,
@@ -324,7 +322,7 @@ class TrainingEpochLoop(Loop):
 
     def _should_stop_batch_loop(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         state: TrainerState
     ) -> bool:
         return self._max_steps_reached(state) or (
@@ -341,7 +339,7 @@ class TrainingEpochLoop(Loop):
 
     def _finish_optimization(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         strategy: Strategy,
         state: TrainerState,
@@ -375,7 +373,7 @@ class TrainingEpochLoop(Loop):
 
     def _store_training_continuation(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         combined_loader: CombinedLoader,
         epoch_completed: bool
     ) -> None:
@@ -400,7 +398,7 @@ class TrainingEpochLoop(Loop):
 
     def _batch_start_requests_stop(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         callbacks: list[Callback],
         batch: Batch,
@@ -424,7 +422,7 @@ class TrainingEpochLoop(Loop):
 
     def _run_batch_optimization(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         strategy: Strategy,
         model: nn.Module,
@@ -496,7 +494,7 @@ class TrainingEpochLoop(Loop):
 
     def _run_batch_end(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         callbacks: list[Callback],
         outputs: StepOutput,
@@ -523,7 +521,7 @@ class TrainingEpochLoop(Loop):
 
     def _run_batch_cadence(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         state: TrainerState,
         batch_idx: int,
@@ -574,7 +572,7 @@ class TrainingEpochLoop(Loop):
 
     def _make_automatic_closure(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         strategy: Strategy,
         model: nn.Module,
@@ -643,7 +641,7 @@ class TrainingEpochLoop(Loop):
 
     def manual_backward(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         loss: torch.Tensor,
         gradient: torch.Tensor | None = None,
@@ -665,7 +663,7 @@ class TrainingEpochLoop(Loop):
 
     def optimizer_step(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
         closure: OptimizerClosure | None = None,
@@ -683,7 +681,7 @@ class TrainingEpochLoop(Loop):
 
     def _automatic_optimizer_step(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
         closure: OptimizerClosure | None = None,
@@ -699,7 +697,7 @@ class TrainingEpochLoop(Loop):
 
     def optimizer_zero_grad(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
         batch_idx: int
@@ -708,7 +706,7 @@ class TrainingEpochLoop(Loop):
 
     def _do_optimizer_step(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
         state: TrainerState,
@@ -740,7 +738,7 @@ class TrainingEpochLoop(Loop):
 
     def update_lr_schedulers(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         interval: SchedulerInterval,
         current_index: int
@@ -755,7 +753,7 @@ class TrainingEpochLoop(Loop):
 
     def update_plateau_schedulers(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         interval: SchedulerInterval,
         current_index: int
@@ -770,7 +768,7 @@ class TrainingEpochLoop(Loop):
 
     def _update_lr_schedulers(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         interval: SchedulerInterval,
         current_index: int,
@@ -810,7 +808,7 @@ class TrainingEpochLoop(Loop):
 
     def _optimizer_step_only(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
         closure: OptimizerClosure | None = None,
@@ -832,7 +830,7 @@ class TrainingEpochLoop(Loop):
 
     def _optimizer_zero_grad(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
         batch_idx: int
@@ -869,7 +867,7 @@ class TrainingEpochLoop(Loop):
 
     def _run_scheduled_validation(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         state: TrainerState,
         is_accumulating: bool,

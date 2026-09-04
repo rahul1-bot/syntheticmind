@@ -218,13 +218,13 @@
     4. Rank-zero presentation and persistence gates should read the Trainer's selected Strategy, while collective participation must remain symmetric across ranks before any rank-specific return.
     5. A utility namespace that duplicates Strategy ranks and collectives creates two authorities and free-function aliases; deletion is safer than relocation once every real consumer already carries Trainer or Strategy.
 
-| Memory | Hook Knowledge Belongs With Lifecycle Owners | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+| Memory | Hook Knowledge and Stage Transitions | Date: 04 September 2026 | Time: 03:23 PM | Name: Ghost |
 
-    1. Recursive model mode is live `Module` state, not an independent value object; capture and restore operations belong on Module and preserve each nested submodule's exact training flag rather than only the root mode.
-    2. Signature inspection belongs with the model hook being adapted, while override discovery belongs with Trainer's centralized dispatch decisions. A global helper creates a second hidden hook authority.
-    3. Narrow contract checks should stay narrow: callback persistence can compare concrete class methods and model parallelism can compare `configure_model` against its established hook base without importing a generic inspection subsystem.
-    4. Wrapped and partial callable unwrapping remains necessary for general Trainer dispatch, but it does not justify a public function, stateless inspector class, Protocol, or utility module.
-    5. Mode restoration requires both loop-level normal completion and Trainer-level failure recovery because stage setup can fail before a loop gains control.
+    1. Recursive model mode and step-signature knowledge are live Module concerns, while general override discovery and DataModule-versus-Module transfer dispatch belong to Trainer.
+    2. A loop owns lifecycle order, not every mechanism it invokes; transfer, precision, Strategy execution, logging, callback state, and checkpoint state retain their independent owners.
+    3. Validation and test may share one loop only because their inputs, no-gradient execution, step outputs, metric reduction, and result contracts align; prediction remains separate because retained outputs have a different lifecycle and memory contract.
+    4. Stage-specific hook order must remain explicit after decomposition, especially validation monitoring callbacks after module epoch-end metrics and exact model-mode restoration after normal or failed execution.
+    5. A free recursive tensor-transfer function creates no domain boundary when both real consumers inherit DataHooks; moving it to the hook owner removes an API without manufacturing a class.
 
 | Memory | Model Summary Is Inspection Plus Presentation | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 

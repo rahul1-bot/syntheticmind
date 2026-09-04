@@ -1,13 +1,14 @@
-from typing import ClassVar
+from collections.abc import Callable
+from typing import ClassVar, cast
 
 import torch
 
-from syntheticmind.core.data_transfer import move_data_to_device
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.types import (
     Batch,
     CheckpointDict,
     DataLoaderSource,
+    DeviceTransferable,
     ModelOutput,
     StepOutput,
     TrainerStage
@@ -66,7 +67,7 @@ class DataHooks:
         dataloader_idx: int = 0
     ) -> Batch:
         del dataloader_idx
-        return move_data_to_device(batch, device)
+        return self._move_data_to_device(batch, device)
 
     def on_after_batch_transfer(
         self,
@@ -75,6 +76,44 @@ class DataHooks:
     ) -> Batch:
         del dataloader_idx
         return batch
+
+    def _move_data_to_device(
+        self,
+        data: Batch,
+        device: torch.device
+    ) -> Batch:
+        non_blocking: bool = device.type == "cuda"
+        if isinstance(data, torch.Tensor):
+            return data.to(device, non_blocking=non_blocking)
+        if isinstance(data, dict):
+            moved_mapping: dict[str, Batch] = {}
+            key: str
+            value: Batch
+            for key, value in data.items():
+                moved_mapping[key]: Batch = self._move_data_to_device(value, device)
+            return moved_mapping
+        if isinstance(data, tuple):
+            moved_items: list[Batch] = []
+            item: Batch
+            for item in data:
+                moved_items.append(self._move_data_to_device(item, device))
+            tuple_items: tuple[Batch, ...] = tuple(moved_items)
+            if hasattr(data, "_fields"):
+                maker: Callable[[tuple[Batch, ...]], Batch] = cast(
+                    Callable[[tuple[Batch, ...]], Batch],
+                    getattr(type(data), "_make")
+                )
+                return maker(tuple_items)
+            return tuple_items
+        if isinstance(data, list):
+            moved_values: list[Batch] = []
+            item: Batch
+            for item in data:
+                moved_values.append(self._move_data_to_device(item, device))
+            return moved_values
+        if isinstance(data, DeviceTransferable):
+            return data.to(device, non_blocking=non_blocking)
+        return data
 
 
 class ModelHooks:
@@ -326,12 +365,12 @@ class ModelHooks:
             resolved_on_epoch: bool = False if on_epoch is None else on_epoch
             return resolved_on_step, resolved_on_epoch
         if hook_name in cls._evaluation_step_logging_hooks:
-            resolved_on_step = False if on_step is None else on_step
-            resolved_on_epoch = True if on_epoch is None else on_epoch
+            resolved_on_step: bool = False if on_step is None else on_step
+            resolved_on_epoch: bool = True if on_epoch is None else on_epoch
             return resolved_on_step, resolved_on_epoch
         if hook_name in cls._epoch_logging_hooks:
-            resolved_on_step = False if on_step is None else on_step
-            resolved_on_epoch = True if on_epoch is None else on_epoch
+            resolved_on_step: bool = False if on_step is None else on_step
+            resolved_on_epoch: bool = True if on_epoch is None else on_epoch
             if resolved_on_step:
                 raise MisconfigurationError(
                     f"self.log(on_step=True) is invalid inside {hook_name}."

@@ -207,14 +207,14 @@
     4. ✅ `utilities/distributed.py`, its classmethod namespace, and all free aliases were deleted; no old production or ignored verification import remains.
     5. ✅ Local validation, direct two-rank Strategy reduction, standard distributed scalar reductions, TorchMetrics, graph state, callback artifacts, progress rendering, checkpoint selection, spawned metric views, and sharded model parallelism pass.
 
-| Progress Complete | Hook Inspection and Module Mode Ownership | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+| Progress Complete | Evaluation and Prediction Lifecycle Reconstruction | Date: 04 September 2026 | Time: 03:23 PM | Name: Ghost |
 
-    1. ✅ Module now owns exact nested training-mode capture and restoration plus step-hook signature adaptation; Trainer owns general inherited-hook discovery beside hook dispatch.
-    2. ✅ Callback persistence and model-parallel configuration use direct narrow contract comparisons rather than importing the general discovery algorithm.
-    3. ✅ `utilities/model_helpers.py`, `ModuleMode`, and all module-level inspection functions were deleted without a replacement class, Protocol, module, compatibility alias, or generic annotation.
-    4. ✅ Inherited, overridden, decorated, partial, and absent hooks; DataModule transfer precedence; batch-index adaptation; mixed child modes; success and failure cleanup; callback state; and model-summary forwarding pass locally.
-    5. ✅ Spawned DDP callback configuration and runtime state plus sharded model-parallel configuration pass through the consolidated owners.
-    6. ✅ Stale Active and Queued ledger entries whose matching Complete records already existed were removed during mandatory ledger consolidation.
+    1. ✅ Fit, evaluation, and prediction god methods were decomposed into named lifecycle transitions without new classes, Protocols, modules, or public entrypoints.
+    2. ✅ Evaluation preserves validation and test hook order, metric reduction, monitoring callbacks, multiple-loader signatures, and exact mode restoration; prediction preserves output retention, result shape, and CPU materialization.
+    3. ✅ Recursive transfer moved onto DataHooks and the free data-transfer module was deleted; Trainer remains the one DataModule-over-Module dispatcher shared by every stage.
+    4. ✅ Conditional annotation imports, generic objects, source prose, static utilities, unannotated assignments, and terminal trailing commas are absent from every loop implementation.
+    5. ✅ ValidationSchedule owns strict duration parsing and cross-epoch cadence, while one-element step arguments retain precise tuple semantics without punctuation-style exceptions.
+    6. ✅ CPU, MPS, DDP, multi-loader, callback, metric, early-stop, checkpoint, stateful continuation, prediction materialization, and sharded model-parallel resume paths pass.
 
 | Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 
