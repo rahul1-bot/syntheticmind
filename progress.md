@@ -216,13 +216,13 @@
     5. ✅ Profiler owns active-stage state and setup-conflict detection, Trainer's shadow boolean is gone, and failed profiler setup rolls back cleanly before the same Trainer and profiler are reused.
     6. ✅ CPU, MPS, DDP, spawned exact continuation, callback composition, multi-loader evaluation, checkpoint selection, early stopping, rank-zero logging, profiler reports and rollback, causal failure cleanup, and sharded model-parallel exact resume pass.
 
-| Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+| Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 
     1. ✅ Model summary now lives in the semantic callback capability package with a public lifecycle callback, private inspection report, and isolated optional Rich renderer.
-    2. ✅ Nested hook functions, destructor cleanup, module functions, module constants, `Any`, generic `object`, local imports, duplicate report naming, and obsolete utility exports were removed from the reconstructed capability.
+    2. ✅ Rendering, shape capture, count formatting, parameter accounting, and model-size formatting are owner-bound operations; static pseudo-utilities, future imports, broad types, nested hooks, destructor cleanup, and source prose are absent.
     3. ✅ Parameter and trainable counts, actual storage-byte size, shapes, FLOPs, module modes, plain output, Rich output, depth validation, and lazy-parameter diagnostics execute through the new owners.
-    4. ✅ Exact nested module modes and Python, NumPy, torch CPU, and MPS random state restore after successful and failed inspection, and every registered shape hook detaches deterministically.
-    5. ✅ Default Trainer execution, callback configuration, metric views, MPS transfer, and spawned DDP exactly-once rank-zero presentation pass.
+    4. ✅ Attached inspection uses canonical DataModule transfer precedence and shared Python, NumPy, torch CPU, CUDA, or MPS state; detached inspection uses Module hooks and every mode, hook, and random source restores deterministically.
+    5. ✅ Default Trainer execution, DataModule precedence, callback configuration, metric views, CPU and MPS random rollback, and two-rank exactly-once presentation pass.
     6. ✅ The final utility source, package initializer, README, and generated cache were removed; no `utilities/` path remains in production or verification imports.
 
 | Progress Complete | Profiler Runtime Reconstruction | Date: 04 September 2026 | Time: 02:11 PM | Name: Ghost |

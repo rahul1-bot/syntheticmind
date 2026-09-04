@@ -226,12 +226,12 @@
     4. Failure cleanup is part of stage semantics: mode restoration and every teardown action must continue after a secondary failure, while the original execution exception remains primary and accumulates causal notes.
     5. Dispatch can store its Trainer host through a generic class parameter and depend directly on existing callback and profiler owners; this prevents a circular Trainer import without inventing a Protocol, quoted annotation, conditional import, or forwarding method family.
 
-| Memory | Model Summary Is Inspection Plus Presentation | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+| Memory | Model Summary Is Inspection Plus Presentation | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 
     1. Model-summary callback timing, layer and model inspection, and optional Rich presentation are related but independently changing responsibilities that justify one semantic capability package rather than a utility module or one oversized callback file.
-    2. Forward-hook ownership must be explicit and deterministic: a bound method records the first shape observation, and report-level `finally` cleanup removes every surviving hook without relying on garbage collection.
+    2. Forward-hook ownership must be explicit and deterministic: a bound method records the first shape observation, layer inspection owns parameter accounting, and report-level `finally` cleanup removes every surviving hook.
     3. Parameter storage size should derive from realized parameter `numel()` and `element_size()` rather than a precision-name table because mixed precision and custom dtypes decouple execution policy from stored parameter dtype.
-    4. Example-input inspection is an observational transaction and must restore model modes and every random generator it may consume even when transfer, forward, hook, or FLOP measurement fails.
+    4. Example-input inspection is observational: attached models must reuse Trainer's DataModule transfer precedence and shared active-backend Randomness snapshot, while detached models use their own Module hooks.
     5. Optional rendering dependencies belong in their adapter module and must not become mandatory imports for the base callback or Trainer construction.
 
 | Memory | Profiler Ownership Requires Executable Measurement | Date: 04 September 2026 | Time: 02:11 PM | Name: Ghost |

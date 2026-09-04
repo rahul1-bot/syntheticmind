@@ -28,9 +28,9 @@ class RichModelSummary(ModelSummary):
     ) -> None:
         super().__init__(max_depth=max_depth, **summarize_kwargs)
 
-    @staticmethod
     @override
     def summarize(
+        self,
         summary_data: SummaryData,
         total_parameters: int,
         trainable_parameters: int,

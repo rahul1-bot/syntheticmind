@@ -2,7 +2,7 @@
 
 The model-summary callback family owns one fit-start inspection lifecycle. `ModelSummary` selects depth and rank-zero presentation, the private report measures parameters, storage size, module modes, tensor shapes, and FLOPs, and the Rich adapter renders the same report through the optional Rich dependency.
 
-Example-input forwarding is transactional. The report restores every nested module mode and the Python, NumPy, torch CPU, CUDA, or MPS random state even when transfer hooks, model forwarding, or FLOP measurement fails.
+Example-input forwarding is transactional. Attached models use the Trainer's canonical DataModule-over-Module transfer precedence and shared multi-backend random-state snapshot; detached models use their Module hooks directly. The report restores every nested module mode and Python, NumPy, torch CPU, CUDA, or MPS random state even when transfer, forwarding, or FLOP measurement fails.
 
 | Module | Contents |
 |---|---|

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import sys
 from typing import TextIO, override
 
@@ -55,8 +53,8 @@ class ModelSummary(Callback):
         del trainer
         return _ModelSummaryReport(module, max_depth=self._max_depth)
 
-    @staticmethod
     def summarize(
+        self,
         summary_data: SummaryData,
         total_parameters: int,
         trainable_parameters: int,
@@ -66,7 +64,7 @@ class ModelSummary(Callback):
         **summarize_kwargs: str
     ) -> None:
         del summarize_kwargs
-        table: str = ModelSummary._format_summary_table(
+        table: str = self._format_summary_table(
             total_parameters,
             trainable_parameters,
             model_size,
@@ -74,10 +72,10 @@ class ModelSummary(Callback):
             total_flops,
             summary_data
         )
-        ModelSummary._write_summary(table)
+        self._write_summary(table)
 
-    @staticmethod
     def _format_summary_table(
+        self,
         total_parameters: int,
         trainable_parameters: int,
         model_size: float,
@@ -113,22 +111,36 @@ class ModelSummary(Callback):
                     )
                 )
             )
+        trainable_count: str = _ModelSummaryReport.human_readable_count(
+            trainable_parameters
+        )
+        non_trainable_count: str = _ModelSummaryReport.human_readable_count(
+            total_parameters - trainable_parameters
+        )
+        total_count: str = _ModelSummaryReport.human_readable_count(
+            total_parameters
+        )
+        formatted_size: str = _ModelSummaryReport.formatted_model_size(model_size)
+        flop_count: str = _ModelSummaryReport.human_readable_count(total_flops)
         lines.extend(
             [
                 "─" * total_width,
-                f"{_ModelSummaryReport.human_readable_count(trainable_parameters):<10}Trainable params",
-                f"{_ModelSummaryReport.human_readable_count(total_parameters - trainable_parameters):<10}Non-trainable params",
-                f"{_ModelSummaryReport.human_readable_count(total_parameters):<10}Total params",
-                f"{_ModelSummaryReport.formatted_model_size(model_size):<10}Total estimated model params size (MB)",
+                f"{trainable_count:<10}Trainable params",
+                f"{non_trainable_count:<10}Non-trainable params",
+                f"{total_count:<10}Total params",
+                f"{formatted_size:<10}Total estimated model params size (MB)",
                 f"{total_training_modes['train']:<10}Modules in train mode",
                 f"{total_training_modes['eval']:<10}Modules in eval mode",
-                f"{_ModelSummaryReport.human_readable_count(total_flops):<10}Total FLOPs"
+                f"{flop_count:<10}Total FLOPs"
             ]
         )
         return "\n".join(lines)
 
-    @staticmethod
-    def _write_summary(summary: str, stream: TextIO | None = None) -> None:
+    def _write_summary(
+        self,
+        summary: str,
+        stream: TextIO | None = None
+    ) -> None:
         destination: TextIO = sys.stderr if stream is None else stream
         try:
             destination.write(f"{summary}\n")

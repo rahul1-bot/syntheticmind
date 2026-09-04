@@ -149,12 +149,12 @@
     3. The generic model-helper module, its state holder, and its free functions were deleted without exporting a substitute abstraction family.
     4. Model-summary computation and rendering are the final behaviors remaining under utilities and form the next concept-first ownership slice.
 
-| Strategic Note | Model Inspection and Utility Elimination | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+| Strategic Note | Model Inspection and Utility Elimination | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 
     1. Model summary is now a callback capability family whose lifecycle, private inspection report, and optional Rich renderer have explicit ownership.
-    2. Inspection measures actual parameter storage and executes example-input forwarding as a reversible observation transaction across model modes, hooks, and random generators.
+    2. Inspection measures actual parameter storage and executes example-input forwarding through canonical DataModule precedence and shared multi-backend randomness as a reversible observation transaction.
     3. The generic utility package has been eliminated completely; every surviving behavior now belongs to an ML lifecycle, execution policy, core contract, callback, or infrastructure boundary.
-    4. Callback topology is the next audit because its remaining flat package width crosses the generic review boundary and must be judged by selectable training concepts rather than file count alone.
+    4. Callback, report, and optional Rich rendering operations are owner-bound without future imports, static pseudo-utilities, broad annotations, or nested hook functions; local and two-rank evidence passes.
 
 | Strategic Note | Callback Contract, Monitoring, and Capability Subtraction | Date: 04 September 2026 | Time: 04:47 PM | Name: Ghost |
 

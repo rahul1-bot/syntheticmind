@@ -207,14 +207,14 @@
     6. Profiler owns active-stage truth directly, replacing Trainer's shadow profiler boolean, while stage teardown still treats model-mode restoration and every framework, loader, user-hook, logger, progress, and profiler cleanup as one failure-collecting transaction.
     7. CPU, MPS, true two-rank DDP, spawned continuation, callback configuration, multi-loader evaluation, checkpoint selection, early stopping, logger rank ownership, profiler reports and rollback, failure composition, and sharded model-parallel resume pass; the macOS multi-Trainer spawn shutdown defect remains an environment boundary.
 
-| Architecture Decision | Model Summary Capability Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+| Architecture Decision | Model Summary Capability Ownership | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 
     1. Model-summary lifecycle, inspection, and optional rendering now form the semantic `callbacks/model_summary/` package with separate callback, private report, and Rich adapter modules; the callback remains the canonical public lifecycle entrypoint.
-    2. Layer shape collection uses a bound inspector method rather than a nested forward-hook function, and deterministic `finally` cleanup replaces destructor-dependent hook removal.
+    2. Layer shape collection uses a bound inspector method, parameter count, trainability, and storage bytes belong to layer inspection, and deterministic `finally` cleanup replaces destructor-dependent hook removal.
     3. Model size now sums each realized parameter's actual storage bytes instead of inferring storage from Trainer precision labels, preserving correct mixed-precision and custom-dtype accounting without a lookup table.
-    4. Example-input forwarding transactionally restores every nested module mode plus Python, NumPy, torch CPU, CUDA, or MPS random state after success or failure.
-    5. The former public utility functions, duplicate report name, generic annotations, module constants, local imports, and utility import paths were removed. The final tracked utility files and generated cache were deleted, leaving no `utilities/` package.
-    6. Plain and Rich rendering, lazy parameters, hook cleanup, failure rollback, MPS transfer and random state, default Trainer integration, callback configuration, metric regression, and exactly-once spawned rank-zero presentation pass.
+    4. Attached example inspection uses Trainer's DataModule-over-Module transfer transaction and shared multi-backend Randomness snapshot; detached inspection uses Module hooks, and every nested mode plus random source restores after success or failure.
+    5. Plain and Rich rendering are owner-bound instance behavior, the report contains no static pseudo-utility, and all three modules contain no future import, conditional annotation, broad type, source prose, or nested function.
+    6. Plain and Rich rendering, lazy parameters, hook cleanup, failure rollback, canonical DataModule transfer, CPU and MPS randomness, default Trainer integration, callback configuration, and exactly-once two-rank presentation pass.
 
 | Architecture Decision | Profiler Runtime Ownership and Callback Subtraction | Date: 04 September 2026 | Time: 02:11 PM | Name: Ghost |
 

@@ -1,13 +1,9 @@
-from __future__ import annotations
-
 import math
-import random
 import warnings
 from collections.abc import Hashable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from typing import ClassVar, cast
 
-import numpy as np
 import syntheticmind
 import torch
 from torch import nn
@@ -16,14 +12,13 @@ from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.hooks import RemovableHandle
 
 from syntheticmind.core.module import Module
+from syntheticmind.randomness import _Randomness, _RandomStateSnapshot
 from syntheticmind.types import Batch, ModelOutput
 
 __all__: list[str] = []
 
 type SummaryShape = str | list[int | SummaryShape]
 type SummaryData = list[tuple[str, list[str]]]
-type _PythonRandomState = tuple[int, tuple[int, ...], float | None]
-type _NumpyRandomState = tuple[str, np.ndarray, int, int, float]
 type _FlopCounts = dict[str, dict[Hashable, int]]
 
 
@@ -70,8 +65,7 @@ class _LayerSummary:
         self._output_size: SummaryShape | None = self._batch_shape(output)
         self.detach_hook()
 
-    @classmethod
-    def _batch_shape(cls, value: Batch | ModelOutput) -> SummaryShape:
+    def _batch_shape(self, value: Batch | ModelOutput) -> SummaryShape:
         shape: Sequence[int] | None = cast(
             Sequence[int] | None,
             getattr(value, "shape", None)
@@ -80,13 +74,12 @@ class _LayerSummary:
             try:
                 return [int(dimension) for dimension in shape]
             except (TypeError, ValueError):
-                return cls._unknown_size
+                return self._unknown_size
         if isinstance(value, list | tuple):
-            return [cls._batch_shape(element) for element in value]
-        return cls._unknown_size
+            return [self._batch_shape(element) for element in value]
+        return self._unknown_size
 
-    @staticmethod
-    def parameter_numel(parameter: torch.Tensor) -> int:
+    def _parameter_numel(self, parameter: torch.Tensor) -> int:
         if isinstance(parameter, UninitializedParameter):
             try:
                 parameter.shape
@@ -124,9 +117,29 @@ class _LayerSummary:
     @property
     def num_parameters(self) -> int:
         return sum(
-            self.parameter_numel(parameter)
+            self._parameter_numel(parameter)
             for parameter in self._module.parameters()
         )
+
+    @property
+    def trainable_parameters(self) -> int:
+        return sum(
+            self._parameter_numel(parameter)
+            for parameter in self._module.parameters()
+            if parameter.requires_grad
+        )
+
+    @property
+    def parameter_bytes(self) -> int:
+        total_bytes: int = 0
+        parameter: torch.nn.Parameter
+        for parameter in self._module.parameters():
+            parameter_count: int = self._parameter_numel(parameter)
+            if parameter_count > 0:
+                total_bytes: int = (
+                    total_bytes + parameter_count * parameter.element_size()
+                )
+        return total_bytes
 
     @property
     def training(self) -> bool:
@@ -147,6 +160,7 @@ class _ModelSummaryReport:
             display=False,
             depth=max_depth + 1
         )
+        self._root_summary: _LayerSummary = _LayerSummary(model)
         self._layers: dict[str, _LayerSummary] = self._summarize_layers()
 
     @property
@@ -180,28 +194,15 @@ class _ModelSummaryReport:
 
     @property
     def total_parameters(self) -> int:
-        return sum(
-            _LayerSummary.parameter_numel(parameter)
-            for parameter in self._model.parameters()
-        )
+        return self._root_summary.num_parameters
 
     @property
     def trainable_parameters(self) -> int:
-        return sum(
-            _LayerSummary.parameter_numel(parameter)
-            for parameter in self._model.parameters()
-            if parameter.requires_grad
-        )
+        return self._root_summary.trainable_parameters
 
     @property
     def model_size(self) -> float:
-        total_bytes: int = 0
-        parameter: torch.nn.Parameter
-        for parameter in self._model.parameters():
-            parameter_count: int = _LayerSummary.parameter_numel(parameter)
-            if parameter_count > 0:
-                total_bytes += parameter_count * parameter.element_size()
-        return total_bytes * 1e-6
+        return self._root_summary.parameter_bytes * 1e-6
 
     @property
     def total_flops(self) -> int:
@@ -250,8 +251,9 @@ class _ModelSummaryReport:
             return f"{int(shifted_number):,d} {cls._parameter_count_units[unit_index]}"
         return f"{shifted_number:,.1f} {cls._parameter_count_units[unit_index]}"
 
-    @staticmethod
-    def formatted_model_size(model_size: float) -> str:
+    @classmethod
+    def formatted_model_size(cls, model_size: float) -> str:
+        del cls
         return f"{model_size:,.3f}"
 
     def _named_modules(self) -> list[tuple[str, nn.Module]]:
@@ -288,34 +290,43 @@ class _ModelSummaryReport:
         example_input: Batch = cast(Batch, self._model.example_input_array)
         trainer: syntheticmind.Trainer | None = self._model._trainer
         training_modes: dict[str, bool] = self._model._capture_training_modes()
-        python_random_state: _PythonRandomState = cast(
-            _PythonRandomState,
-            random.getstate()
-        )
-        numpy_random_state: _NumpyRandomState = cast(
-            _NumpyRandomState,
-            np.random.get_state()
-        )
-        cpu_random_state: torch.Tensor = torch.random.get_rng_state()
-        device_random_state: torch.Tensor | None = None
         device_type: str = self._model.device.type
-        if device_type == "cuda" and torch.cuda.is_available():
-            device_random_state = torch.cuda.get_rng_state(self._model.device)
-        elif device_type == "mps" and torch.backends.mps.is_available():
-            device_random_state = torch.mps.get_rng_state()
+        randomness: _Randomness = (
+            trainer._randomness
+            if trainer is not None
+            else _Randomness(
+                [device_type if device_type in {"cpu", "cuda", "mps"} else "cpu"]
+            )
+        )
+        random_state: _RandomStateSnapshot = randomness.capture()
         try:
             if trainer is not None:
-                example_input = trainer.precision_plugin.convert_input(example_input)
-            with self._model._hook_context("on_before_batch_transfer"):
-                example_input = self._model.on_before_batch_transfer(example_input, 0)
-            with self._model._hook_context("transfer_batch_to_device"):
-                example_input = self._model.transfer_batch_to_device(
+                example_input: Batch = trainer.precision_plugin.convert_input(
+                    example_input
+                )
+                example_input: Batch = trainer._transfer_batch(
+                    self._model,
                     example_input,
                     self._model.device,
                     0
                 )
-            with self._model._hook_context("on_after_batch_transfer"):
-                example_input = self._model.on_after_batch_transfer(example_input, 0)
+            else:
+                with self._model._hook_context("on_before_batch_transfer"):
+                    example_input: Batch = self._model.on_before_batch_transfer(
+                        example_input,
+                        0
+                    )
+                with self._model._hook_context("transfer_batch_to_device"):
+                    example_input: Batch = self._model.transfer_batch_to_device(
+                        example_input,
+                        self._model.device,
+                        0
+                    )
+                with self._model._hook_context("on_after_batch_transfer"):
+                    example_input: Batch = self._model.on_after_batch_transfer(
+                        example_input,
+                        0
+                    )
             self._model.eval()
             forward_context: AbstractContextManager[None] = (
                 trainer.precision_plugin.forward_context()
@@ -331,13 +342,7 @@ class _ModelSummaryReport:
                     self._model(example_input)
         finally:
             self._model._restore_training_modes(training_modes)
-            random.setstate(python_random_state)
-            np.random.set_state(numpy_random_state)
-            torch.random.set_rng_state(cpu_random_state)
-            if device_type == "cuda" and device_random_state is not None:
-                torch.cuda.set_rng_state(device_random_state, self._model.device)
-            elif device_type == "mps" and device_random_state is not None:
-                torch.mps.set_rng_state(device_random_state)
+            randomness.restore(random_state)
 
     def _layer_flops(self) -> list[int]:
         flop_counts: _FlopCounts = cast(
