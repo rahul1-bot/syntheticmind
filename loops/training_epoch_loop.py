@@ -20,8 +20,7 @@ from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.exceptions import MisconfigurationError
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
-    MetricAccumulator,
-    extract_batch_size
+    MetricAccumulator
 )
 from syntheticmind.types import (
     Batch,
@@ -940,12 +939,10 @@ class TrainingEpochLoop(Loop):
                 if metric.is_metric:
                     accumulator.update_metric(metric.value)
                 else:
-                    resolved_batch_size: int | None = metric.batch_size
-                    if resolved_batch_size is None and metric.reduction == "mean":
-                        resolved_batch_size: int | None = extract_batch_size(batch)
                     accumulator.update(
                         metric.local_value(),
-                        batch_size=resolved_batch_size
+                        batch_size=metric.batch_size,
+                        batch=batch
                     )
 
         self.trainer._logger_connector.callback_metrics.update(callback_step_metrics)

@@ -17,8 +17,7 @@ from syntheticmind.loops.loop import Loop
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.combined_loader import CombinedLoader
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
-    MetricAccumulator,
-    extract_batch_size
+    MetricAccumulator
 )
 from syntheticmind.types import Batch, RunningStage, StepArgument, StepOutput
 
@@ -780,12 +779,10 @@ class EvaluationLoop(Loop):
                 if metric.is_metric:
                     accumulator.update_metric(metric.value)
                 else:
-                    resolved_batch_size: int | None = metric.batch_size
-                    if resolved_batch_size is None and metric.reduction == "mean":
-                        resolved_batch_size: int | None = extract_batch_size(batch)
                     accumulator.update(
                         metric.local_value(),
-                        batch_size=resolved_batch_size
+                        batch_size=metric.batch_size,
+                        batch=batch
                     )
 
         if not self.trainer.sanity_checking:

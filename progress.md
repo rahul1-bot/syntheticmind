@@ -119,12 +119,12 @@
     3. ✅ The batch-limit function module and Trainer's final module function were deleted without a new class, wrapper, alias, broad annotation, or duplicated calculation.
     4. ✅ Sized, unsized, direct, nested, stateful, persistent-worker, overfit, fast-development, DDP, spawn, prediction, and model-parallel limit paths pass.
 
-| Progress Complete | Logger Routing and Persistence Reconstruction | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
+| Progress Complete | Metric Accumulation and Logger Reconstruction | Date: 04 September 2026 | Time: 04:33 PM | Name: Ghost |
 
-    1. ✅ Logger selection, scalar conversion, rank-zero fan-out, metric views, default versioning, run metadata, and launcher reconciliation belong to the Trainer connector; backend persistence remains on concrete loggers.
-    2. ✅ The stateful Logger contract no longer uses an ABC or fake experiment, fast-development runs expose no logger, identities reject path traversal, and public collections cannot mutate connector state.
+    1. ✅ MetricAccumulator now owns scalar validation, optional nested-batch inference, weighted epoch reduction, TorchMetrics windows, and Strategy-driven synchronization; loops provide observations and cadence without importing a free inference function.
+    2. ✅ The established direct update API remains compatible, ambiguous nested leading dimensions fail with an explicit-batch-size remedy, and the accumulator contains no module function, fake Protocol, generic `object`, stale prose, or unannotated owner state.
     3. ✅ CSV local and remote persistence supports strict headers, resumable schema union, atomic widening and rollback, deterministic JSON hyperparameters, and spawned-stage reconciliation; TensorBoard emits verified local scalar events.
-    4. ✅ Local, MPS, remote fsspec, multi-logger, failure injection, external DDP, internal DDP spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
+    4. ✅ Weighted, dataclass, ambiguity, tensor-state, TorchMetrics, CPU, MPS, remote fsspec, external DDP, spawn, callback telemetry, one-time hyperparameters, and per-rank device views pass without static-analysis tools.
 
 | Progress Complete | Checkpoint Schema V2 and Randomness Reconstruction | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 

@@ -221,13 +221,13 @@
     4. Trace export, remote artifacts, module instrumentation, schedule output, and cleanup failures now fail visibly rather than disappearing behind ignored options or destructor behavior.
     5. XLA profiling remains absent until an executable SyntheticMind XLA runtime exists and can provide real lifecycle evidence.
 
-| Strategic Note | Experiment Logging Boundary | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
+| Strategic Note | Metric and Experiment Logging Boundary | Date: 04 September 2026 | Time: 04:33 PM | Name: Ghost |
 
-    1. Metric production, reduction, runtime views, rank routing, and durable backend writes remain separate phases with one owner each.
+    1. Metric production, scalar and batch-weight accumulation, reduction cadence, runtime views, rank routing, and durable backend writes remain separate phases with one owner each.
     2. Disabled logging is an empty collection rather than an object that accepts arbitrary misspelled operations and fabricates an experiment surface.
     3. CSV schema growth is a persistence transaction and must reconcile state written by prior spawned workers before widening later-stage records.
     4. Hyperparameters cross the logger boundary only after deterministic portable normalization and remain a one-time run record across worker replacement.
-    5. TensorBoard is a local event backend, while CSV owns local and fsspec records; neither backend pretends to support storage semantics it cannot execute.
+    5. Nested batch inference belongs to MetricAccumulator, rejects ambiguous leading dimensions, and preserves direct explicit weighting without a free function or utility class; CPU, MPS, TorchMetrics, and DDP evidence passes.
 
 | Strategic Note | Training Epoch Transition Map | Date: 04 September 2026 | Time: 02:58 PM | Name: Ghost |
 

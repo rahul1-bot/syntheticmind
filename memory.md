@@ -151,15 +151,15 @@
     5. Scalar run-policy validation and resolution belong to one immutable Trainer configuration boundary, while applying a resolved stage limit belongs to DataConnector because only that owner knows whether the loader is sized, unsized, nested, or distributed.
     6. Configuration must not absorb live runtime objects merely to shorten a constructor; accelerators, strategies, loggers, profilers, callbacks, dataloaders, and optimizers retain behavioral owners and are composed after scalar policy resolution.
 
-| Memory | Metric Production, Routing, and Persistence | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
+| Memory | Metric Production, Weighting, Routing, and Persistence | Date: 04 September 2026 | Time: 04:33 PM | Name: Ghost |
 
-    1. Metric production belongs to Module hooks, reduction cadence belongs to loops, view routing belongs to the logger connector, and durable output belongs to concrete loggers; merging these phases creates hidden state and inconsistent consumers.
-    2. Callback metrics may include monitoring values that are intentionally absent from external logs, while progress metrics are scalar presentation state and logged metrics retain tensors for programmatic inspection.
+    1. Metric production belongs to Module hooks, reduction cadence belongs to loops, scalar and batch-weight reduction belongs to MetricAccumulator, view routing belongs to the logger connector, and durable output belongs to concrete loggers.
+    2. Batch-size inference is part of mean-reduction semantics rather than a loop utility; nested tensors with contradictory leading dimensions must fail and request explicit `batch_size` instead of silently selecting the first candidate.
     3. Sanity validation must clear every observable metric view after execution so early diagnostic batches cannot alter checkpoint ranking, early stopping, progress output, or experiment records.
     4. Global-rank persistence belongs in the connector rather than every callback and loop call site; callbacks may retain rank-local observations while one central gate prevents duplicate durable writes.
     5. Multiprocessing launch must transfer metric views, presentation state, and one-time hyperparameter progress; a later worker otherwise repeats run metadata or widens a CSV file from stale parent schema.
     6. CSV schema widening is a commit operation: adopt the existing header, serialize all prior rows under the union, atomically replace the file, and roll back live field state if promotion fails.
-    7. Broad in-memory hyperparameters become logger data only after deterministic portable normalization; live modules, non-scalar tensors, non-scalar arrays, and non-finite values must fail instead of degrading through arbitrary string conversion.
+    7. TorchMetrics objects retain their own update and reset lifecycle, while scalar observations retain differentiable tensors only when explicitly requested; neither path may hide its value behind `object` or an unearned Protocol.
 
 | Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 

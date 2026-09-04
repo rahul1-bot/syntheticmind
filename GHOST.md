@@ -114,15 +114,15 @@
     6. The former `loops/batch_limits.py` function module and Trainer's module-level training-limit resolver were deleted without a wrapper class, factory, public alias, or duplicate implementation; the loop package now contains only class-owned behavior.
     7. Direct, module-owned, DataModule-owned, sized, unsized, nested, spawned, two-rank DDP, stateful continuation, overfit, reload, fast-development, persistent-worker, and unrepeated-prediction limits pass through the reconstructed owners.
 
-| Architecture Decision | Logger Routing and Persistence Ownership | Date: 04 September 2026 | Time: 02:32 PM | Name: Ghost |
+| Architecture Decision | Metric Accumulation, Routing, and Persistence | Date: 04 September 2026 | Time: 04:33 PM | Name: Ghost |
 
-    1. Module hooks produce metrics, loops own reduction cadence, the Trainer logger connector owns view routing and global-rank persistence, and concrete loggers own only destination identity, serialization, buffering, and finalization.
-    2. `Logger` is now a regular stateful inheritance contract rather than an ABC; fake no-op experiments and arbitrary attribute swallowing were removed, and fast-development runs use an empty logger collection.
+    1. Module hooks produce metric observations, loops own reduction cadence, MetricAccumulator owns scalar validation, batch weighting, TorchMetrics windows, and distributed reduction, the logger connector owns view routing and rank policy, and concrete loggers own persistence.
+    2. MetricAccumulator now consumes the batch only when loop-driven mean inference is required, retains its established direct `update(value, batch_size=...)` API, rejects inconsistent nested leading dimensions, and contains no free function, fake Protocol, generic `object`, or source prose.
     3. Logger names and versions are validated single path segments, integer versions retain standard `version_N` layout, custom loggers contribute their own `log_dir`, duplicate instances are rejected, and public logger collections are defensive copies.
     4. Shared hyperparameter normalization accepts portable deterministic values, rejects live modules and non-scalar tensors or arrays, and emits once per run across sequential and spawned stages through explicit launcher-state transfer.
     5. CSV persistence validates existing headers, reconciles worker-written schema before later stages, widens columns transactionally, restores in-memory schema on failed promotion, resumes existing rows, and supports transactional fsspec replacement.
     6. TensorBoard persistence validates local-only storage, records normalized hyperparameters and step-keyed scalar events, acquires its optional writer lazily, and releases it deterministically even when flushing fails.
-    7. Local and remote CSV, atomic failure retry, TensorBoard event reading, multi-logger mutation isolation, MPS metric views, external DDP, and internal DDP spawn pass; device statistics now populate every rank's callback view while the connector alone gates durable output.
+    7. Weighted, unweighted, dataclass, ambiguous-batch, TorchMetrics, tensor-state, CPU, MPS, standard distributed reduction, local and remote CSV, TensorBoard, external DDP, and internal spawn paths pass; the connector alone gates durable output.
 
 | Architecture Decision | Checkpoint Schema V2 and Trajectory Ownership | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 
