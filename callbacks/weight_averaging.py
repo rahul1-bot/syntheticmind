@@ -1,3 +1,29 @@
+# This module:
+# 1. Defines EMAWeightAveraging, the callback that maintains a resumable
+#    exponential moving average of model parameters and optional buffers
+# 2. Swaps averaged weights into validation, testing, prediction, and the final
+#    fitted model while preserving live optimizer-training weights in full
+#    checkpoints
+#
+# Design decisions:
+# - Averaging begins from an exact model-state clone and updates only after a
+#   completed global optimizer step; accumulation batches sharing a step cannot
+#   update the average twice
+# - Floating and complex tensors use exponential interpolation while integral
+#   buffers copy the current value, preserving counters and categorical state
+# - Evaluation swapping is transactional: the live state is cloned before the
+#   average is installed and restored at stage end, teardown, or exception
+# - A fit that completes with averaged weights retains the pre-swap training
+#   state separately; on_save_checkpoint replaces checkpoint state_dict with
+#   those live weights so optimizer continuation and model weights describe the
+#   same training trajectory
+# - Restored averages are aligned to the live module's device and dtype only
+#   after exact key and shape validation
+# - DTensor state is rejected because local tensor averaging cannot represent a
+#   sharded model's global state semantics safely
+#
+# Author: Rahul Sawhney
+
 from typing import cast, override
 
 import syntheticmind
@@ -23,6 +49,9 @@ type _AveragedState = dict[str, torch.Tensor]
 
 
 class EMAWeightAveraging(Callback):
+    # Exponential moving-average policy for replicated client models. Register
+    # it as a Trainer callback; evaluation entry points then run under averaged
+    # weights without requiring a second wrapper module or manual swap logic.
     def __init__(
         self,
         decay: float = 0.999,
@@ -30,6 +59,15 @@ class EMAWeightAveraging(Callback):
         update_starting_at_step: int | None = None,
         use_buffers: bool = True
     ) -> None:
+        # Args:
+        #     decay: Previous-average weight in ``[0.0, 1.0)``. Default:
+        #         ``0.999``.
+        #     update_every_n_steps: Positive optimizer-step cadence for average
+        #         updates. Default: ``1``.
+        #     update_starting_at_step: Optional zero-based optimizer step at
+        #         which averaging begins. Default: ``None``.
+        #     use_buffers: Whether named buffers participate beside parameters.
+        #         Default: ``True``.
         if type(decay) is not float or not 0.0 <= decay < 1.0:
             raise ValueError("`decay` must be a float in the interval [0.0, 1.0).")
         if type(update_every_n_steps) is not int or update_every_n_steps < 1:
@@ -60,6 +98,8 @@ class EMAWeightAveraging(Callback):
     @property
     @override
     def state_key(self) -> str:
+        # Separates persisted averages whose update schedule or state coverage
+        # differs, preventing accidental callback-state collisions.
         return self._generate_state_key(
             decay=self.decay,
             update_every_n_steps=self.update_every_n_steps,
@@ -73,6 +113,9 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Restores the live training state when reusing a completed callback,
+        # validates replicated tensor ownership, and initializes or realigns the
+        # running average for this fit transaction.
         del trainer
         if self._finalized_training_state is not None:
             self._copy_state_to_module(module, self._finalized_training_state)
@@ -104,6 +147,8 @@ class EMAWeightAveraging(Callback):
         batch: Batch,
         batch_idx: int
     ) -> None:
+        # Updates once for each eligible completed optimizer step, independent
+        # of the number of accumulation batches that produced it.
         del outputs, batch, batch_idx
         if trainer.global_step <= self._last_processed_step:
             return
@@ -122,6 +167,8 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Preserves the last live training state and leaves the fitted client
+        # module under its averaged state for post-fit inference.
         del trainer
         if self._num_averaged > 0:
             self._finalized_training_state: _AveragedState | None = (
@@ -135,6 +182,7 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Installs averaged state for validation while retaining live weights.
         del trainer
         self._swap_to_average(module)
 
@@ -144,6 +192,7 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Restores live training state after validation.
         del trainer
         self._restore_original_state(module)
 
@@ -153,6 +202,7 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Installs averaged state for standalone testing.
         del trainer
         self._swap_to_average(module)
 
@@ -162,6 +212,7 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Restores the state that preceded standalone testing.
         del trainer
         self._restore_original_state(module)
 
@@ -171,6 +222,7 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Installs averaged state for prediction.
         del trainer
         self._swap_to_average(module)
 
@@ -180,6 +232,7 @@ class EMAWeightAveraging(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Restores the state that preceded prediction.
         del trainer
         self._restore_original_state(module)
 
@@ -190,6 +243,7 @@ class EMAWeightAveraging(Callback):
         module: Module,
         exception: BaseException
     ) -> None:
+        # Rolls back any active evaluation swap before failure teardown.
         del trainer, exception
         self._restore_original_state(module)
 
@@ -200,11 +254,15 @@ class EMAWeightAveraging(Callback):
         module: Module,
         stage: TrainerStage
     ) -> None:
+        # Makes swap rollback unconditional across normal and exceptional stage
+        # exits; the operation is idempotent when no average is active.
         del trainer, stage
         self._restore_original_state(module)
 
     @override
     def state_dict(self) -> StateDict:
+        # Persists a device-independent clone of the running average and the
+        # exact cadence counters required for continuation.
         if self._average_state is None:
             return {}
         average_state: dict[str, StateValue] = {
@@ -219,6 +277,8 @@ class EMAWeightAveraging(Callback):
 
     @override
     def load_state_dict(self, state_dict: StateDict) -> None:
+        # Validates the serialized mapping and defers model-specific key, shape,
+        # device, and dtype alignment until a module is attached at fit start.
         average_value: StateValue | None = state_dict.get("average_state")
         last_step_value: StateValue | None = state_dict.get("last_processed_step")
         count_value: StateValue | None = state_dict.get("num_averaged")
@@ -249,6 +309,8 @@ class EMAWeightAveraging(Callback):
         module: Module,
         checkpoint: CheckpointDict
     ) -> None:
+        # Replaces checkpoint model weights with the live training trajectory
+        # whenever the in-memory module currently exposes averaged weights.
         del trainer, module
         live_training_state: _AveragedState | None = (
             self._original_state
@@ -276,6 +338,8 @@ class EMAWeightAveraging(Callback):
         checkpoint["state_dict"] = live_state
 
     def _update_average(self, module: Module) -> None:
+        # Applies EMA in place after exact state validation, copying non-floating
+        # tensors because interpolation is undefined for their semantics.
         current_state: _AveragedState = self._current_state(module)
         if self._average_state is None:
             self._average_state: _AveragedState | None = self._clone_state(current_state)
@@ -303,6 +367,8 @@ class EMAWeightAveraging(Callback):
         self._num_averaged += 1
 
     def _swap_to_average(self, module: Module) -> None:
+        # Begins one evaluation transaction and rejects nested swaps that would
+        # lose the only live-state rollback snapshot.
         if self._average_state is None:
             return
         if self._original_state is not None:
@@ -312,6 +378,7 @@ class EMAWeightAveraging(Callback):
         self._copy_average_to_module(module)
 
     def _restore_original_state(self, module: Module) -> None:
+        # Ends the active evaluation transaction exactly once.
         if self._original_state is None:
             return
         original_state: _AveragedState = self._original_state
@@ -319,12 +386,16 @@ class EMAWeightAveraging(Callback):
         self._copy_state_to_module(module, original_state)
 
     def _copy_average_to_module(self, module: Module) -> None:
+        # Aligns and installs the average without opening a rollback snapshot;
+        # fit-end uses this path to expose the final averaged model.
         if self._average_state is None:
             return
         self._align_average_state(module)
         self._copy_state_to_module(module, self._average_state)
 
     def _align_average_state(self, module: Module) -> None:
+        # Validates logical identity before moving persisted averages onto each
+        # live tensor's current device and dtype.
         if self._average_state is None:
             return
         current_state: _AveragedState = self._current_state(module)
@@ -341,6 +412,8 @@ class EMAWeightAveraging(Callback):
         self._average_state: _AveragedState | None = aligned_state
 
     def _validate_state(self, current_state: _AveragedState) -> None:
+        # Requires exact tensor names and shapes; silent partial averaging would
+        # create a model state with no coherent statistical interpretation.
         assert self._average_state is not None
         current_names: set[str] = set(current_state)
         average_names: set[str] = set(self._average_state)
@@ -362,6 +435,7 @@ class EMAWeightAveraging(Callback):
                 )
 
     def _current_state(self, module: Module) -> _AveragedState:
+        # Selects parameters and, when configured, buffers from the live module.
         state: _AveragedState = {
             name: parameter
             for name, parameter in module.named_parameters()
@@ -376,9 +450,11 @@ class EMAWeightAveraging(Callback):
         return state
 
     def _clone_current_state(self, module: Module) -> _AveragedState:
+        # Captures a mutation-independent snapshot of the selected module state.
         return self._clone_state(self._current_state(module))
 
     def _clone_state(self, state: _AveragedState) -> _AveragedState:
+        # Detaches every tensor so callback state never retains autograd graphs.
         return {
             name: tensor.detach().clone()
             for name, tensor in state.items()
@@ -389,6 +465,8 @@ class EMAWeightAveraging(Callback):
         module: Module,
         state: _AveragedState
     ) -> None:
+        # Copies a validated logical state into live tensors without replacing
+        # Parameter or buffer objects owned by the module and optimizer.
         current_state: _AveragedState = self._current_state(module)
         current_names: set[str] = set(current_state)
         state_names: set[str] = set(state)
@@ -406,6 +484,7 @@ class EMAWeightAveraging(Callback):
 
     @override
     def __repr__(self) -> str:
+        # Exposes the complete averaging policy in trainer diagnostics.
         return (
             f"EMAWeightAveraging(decay={self.decay}, "
             f"update_every_n_steps={self.update_every_n_steps}, "

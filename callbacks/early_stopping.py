@@ -1,3 +1,27 @@
+# This module:
+# 1. Defines EarlyStopping, the validation-driven policy that requests a
+#    cooperative training stop after convergence, divergence, non-finite
+#    monitoring, or an exhausted improvement patience window
+# 2. Persists the complete stopping trajectory so resumed fitting continues
+#    from the same best score, wait count, and terminal diagnosis
+#
+# Design decisions:
+# - The policy evaluates only completed, non-sanity validation epochs; bounded
+#   startup probes therefore cannot establish a best score or consume patience
+# - The global-zero metric is broadcast before evaluation and the resulting
+#   decision is reduced across the Strategy, keeping every process on the same
+#   control-flow branch even when callback metric storage differs by rank
+# - strict=True turns an absent monitor into a configuration failure listing
+#   available keys; strict=False warns only on global zero and leaves state
+#   unchanged
+# - Threshold exits precede ordinary improvement accounting: a target, a
+#   divergence boundary, or a non-finite value records an exact stopping reason
+#   instead of being misreported as patience exhaustion
+# - state_key includes every field that changes decision semantics, allowing
+#   several independently configured EarlyStopping callbacks to resume safely
+#
+# Author: Rahul Sawhney
+
 import math
 from typing import Literal, override
 
@@ -21,6 +45,9 @@ type StoppingReason = Literal[
 
 
 class EarlyStopping(Callback):
+    # Stateful validation policy for terminating fit without raising an
+    # exception. Client models publish the monitored scalar through Module.log;
+    # the callback reads the trainer's reduced callback metric view.
     def __init__(
         self,
         monitor: str = "val_loss",
@@ -33,6 +60,26 @@ class EarlyStopping(Callback):
         stopping_threshold: float | None = None,
         divergence_threshold: float | None = None
     ) -> None:
+        # Binds the monitored metric, improvement rule, and all terminal exits.
+        #
+        # Args:
+        #     monitor: Callback metric key evaluated after validation epochs.
+        #         Default: ``"val_loss"``.
+        #     min_delta: Non-negative absolute margin required for a new best
+        #         score. Default: ``0.0``.
+        #     patience: Number of consecutive non-improving validation checks
+        #         tolerated before stopping. Default: ``3``.
+        #     verbose: Whether global zero logs the terminal diagnosis.
+        #         Default: ``False``.
+        #     mode: ``"min"`` for lower-is-better metrics or ``"max"`` for
+        #         higher-is-better metrics. Default: ``"min"``.
+        #     strict: Whether a missing metric is fatal. Default: ``True``.
+        #     check_finite: Whether NaN or infinity stops immediately.
+        #         Default: ``True``.
+        #     stopping_threshold: Optional success boundary that stops as soon
+        #         as the score reaches it. Default: ``None``.
+        #     divergence_threshold: Optional failure boundary that stops as
+        #         soon as the score crosses it. Default: ``None``.
         if not isinstance(monitor, str) or not monitor.strip():
             raise ValueError("`monitor` must be a non-empty string.")
         if (
@@ -77,6 +124,8 @@ class EarlyStopping(Callback):
     @property
     @override
     def state_key(self) -> str:
+        # Separates persisted trajectories for callbacks whose monitoring
+        # semantics differ, even when they share the same concrete class.
         return self._generate_state_key(
             monitor=self.monitor,
             min_delta=self.min_delta,
@@ -93,6 +142,9 @@ class EarlyStopping(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Evaluates the synchronized scalar after a real validation epoch and
+        # raises the trainer's cooperative stop flag on every rank when a
+        # terminal condition is reached.
         if trainer.fast_dev_run or trainer.sanity_checking:
             return
         local_score: torch.Tensor | None = trainer.callback_metrics.get(self.monitor)
@@ -136,6 +188,8 @@ class EarlyStopping(Callback):
 
     @override
     def state_dict(self) -> StateDict:
+        # Persists both the convergence trajectory and its terminal diagnosis;
+        # configuration remains encoded by state_key rather than duplicated.
         return {
             "wait_count": self.wait_count,
             "best_score": self.best_score.detach().cpu().clone(),
@@ -146,6 +200,8 @@ class EarlyStopping(Callback):
 
     @override
     def load_state_dict(self, state_dict: StateDict) -> None:
+        # Restores only structurally valid scalar state, rejecting corrupted or
+        # semantically foreign callback payloads before training resumes.
         wait_value: StateValue | None = state_dict.get("wait_count")
         score_value: StateValue | None = state_dict.get("best_score")
         epoch_value: StateValue | None = state_dict.get("stopped_epoch")
@@ -183,6 +239,8 @@ class EarlyStopping(Callback):
         self,
         current_score: torch.Tensor
     ) -> tuple[bool, StoppingReason | None, str | None]:
+        # Applies terminal thresholds first, then improvement accounting, and
+        # returns the decision with a machine-readable and human-readable cause.
         current_value: float = float(current_score.item())
         if self.check_finite and not bool(torch.isfinite(current_score)):
             return (
@@ -221,12 +279,14 @@ class EarlyStopping(Callback):
         )
 
     def _is_improvement(self, current_value: float) -> bool:
+        # Requires the new value to clear min_delta in the configured direction.
         best_value: float = float(self.best_score)
         if self.mode == "min":
             return current_value < best_value - self.min_delta
         return current_value > best_value + self.min_delta
 
     def _reached_stopping_threshold(self, current_value: float) -> bool:
+        # Interprets the success boundary in the same direction as improvement.
         if self.stopping_threshold is None:
             return False
         if self.mode == "min":
@@ -234,6 +294,7 @@ class EarlyStopping(Callback):
         return current_value >= self.stopping_threshold
 
     def _reached_divergence_threshold(self, current_value: float) -> bool:
+        # Interprets the divergence boundary opposite the improvement direction.
         if self.divergence_threshold is None:
             return False
         if self.mode == "min":
@@ -241,6 +302,7 @@ class EarlyStopping(Callback):
         return current_value <= self.divergence_threshold
 
     def _validate_threshold(self, name: str, value: float | None) -> None:
+        # Rejects non-numeric and non-finite thresholds during construction.
         if value is None:
             return
         if type(value) not in (int, float):
@@ -250,6 +312,7 @@ class EarlyStopping(Callback):
 
     @override
     def __repr__(self) -> str:
+        # Includes every decision field for reproducible trainer diagnostics.
         return (
             f"EarlyStopping(monitor={self.monitor!r}, min_delta={self.min_delta}, "
             f"patience={self.patience}, verbose={self.verbose}, "

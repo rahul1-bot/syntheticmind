@@ -1,3 +1,27 @@
+# This module:
+# 1. Defines the checkpoint artifact path policy: directory resolution,
+#    filename interpolation, collision versioning, last aliases, containment,
+#    retention eligibility, and local links
+# 2. Coordinates path existence and link operations across distributed ranks
+#    without owning checkpoint serialization
+#
+# Design decisions:
+# - A missing directory resolves lazily from the active trainer's logger-aware
+#   root, so callback construction remains independent of a specific run
+# - Filename fields interpolate from synchronized tensor candidates; missing
+#   fields resolve to zero for deterministic formatting instead of raw KeyError
+# - Relative paths may create intentional subdirectories but absolute paths and
+#   parent traversal cannot escape the configured checkpoint root
+# - Collision versioning consults storage only on global zero and broadcasts the
+#   result, keeping every rank on the same path without duplicate remote calls
+# - Retention never removes the active resume artifact and only removes local
+#   artifacts inside the callback-owned directory; remote paths delegate safety
+#   to their storage backend semantics
+# - save_last links are local-only and fall back to copying when symbolic links
+#   are unavailable
+#
+# Author: Rahul Sawhney
+
 import re
 from pathlib import Path
 from typing import ClassVar
@@ -12,6 +36,8 @@ __all__: list[str] = []
 
 
 class _CheckpointPaths:
+    # Path and retention policy composed by ModelCheckpoint. Client code reaches
+    # its supported naming surface through ModelCheckpoint.format_checkpoint_name.
     _join_character: ClassVar[str] = "-"
     _equals_character: ClassVar[str] = "="
     _extension: ClassVar[str] = ".ckpt"
@@ -24,12 +50,16 @@ class _CheckpointPaths:
         auto_insert_metric_name: bool,
         enable_version_counter: bool
     ) -> None:
+        # Stores a normalized directory and the immutable naming behavior used
+        # by every subsequent ranked or last-artifact decision.
         self.dirpath: str | None = self._normalize_directory(dirpath)
         self.filename: str | None = filename
         self.auto_insert_metric_name: bool = auto_insert_metric_name
         self.enable_version_counter: bool = enable_version_counter
 
     def resolve_directory(self, trainer: syntheticmind.Trainer) -> str:
+        # Resolves the run-specific default once, preferring logger log_dir for
+        # ordinary runs and default_root_dir for fast development runs.
         if self.dirpath is None:
             root: str = (
                 trainer.log_dir
@@ -46,6 +76,8 @@ class _CheckpointPaths:
         version: int | None = None,
         prefix: str | None = None
     ) -> str:
+        # Renders one contained checkpoint path from synchronized metric values,
+        # an optional alternate template, version, and prefix.
         resolved_filename: str = self._format_name(
             filename or self.filename,
             dict(metrics),
@@ -80,6 +112,8 @@ class _CheckpointPaths:
         candidates: dict[str, torch.Tensor],
         trainer: syntheticmind.Trainer | None = None
     ) -> str:
+        # Finds an unused ranked artifact path when collision versioning is
+        # enabled; disabled versioning intentionally permits replacement.
         filepath: str = self.format_checkpoint_name(candidates)
         if not self.enable_version_counter:
             return filepath
@@ -98,6 +132,8 @@ class _CheckpointPaths:
         previous_path: str,
         trainer: syntheticmind.Trainer | None = None
     ) -> str:
+        # Resolves the mutable last-artifact path while permitting the callback
+        # to reuse its own existing last path without creating endless versions.
         filepath: str = self.format_checkpoint_name(candidates, "last")
         if not self.enable_version_counter:
             return filepath
@@ -117,6 +153,8 @@ class _CheckpointPaths:
         previous: str,
         current: str
     ) -> bool:
+        # Determines whether a superseded artifact belongs to this callback and
+        # is safe to prune after the replacement has committed.
         if previous == current:
             return False
         if not StoragePath(previous).is_local:
@@ -137,6 +175,8 @@ class _CheckpointPaths:
         linkpath: str | Path,
         synchronize: bool = True
     ) -> None:
+        # Creates or replaces a rank-zero local last alias, then optionally
+        # barriers so all ranks observe completion before leaving the callback.
         if not StoragePath(filepath).is_local or not StoragePath(linkpath).is_local:
             raise ValueError("Checkpoint links require local paths.")
         source_path: Path = Path(StoragePath(filepath).normalized)
@@ -176,6 +216,8 @@ class _CheckpointPaths:
         metrics: dict[str, torch.Tensor],
         prefix: str | None
     ) -> str:
+        # Converts metric fields into mapping-based format expressions, inserts
+        # public metric labels when requested, and applies the optional prefix.
         resolved_filename: str = filename or "{epoch}-{step}"
         groups: list[str] = sorted(
             re.findall(r"(\{.*?)[:\}]", resolved_filename),
@@ -207,6 +249,7 @@ class _CheckpointPaths:
         filepath: str | Path,
         trainer: syntheticmind.Trainer | None
     ) -> bool:
+        # Queries storage once on global zero and broadcasts the collision result.
         if trainer is None:
             return StoragePath(filepath).exists()
         path_exists: bool = (
@@ -215,6 +258,8 @@ class _CheckpointPaths:
         return trainer.strategy.broadcast(path_exists)
 
     def _normalize_directory(self, dirpath: str | Path | None) -> str | None:
+        # Canonicalizes local paths for containment comparisons while preserving
+        # remote protocol paths for StoragePath dispatch.
         if dirpath is None:
             return None
         normalized_path: str = StoragePath(dirpath).normalized

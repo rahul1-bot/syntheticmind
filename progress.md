@@ -61,7 +61,7 @@
     4. ✅ Legacy flat sharded checkpoints resume and migrate, full checkpoints retain their atomic file path, and cross-format collisions preserve the existing artifact by failing visibly.
     5. ✅ Full and sharded two-rank baseline, interrupted, and resumed runs reach the same global step and produce bit-identical final model state.
     6. ✅ Two-rank injected distributed shard, Trainer-metadata, and pointer-publication failures preserve the active generation and causal error on the failing rank.
-    7. ✅ The checkpoint-generation schema rejects unknown versions, malformed UUIDs, and extra fields; all new classes and modules remain within hard structural budgets with no module-level functions, terminal trailing commas, new comments, or static-analysis execution.
+    7. ✅ The checkpoint-generation schema rejects unknown versions, malformed UUIDs, and extra fields; all new classes and modules remain within hard structural budgets with no module-level functions, terminal trailing commas, or static-analysis execution, and their later authorized documentation preserves these structural guarantees.
 
 | Progress Complete | Strategy, Initialization, and Distributed Documentation | Date: 04 September 2026 | Time: 10:33 PM | Name: Ghost |
 
@@ -103,8 +103,8 @@
 
     1. ✅ Callback resolution, default checkpointing, timers, progress display, model summaries, ordering, model callback replacement, and state-key validation now belong to one internal callback connector.
     2. ✅ Callback preserves all forty-three established call signatures through Python 3.14 lazy package annotations, while HookDispatcher owns invocation and the connector uses a bound configuration operation without a circular import or host Protocol.
-    3. ✅ Early stopping, finite checks, learning-rate monitoring, throughput, and device statistics retain separate callback files and contain no obsolete import, legacy state-key property, broad annotation, static pseudo-utility, source prose, unannotated transition, or call to an absent parent initializer.
-    4. ✅ Model callback stages, non-finite rejection, telemetry, distributed sample accounting, filtered device statistics, checkpoint state, invalid configuration, DDP, spawn, and fork paths pass without changing public callback APIs.
+    3. ✅ Early stopping, finite checks, learning-rate monitoring, throughput, and device statistics retain separate callback files and contain no obsolete import, legacy state-key property, broad annotation, static pseudo-utility, unannotated transition, or call to an absent parent initializer; authorized comments now explain their distinct decision and client boundaries.
+    4. ✅ Every callback source and semantic package README now follows the VOCODE documentation contract, and the composed CPU integration probe exercises model summary, timing, finite checks, learning-rate, throughput, device statistics, EMA, early stopping, ranked and last checkpoints, and CSV logging without changing public APIs; prior DDP, spawn, and fork evidence remains valid.
 
 | Progress Complete | Signal Connector Relocation | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
 
@@ -219,7 +219,7 @@
 | Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 
     1. ✅ Model summary now lives in the semantic callback capability package with a public lifecycle callback, private inspection report, and isolated optional Rich renderer.
-    2. ✅ Rendering, shape capture, count formatting, parameter accounting, and model-size formatting are owner-bound operations; static pseudo-utilities, future imports, broad types, nested hooks, destructor cleanup, and source prose are absent.
+    2. ✅ Rendering, shape capture, count formatting, parameter accounting, and model-size formatting are owner-bound operations; static pseudo-utilities, future imports, broad types, nested hooks, and destructor cleanup are absent, while authorized comments document state-neutral example forwarding and renderer extension.
     3. ✅ Parameter and trainable counts, actual storage-byte size, shapes, FLOPs, module modes, plain output, Rich output, depth validation, and lazy-parameter diagnostics execute through the new owners.
     4. ✅ Attached inspection uses canonical DataModule transfer precedence and shared Python, NumPy, torch CPU, CUDA, or MPS state; detached inspection uses Module hooks and every mode, hook, and random source restores deterministically.
     5. ✅ Default Trainer execution, DataModule precedence, callback configuration, metric views, CPU and MPS random rollback, and two-rank exactly-once presentation pass.
@@ -241,7 +241,7 @@
     2. ✅ Invalid trigger combinations, invalid ranking, non-scalar monitors, path traversal, remote link mode, and unsupported collective exception saves fail explicitly at their owning boundaries.
     3. ✅ Top-k and last state serialize before persistence, transport failures restore callback state, deferred-validation triggers serialize as consumed, and train-end logic refreshes stale final-step artifacts.
     4. ✅ Local link mode executes directly through CheckpointPaths, never points current last at a rejected candidate's older best artifact, and remote fsspec paths reject unsupported symbolic-link semantics.
-    5. ✅ The unused ModelCheckpoint link wrapper and final callback initializer prose were deleted; the complete callback tree now contains no future import, conditional type import, broad annotation, source comment, static pseudo-utility, lambda, or module function.
+    5. ✅ The unused ModelCheckpoint link wrapper and obsolete initializer prose were deleted; the callback tree contains no future import, conditional type import, broad annotation, static pseudo-utility, lambda, or module function, and its authorized comments now document schedule, ranking, path, transaction, rollback, and all-rank durability semantics.
     6. ✅ CPU configuration, ranking, retention, final-step, failure, and resume probes plus remote persistence and asynchronous snapshot isolation pass.
     7. ✅ Callback composition, tensor metric state, two-rank DDP checkpoint selection, and two-rank sharded model-parallel uninterrupted-versus-resumed trajectories pass.
 

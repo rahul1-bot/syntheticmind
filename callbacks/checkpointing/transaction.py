@@ -1,3 +1,28 @@
+# This module:
+# 1. Defines the checkpoint persistence transaction that coordinates top-k,
+#    last-artifact, exception-save, rollback, logging, and post-commit pruning
+# 2. Serializes the joint path, ranking, and schedule state needed for exact
+#    callback continuation
+#
+# Design decisions:
+# - Ranking and schedule mutate before persistence so the checkpoint captures
+#   the state created by its own save; an in-memory snapshot rolls both back if
+#   persistence or link creation fails
+# - Superseded artifacts are removed only after a replacement commits, avoiding
+#   retention policies that destroy the last good checkpoint on write failure
+# - save_last="link" reuses a newly saved top-k artifact when possible; when no
+#   ranked artifact was written, the last policy falls back to an independent
+#   checkpoint so latest-state semantics remain true
+# - Exception saving is deliberately best-effort and global-zero-only. Failure
+#   to preserve diagnostics is logged without replacing the original exception
+# - Full durability, topology-specific state assembly, and transport are
+#   delegated to Trainer, Strategy, and CheckpointIO; this layer owns policy
+#   state, not checkpoint format
+# - Checkpoint save latency and artifact size enter ordinary logger telemetry
+#   only after the persistence request returns successfully
+#
+# Author: Rahul Sawhney
+
 import time
 import warnings
 from pathlib import Path
@@ -26,6 +51,9 @@ type _TransactionSnapshot = tuple[_ScheduleSnapshot, _RankingSnapshot, str, str]
 
 
 class _CheckpointTransaction:
+    # Transactional coordinator composed privately by ModelCheckpoint. Its
+    # methods receive already synchronized metric candidates and never decide
+    # callback hook cadence themselves.
     def __init__(
         self,
         paths: _CheckpointPaths,
@@ -35,6 +63,8 @@ class _CheckpointTransaction:
         save_last: bool | Literal["link"] | None,
         save_weights_only: bool
     ) -> None:
+        # Binds the path, ranking, schedule, retention, and payload policies that
+        # must advance or roll back as one logical save operation.
         self._paths: _CheckpointPaths = paths
         self._ranking: _CheckpointRanking = ranking
         self._schedule: _CheckpointSchedule = schedule
@@ -51,6 +81,8 @@ class _CheckpointTransaction:
         trigger_time: float,
         synchronize: bool
     ) -> None:
+        # Executes one periodic save decision, coordinating ranked retention and
+        # the optional last artifact under one rollback boundary.
         previous_last_path: str = self.last_model_path
         planned_link_path: str | None = None
         if self._save_last == "link":
@@ -102,6 +134,8 @@ class _CheckpointTransaction:
         candidates: dict[str, torch.Tensor],
         trigger_time: float
     ) -> None:
+        # Persists a final last artifact when training ends after the most recent
+        # periodic save coordinate.
         if (
             not self._save_last
             or self._schedule.last_global_step_saved == trainer.global_step
@@ -121,6 +155,8 @@ class _CheckpointTransaction:
         candidates: dict[str, torch.Tensor],
         exception: BaseException
     ) -> None:
+        # Attempts a non-collective diagnostic checkpoint while preserving the
+        # original training failure as the authoritative exception.
         filepath: str = self._paths.ranked_filepath(candidates)
         snapshot: _TransactionSnapshot = self.snapshot()
         self._schedule.mark_saved(trainer.global_step, time.monotonic())
@@ -143,6 +179,8 @@ class _CheckpointTransaction:
             )
 
     def state_dict(self) -> StateDict:
+        # Combines ranking, schedule, directory, and last-artifact coordinates
+        # into the callback state stored inside a Trainer checkpoint.
         state: StateDict = self._ranking.state_dict()
         state.update(self._schedule.state_dict())
         state["dirpath"] = self._paths.dirpath
@@ -151,6 +189,9 @@ class _CheckpointTransaction:
         return state
 
     def load_state_dict(self, state_dict: StateDict) -> None:
+        # Restores the joint policy state. A changed checkpoint directory keeps
+        # schedule progress but resets artifact rankings whose paths no longer
+        # describe the active destination.
         self._schedule.load_state_dict(state_dict)
         restored_dirpath_value: StateValue | None = state_dict.get("dirpath")
         if restored_dirpath_value is not None and not isinstance(restored_dirpath_value, str):
@@ -185,6 +226,7 @@ class _CheckpointTransaction:
         self.last_checkpoint_saved: str = last_saved
 
     def snapshot(self) -> _TransactionSnapshot:
+        # Captures every mutable logical field that may advance before a write.
         return (
             self._schedule.snapshot(),
             self._ranking.snapshot(),
@@ -193,6 +235,7 @@ class _CheckpointTransaction:
         )
 
     def restore_snapshot(self, snapshot: _TransactionSnapshot) -> None:
+        # Rolls back a failed write without inventing filesystem compensation.
         self._schedule.restore_snapshot(snapshot[0])
         self._ranking.restore_snapshot(snapshot[1])
         self.last_model_path: str = snapshot[2]
@@ -205,6 +248,8 @@ class _CheckpointTransaction:
         trigger_time: float,
         synchronize: bool
     ) -> str | None:
+        # Selects disabled, unmonitored, or monitored retention and returns the
+        # newly persisted ranked path when an artifact was committed.
         if self._ranking.save_top_k == 0:
             return None
         if self._ranking.monitor is None:
@@ -247,6 +292,8 @@ class _CheckpointTransaction:
         trigger_time: float,
         synchronize: bool
     ) -> str:
+        # Persists an unmonitored artifact, commits latest-only logical state,
+        # then prunes the superseded path.
         filepath: str = self._paths.ranked_filepath(
             candidates,
             trainer if synchronize else None
@@ -276,6 +323,8 @@ class _CheckpointTransaction:
         trigger_time: float,
         synchronize: bool
     ) -> str:
+        # Persists a qualifying monitored artifact and commits its scalar top-k
+        # ordering before removing the displaced kth artifact.
         filepath: str = self._paths.ranked_filepath(
             candidates,
             trainer if synchronize else None
@@ -307,6 +356,8 @@ class _CheckpointTransaction:
         trigger_time: float,
         synchronize: bool
     ) -> None:
+        # Materializes the last policy as a link to the current ranked artifact
+        # or as an independent checkpoint when no reusable artifact exists.
         if not self._save_last:
             return
         filepath: str = self._paths.last_filepath(
@@ -341,6 +392,8 @@ class _CheckpointTransaction:
         filepath: str | Path,
         synchronize: bool
     ) -> None:
+        # Delegates checkpoint assembly and transport to Trainer, then records
+        # rank-zero persistence cost and local artifact size.
         if trainer.module is None:
             raise RuntimeError("ModelCheckpoint requires an attached Trainer module.")
         started_at: float = time.perf_counter()
@@ -368,6 +421,8 @@ class _CheckpointTransaction:
         delete_path: str | None,
         current_path: str
     ) -> None:
+        # Applies retention only after success and only when path policy confirms
+        # the superseded artifact belongs to this callback.
         if (
             delete_path is not None
             and self._paths.should_remove(trainer, delete_path, current_path)
@@ -375,6 +430,7 @@ class _CheckpointTransaction:
             trainer._checkpoint_connector.remove(delete_path)
 
     def _required_string(self, state_dict: StateDict, name: str) -> str:
+        # Reads one mandatory transaction path without coercing foreign state.
         value: StateValue | None = state_dict.get(name)
         if not isinstance(value, str):
             raise TypeError(f"ModelCheckpoint {name} state must be a string.")

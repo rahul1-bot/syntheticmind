@@ -1,3 +1,27 @@
+# This module:
+# 1. Defines LearningRateMonitor, the callback that publishes learning rate and
+#    optional momentum and weight-decay values for every optimizer parameter
+#    group
+# 2. Derives stable metric identities from scheduler names, optimizer classes,
+#    and client-supplied parameter-group names while preserving emission cadence
+#    across checkpoint resumption
+#
+# Design decisions:
+# - A client may force one global logging_interval or defer to each configured
+#   scheduler interval; optimizers without schedulers default to step logging
+# - Scheduler names identify their optimizer rather than the scheduler object,
+#   so several schedulers attached to one optimizer must agree on one public
+#   metric prefix
+# - Repeated optimizer classes receive deterministic numeric suffixes, and
+#   multi-group optimizers receive explicit group suffixes; duplicate final
+#   names fail instead of overwriting telemetry
+# - Step emission occurs at the before-optimizer-step boundary and suppresses
+#   duplicates when several optimizer callbacks share a global step
+# - Callback state stores only cadence coordinates. Optimizer topology and names
+#   are rebuilt from the live resumed configuration and validated again
+#
+# Author: Rahul Sawhney
+
 from typing import Literal, cast, override
 
 import syntheticmind
@@ -19,6 +43,9 @@ __all__: list[str] = ["LearningRateMonitor"]
 
 
 class LearningRateMonitor(Callback):
+    # Optimizer-hyperparameter observer for client runs with configured loggers.
+    # `lrs` retains the emitted learning-rate history per resolved metric name
+    # for direct experiment inspection after fitting.
     def __init__(
         self,
         logging_interval: Literal["step", "epoch"] | None = None,
@@ -26,6 +53,15 @@ class LearningRateMonitor(Callback):
         log_weight_decay: bool = False,
         log_key_prefix: str | None = None
     ) -> None:
+        # Args:
+        #     logging_interval: Forced ``"step"`` or ``"epoch"`` cadence, or
+        #         None to follow scheduler intervals. Default: ``None``.
+        #     log_momentum: Whether supported momentum or first-beta values are
+        #         emitted beside learning rates. Default: ``False``.
+        #     log_weight_decay: Whether configured weight decay is emitted.
+        #         Default: ``False``.
+        #     log_key_prefix: Optional prefix prepended to every resolved metric
+        #         name. Default: ``None``.
         if logging_interval not in (None, "step", "epoch"):
             raise ValueError("`logging_interval` must be 'step', 'epoch', or None.")
         if type(log_momentum) is not bool:
@@ -48,6 +84,7 @@ class LearningRateMonitor(Callback):
     @property
     @override
     def state_key(self) -> str:
+        # Qualifies state by every field that changes metric identity or cadence.
         return self._generate_state_key(
             logging_interval=self.logging_interval,
             log_momentum=self.log_momentum,
@@ -61,6 +98,9 @@ class LearningRateMonitor(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Resolves optimizer identities only after configure_optimizers has been
+        # materialized, retaining restored cadence coordinates for the first
+        # resumed epoch.
         del module
         if not trainer.loggers:
             raise MisconfigurationError(
@@ -82,6 +122,8 @@ class LearningRateMonitor(Callback):
         module: Module,
         optimizer: torch.optim.Optimizer
     ) -> None:
+        # Publishes step-cadence values immediately before the selected optimizer
+        # steps, when its current parameter-group values are authoritative.
         del module
         if not self._should_log(optimizer, "step"):
             return
@@ -96,6 +138,7 @@ class LearningRateMonitor(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Publishes one epoch-cadence snapshot before training batches begin.
         del module
         if self._last_logged_epoch == trainer.current_epoch:
             return
@@ -110,6 +153,7 @@ class LearningRateMonitor(Callback):
 
     @override
     def state_dict(self) -> StateDict:
+        # Persists duplicate-suppression coordinates across resumption.
         return {
             "last_logged_step": self._last_logged_step,
             "last_logged_epoch": self._last_logged_epoch
@@ -117,6 +161,8 @@ class LearningRateMonitor(Callback):
 
     @override
     def load_state_dict(self, state_dict: StateDict) -> None:
+        # Restores cadence state strictly and marks it for preservation through
+        # the next on_train_start configuration rebuild.
         step_value: StateValue | None = state_dict.get("last_logged_step")
         epoch_value: StateValue | None = state_dict.get("last_logged_epoch")
         if type(step_value) is not int or step_value < -1:
@@ -132,6 +178,8 @@ class LearningRateMonitor(Callback):
         optimizers: list[torch.optim.Optimizer],
         scheduler_configs: list[LRSchedulerConfig]
     ) -> None:
+        # Rebuilds stable public names and scheduler-derived interval sets from
+        # the live optimizer graph, rejecting ambiguous client configurations.
         self._optimizer_names.clear()
         self._optimizer_intervals.clear()
         self.lrs.clear()
@@ -185,6 +233,8 @@ class LearningRateMonitor(Callback):
         optimizer: torch.optim.Optimizer,
         base_name: str
     ) -> list[str]:
+        # Resolves parameter-group suffixes, preferring explicit client names and
+        # falling back to deterministic one-based pg identifiers.
         parameter_groups: list[OptimizerParameterGroup] = cast(
             list[OptimizerParameterGroup],
             optimizer.param_groups
@@ -213,6 +263,8 @@ class LearningRateMonitor(Callback):
         optimizer: torch.optim.Optimizer,
         interval: SchedulerInterval
     ) -> bool:
+        # Applies an explicit monitor-wide cadence first, then the optimizer's
+        # scheduler intervals, then the step default for unscheduled optimizers.
         if self.logging_interval is not None:
             return self.logging_interval == interval
         configured_intervals: set[SchedulerInterval] = self._optimizer_intervals[
@@ -228,6 +280,8 @@ class LearningRateMonitor(Callback):
         optimizers: list[torch.optim.Optimizer],
         step: int
     ) -> None:
+        # Merges values from the selected optimizers into one callback snapshot;
+        # experiment loggers emit only on global zero.
         metrics: dict[str, float] = {}
         optimizer: torch.optim.Optimizer
         for optimizer in optimizers:
@@ -247,6 +301,8 @@ class LearningRateMonitor(Callback):
         self,
         optimizer: torch.optim.Optimizer
     ) -> dict[str, float]:
+        # Reads live scalar hyperparameters and appends learning-rate history
+        # under the same names sent to configured loggers.
         base_name: str = self._optimizer_names[id(optimizer)]
         group_names: list[str] = self._group_names(optimizer, base_name)
         parameter_groups: list[OptimizerParameterGroup] = cast(
@@ -281,6 +337,8 @@ class LearningRateMonitor(Callback):
         return metrics
 
     def _momentum(self, group: OptimizerParameterGroup) -> float | None:
+        # Uses the first adaptive beta when present, otherwise conventional
+        # momentum, matching the optimizer vocabulary exposed to clients.
         betas: OptimizerStateValue | None = group.get("betas")
         if isinstance(betas, list | tuple) and betas:
             return self._scalar(betas[0], "momentum beta")
@@ -294,6 +352,8 @@ class LearningRateMonitor(Callback):
         value: OptimizerStateValue | None,
         name: str
     ) -> float:
+        # Normalizes Python and scalar-tensor optimizer fields while rejecting
+        # vector or foreign values that cannot form one metric sample.
         if type(value) is int or type(value) is float:
             return float(value)
         if isinstance(value, torch.Tensor) and value.numel() == 1:
@@ -302,6 +362,7 @@ class LearningRateMonitor(Callback):
 
     @override
     def __repr__(self) -> str:
+        # Reports the full naming and cadence policy for run diagnostics.
         return (
             f"LearningRateMonitor(logging_interval={self.logging_interval!r}, "
             f"log_momentum={self.log_momentum}, "

@@ -50,7 +50,7 @@
     3. ✅ Model, DataModule, direct, multiple, nested, sized, unsized, stateful, and distributed data paths preserve ownership, identity, limits, ordering, and exact continuation.
     4. ✅ Metric production, graph state, reduction, TorchMetrics, callback views, progress views, logger output, scheduler monitoring, early stopping, and checkpoint ranking remain distinct and coherent.
     5. ✅ Model, data, checkpoint, and callback hooks; model-provided callbacks; logger access; rank-safe printing; nested gathering; and model checkpoint reconstruction preserve established extension semantics.
-    6. ✅ ConsoleRenderer owns terminal mechanics and owner-bound metric ordering without a lambda, while one ProgressBarCallback owns rank-zero stage presentation; the hook-rich callback retains an explicit concept-integrity size exception without annotation, prose, static, or pass-through debt.
+    6. ✅ ConsoleRenderer owns terminal mechanics and owner-bound metric ordering without a lambda, while one ProgressBarCallback owns rank-zero stage presentation; the hook-rich callback retains an explicit concept-integrity size exception without annotation, static, or pass-through debt, and its authorized source comments document rank ownership, metric selection, timing, and failure finalization.
     7. CUDA execution remains hardware-unavailable, installed PyTorch 2.9 rejects `torch.compile` on Python 3.14, and macOS may abort during post-success spawned-process shutdown with a native recursive-mutex error; these are recorded environment boundaries rather than simulated capability.
 
 | Architecture Decision | Atomic Sharded Checkpoint Generations | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
@@ -94,9 +94,9 @@
     1. Callback defines the complete established setup, fit, training, validation, test, prediction, optimization, exception, checkpoint, and state hook vocabulary; all forty-three call signatures remain unchanged and concrete implementations mark every actual override.
     2. Model-provided callbacks are configured once per stage, replace compatible Trainer callbacks through the established inheritance rule, and remain ordered before checkpoint callbacks.
     3. The connector accepts a bound configuration operation rather than a concrete Trainer reference, preserving module hook context and profiler ownership without introducing a circular import or synthetic Trainer-host Protocol.
-    4. Trainer and loops own hook timing, HookDispatcher owns profiler-aware invocation, and the connector owns only callback composition and configuration state; the base contract now uses Python 3.14 lazy package annotations without a future import, conditional type import, source prose, or circular dependency workaround.
+    4. Trainer and loops own hook timing, HookDispatcher owns profiler-aware invocation, and the connector owns only callback composition and configuration state; the base contract uses Python 3.14 lazy package annotations without a future import, conditional type import, or circular dependency workaround, while its authorized comments now define ordering, persistence, and client override boundaries.
     5. Early stopping, finite-value protection, learning-rate telemetry, data-axis throughput, and accelerator statistics retain separate ML meanings; obsolete imports, the unused legacy state-key property, static pseudo-utilities, and nine callback initializers terminating at `object` were removed while real overrides remain explicit.
-    6. Fit, validation, test, prediction, invalid configuration, non-finite failure, optimizer telemetry, distributed sample accounting, filtered device statistics, checkpoint participation, serialization, DDP, spawn, and fork verification pass.
+    6. Every callback module now carries the authorized VOCODE ownership, design-rationale, lifecycle, persistence, and client-integration comments; the callback, checkpointing, and model-summary READMEs document extension, durability, retention, and presentation contracts, and the composed local callback integration probe passes alongside the existing fit, validation, test, prediction, DDP, spawn, and fork evidence.
 
 | Architecture Decision | Signal Connector Placement | Date: 04 September 2026 | Time: 09:15 AM | Name: Ghost |
 
@@ -215,7 +215,7 @@
     2. Layer shape collection uses a bound inspector method, parameter count, trainability, and storage bytes belong to layer inspection, and deterministic `finally` cleanup replaces destructor-dependent hook removal.
     3. Model size now sums each realized parameter's actual storage bytes instead of inferring storage from Trainer precision labels, preserving correct mixed-precision and custom-dtype accounting without a lookup table.
     4. Attached example inspection uses Trainer's DataModule-over-Module transfer transaction and shared multi-backend Randomness snapshot; detached inspection uses Module hooks, and every nested mode plus random source restores after success or failure.
-    5. Plain and Rich rendering are owner-bound instance behavior, the report contains no static pseudo-utility, and all three modules contain no future import, conditional annotation, broad type, source prose, or nested function.
+    5. Plain and Rich rendering are owner-bound instance behavior, the report contains no static pseudo-utility, and all three modules contain no future import, conditional annotation, broad type, or nested function; authorized comments and the package README now document depth, example forwarding, state restoration, and renderer extension.
     6. Plain and Rich rendering, lazy parameters, hook cleanup, failure rollback, canonical DataModule transfer, CPU and MPS randomness, default Trainer integration, callback configuration, and exactly-once two-rank presentation pass.
 
 | Architecture Decision | Profiler Runtime Ownership and Callback Subtraction | Date: 04 September 2026 | Time: 02:11 PM | Name: Ghost |

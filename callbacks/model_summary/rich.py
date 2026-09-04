@@ -1,3 +1,21 @@
+# This module:
+# 1. Defines RichModelSummary, the optional Rich terminal renderer for the
+#    canonical ModelSummary report
+# 2. Converts normalized report columns and aggregate values into a Rich table
+#    and compact summary grid
+#
+# Design decisions:
+# - Rich remains an optional import boundary; requesting this renderer without
+#   the dependency raises one actionable installation error at import time
+# - Measurement stays entirely in _ModelSummaryReport. This adapter changes only
+#   presentation, so plain and Rich clients receive identical model facts
+# - Optional shape and per-device columns are discovered from report column
+#   names rather than coupled to one execution strategy
+# - Client summarize_kwargs may choose header_style while the structural column
+#   order remains canonical
+#
+# Author: Rahul Sawhney
+
 from typing import override
 
 try:
@@ -20,12 +38,15 @@ __all__: list[str] = ["RichModelSummary"]
 
 
 class RichModelSummary(ModelSummary):
+    # Rich presentation adapter selected explicitly by clients that installed
+    # the optional dependency.
     @override
     def __init__(
         self,
         max_depth: int = 1,
         **summarize_kwargs: str
     ) -> None:
+        # Preserves ModelSummary depth and presentation-option validation.
         super().__init__(max_depth=max_depth, **summarize_kwargs)
 
     @override
@@ -39,6 +60,8 @@ class RichModelSummary(ModelSummary):
         total_flops: int,
         **summarize_kwargs: str
     ) -> None:
+        # Renders canonical layer rows and aggregate model accounting without
+        # recomputing or mutating the underlying report.
         column_names: set[str] = {name for name, _ in summary_data}
         header_style: str = summarize_kwargs.get("header_style", "bold magenta")
         table: Table = Table(header_style=header_style)

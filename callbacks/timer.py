@@ -1,3 +1,26 @@
+# This module:
+# 1. Defines Timer, the lifecycle clock that measures fit, active training,
+#    validation, testing, prediction, and epoch durations
+# 2. Implements a resumable training-time budget that requests a synchronized,
+#    cooperative stop at step or epoch boundaries
+#
+# Design decisions:
+# - The training budget counts active training wall time and pauses around
+#   fit-time validation, so validation cadence does not consume a model's
+#   configured optimization budget
+# - Fit and standalone evaluation clocks remain separate from the active
+#   training clock; client reporting can therefore distinguish end-to-end stage
+#   latency from time spent executing training batches
+# - Only elapsed training time crosses a checkpoint boundary. perf_counter
+#   origins are process-local and meaningless after restart, so resumption adds
+#   a validated numeric offset to a new monotonic interval
+# - Global zero evaluates the budget and broadcasts the stop decision, keeping
+#   distributed workers aligned without assuming synchronized host clocks
+# - Failure handling closes every active interval idempotently, allowing
+#   ProgressBarCallback and clients to query final durations during teardown
+#
+# Author: Rahul Sawhney
+
 import math
 import re
 import time
@@ -18,12 +41,23 @@ type _TimerStage = Literal["fit", "train", "validate", "test", "predict"]
 
 
 class Timer(Callback):
+    # Stage clock and optional fit budget. Add this callback explicitly or let
+    # the Trainer synthesize it from max_time; clients may query elapsed and
+    # terminal durations through the public accessors after a run.
     def __init__(
         self,
         duration: str | timedelta | dict[str, int] | None = None,
         interval: Literal["step", "epoch"] = "step",
         verbose: bool = True
     ) -> None:
+        # Args:
+        #     duration: Positive budget as ``DD:HH:MM:SS``, timedelta, accepted
+        #         timedelta keyword mapping, or None for measurement only.
+        #         Default: ``None``.
+        #     interval: Boundary at which the budget is checked, ``"step"`` or
+        #         ``"epoch"``. Default: ``"step"``.
+        #     verbose: Whether global zero logs the first budget exhaustion.
+        #         Default: ``True``.
         if interval not in ("step", "epoch"):
             raise ValueError("`interval` must be 'step' or 'epoch'.")
         if type(verbose) is not bool:
@@ -55,17 +89,24 @@ class Timer(Callback):
         module: Module,
         stage: TrainerStage
     ) -> None:
+        # Clears prior standalone-stage timing so repeated validate, test, or
+        # predict calls report only their current transaction.
         del trainer, module
         if stage in ("validate", "test", "predict"):
             self._reset_stage(stage)
 
     def start_time(self, stage: _TimerStage = "train") -> float | None:
+        # Returns this process's perf_counter origin for diagnostic correlation;
+        # persisted clients should use elapsed durations instead.
         return self._stage_started_at[stage]
 
     def end_time(self, stage: _TimerStage = "train") -> float | None:
+        # Returns the local perf_counter endpoint once the stage has closed.
         return self._stage_ended_at[stage]
 
     def time_elapsed(self, stage: _TimerStage = "train") -> float:
+        # Computes live or terminal seconds. Training includes its restored
+        # offset while other stages expose only the current process interval.
         if stage == "train":
             elapsed: float = self._training_time_offset
             if self._training_started_at is None:
@@ -82,6 +123,8 @@ class Timer(Callback):
         return self._last_stage_durations[stage]
 
     def time_remaining(self, stage: _TimerStage = "train") -> float | None:
+        # Returns signed seconds against the configured budget, or None when the
+        # callback is operating only as a clock.
         if self._duration is None:
             return None
         return self._duration - self.time_elapsed(stage)
@@ -92,6 +135,8 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Starts a fresh fit clock, retaining only a checkpoint-restored training
+        # offset, and immediately rejects a budget already exhausted on resume.
         del module
         restored_offset: float = self._training_time_offset if self._state_restored else 0.0
         self._reset_all()
@@ -107,6 +152,7 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Closes active training and the enclosing fit interval on normal exit.
         del trainer, module
         self._pause_active_training()
         self._stop_stage("fit")
@@ -117,6 +163,7 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Opens the cumulative training clock after sanity validation.
         del trainer, module
         current_time: float = time.perf_counter()
         self._training_started_at: float | None = current_time
@@ -130,6 +177,8 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Closes the cumulative training clock without discarding its restored
+        # offset or the final active-training duration.
         del trainer, module
         self._pause_active_training()
         if self._training_started_at is not None:
@@ -142,6 +191,7 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Opens both the full epoch clock and the active training portion.
         del trainer, module
         self._current_epoch_training_seconds: float = 0.0
         self._epoch_started_at: float | None = time.perf_counter()
@@ -153,6 +203,8 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Freezes the epoch's training-only and end-to-end durations, then checks
+        # an epoch-cadence budget after all epoch work has completed.
         del module
         self._pause_active_training()
         self._last_train_epoch_time: float = self._current_epoch_training_seconds
@@ -170,6 +222,7 @@ class Timer(Callback):
         batch: Batch,
         batch_idx: int
     ) -> None:
+        # Checks a step-cadence budget after the batch and its optimizer work.
         del module, outputs, batch, batch_idx
         if self._interval == "step":
             self._check_time_remaining(trainer)
@@ -180,6 +233,8 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Opens validation timing and pauses active training for fit-time passes;
+        # sanity validation is intentionally outside user timing.
         del module
         if trainer.sanity_checking:
             return
@@ -193,6 +248,8 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Closes validation, resumes an interrupted training epoch, and checks
+        # the budget at a durable fit boundary.
         del module
         if trainer.sanity_checking:
             return
@@ -211,6 +268,7 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Opens the standalone test clock.
         del trainer, module
         self._start_stage("test")
 
@@ -220,6 +278,7 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Closes the standalone test clock.
         del trainer, module
         self._stop_stage("test")
 
@@ -229,6 +288,7 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Opens the standalone prediction clock.
         del trainer, module
         self._start_stage("predict")
 
@@ -238,6 +298,7 @@ class Timer(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Closes the standalone prediction clock.
         del trainer, module
         self._stop_stage("predict")
 
@@ -248,6 +309,8 @@ class Timer(Callback):
         module: Module,
         exception: BaseException
     ) -> None:
+        # Freezes all active clocks before failure teardown without replacing
+        # the original exception.
         del trainer, module, exception
         self._pause_active_training()
         if self._training_started_at is not None and self._training_ended_at is None:
@@ -261,26 +324,33 @@ class Timer(Callback):
 
     @property
     def last_train_epoch_time(self) -> float:
+        # Returns active training seconds for the most recently closed epoch.
         return self._last_train_epoch_time
 
     @property
     def last_validation_time(self) -> float:
+        # Returns seconds for the most recently closed validation pass.
         return self._last_stage_durations["validate"]
 
     @property
     def last_test_time(self) -> float:
+        # Returns seconds for the most recently closed test pass.
         return self._last_stage_durations["test"]
 
     @property
     def last_predict_time(self) -> float:
+        # Returns seconds for the most recently closed prediction pass.
         return self._last_stage_durations["predict"]
 
     @property
     def time_limit_reached(self) -> bool:
+        # Reports whether this run has crossed its configured training budget.
         return self._time_limit_reached
 
     @override
     def state_dict(self) -> StateDict:
+        # Persists semantic configuration and accumulated training seconds;
+        # process-local timestamps are deliberately excluded.
         return {
             "duration": self._duration,
             "interval": self._interval,
@@ -290,6 +360,8 @@ class Timer(Callback):
 
     @override
     def load_state_dict(self, state_dict: StateDict) -> None:
+        # Restores elapsed training only when duration and check cadence exactly
+        # match the active client configuration.
         duration_value: StateValue | None = state_dict.get("duration")
         interval_value: StateValue | None = state_dict.get("interval")
         elapsed_value: StateValue | None = state_dict.get("time_elapsed")
@@ -318,23 +390,27 @@ class Timer(Callback):
         self._state_restored: bool = True
 
     def _train_epoch_time_elapsed(self) -> float:
+        # Computes the live active-training portion of the current epoch.
         elapsed: float = self._current_epoch_training_seconds
         if self._active_training_started_at is not None:
             elapsed += max(0.0, time.perf_counter() - self._active_training_started_at)
         return elapsed
 
     def _epoch_time_elapsed(self) -> float:
+        # Computes end-to-end epoch time, including scheduled validation.
         if self._epoch_started_at is None:
             return self._last_epoch_time
         return max(0.0, time.perf_counter() - self._epoch_started_at)
 
     def _start_stage(self, stage: _TimerStage) -> None:
+        # Opens or replaces one non-training stage interval.
         current_time: float = time.perf_counter()
         self._stage_started_at[stage] = current_time
         self._stage_ended_at[stage] = None
         self._active_stage_started_at[stage] = current_time
 
     def _stop_stage(self, stage: _TimerStage) -> None:
+        # Idempotently freezes one open stage interval.
         active_start: float | None = self._active_stage_started_at[stage]
         if active_start is None:
             return
@@ -344,10 +420,12 @@ class Timer(Callback):
         self._active_stage_started_at[stage] = None
 
     def _resume_active_training(self) -> None:
+        # Opens the current epoch's training-only interval if it is paused.
         if self._active_training_started_at is None:
             self._active_training_started_at: float | None = time.perf_counter()
 
     def _pause_active_training(self) -> None:
+        # Accumulates and closes the current training-only interval.
         if self._active_training_started_at is None:
             return
         self._current_epoch_training_seconds += max(
@@ -357,6 +435,7 @@ class Timer(Callback):
         self._active_training_started_at: float | None = None
 
     def _close_epoch(self) -> None:
+        # Freezes the current end-to-end epoch duration once.
         if self._epoch_started_at is None:
             return
         self._last_epoch_time: float = max(
@@ -366,6 +445,8 @@ class Timer(Callback):
         self._epoch_started_at: float | None = None
 
     def _check_time_remaining(self, trainer: syntheticmind.Trainer) -> None:
+        # Evaluates on global zero, broadcasts the result, and raises only the
+        # cooperative stop flag so loops finish their current durable boundary.
         if self._duration is None:
             return
         rank_zero_stop: bool = (
@@ -383,6 +464,8 @@ class Timer(Callback):
             log.info(f"Time limit reached after {elapsed}; requesting training stop.")
 
     def _reset_all(self) -> None:
+        # Clears process-local clocks for a new fit while the caller separately
+        # preserves any checkpoint-restored training offset.
         self._stage_started_at: dict[_TimerStage, float | None] = self._empty_times()
         self._stage_ended_at: dict[_TimerStage, float | None] = self._empty_times()
         self._active_stage_started_at: dict[
@@ -401,12 +484,14 @@ class Timer(Callback):
         self._last_epoch_time: float = 0.0
 
     def _reset_stage(self, stage: _TimerStage) -> None:
+        # Clears one repeatable standalone stage without perturbing fit state.
         self._stage_started_at[stage] = None
         self._stage_ended_at[stage] = None
         self._active_stage_started_at[stage] = None
         self._last_stage_durations[stage] = 0.0
 
     def _empty_times(self) -> dict[_TimerStage, float | None]:
+        # Creates independent mutable stage-clock mappings for each timing view.
         return {
             "fit": None,
             "train": None,
@@ -419,6 +504,8 @@ class Timer(Callback):
         self,
         duration: str | timedelta | dict[str, int] | None
     ) -> float | None:
+        # Normalizes supported client duration forms to positive finite seconds
+        # and rejects ambiguous strings or timedelta mappings immediately.
         if duration is None:
             return None
         parsed_duration: timedelta
@@ -482,6 +569,7 @@ class Timer(Callback):
 
     @override
     def __repr__(self) -> str:
+        # Presents the normalized budget and cadence used by the callback.
         return (
             f"Timer(duration={self._duration!r}, interval={self._interval!r}, "
             f"verbose={self._verbose})"

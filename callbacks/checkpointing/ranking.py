@@ -1,3 +1,23 @@
+# This module:
+# 1. Defines the scalar checkpoint ranking state used for monitored top-k and
+#    unmonitored latest-artifact retention
+# 2. Validates, snapshots, restores, serializes, and resumes ranking metadata
+#    independently of storage side effects
+#
+# Design decisions:
+# - Qualification is reduced through Strategy so all ranks agree whether a
+#   monitored candidate enters the retained set
+# - Scores are detached scalar CPU tensors, making ranking independent of
+#   accelerator placement and autograd lifetime
+# - NaN is converted to the worst possible score for the active direction; the
+#   artifact remains representable without accidentally becoming best
+# - Ranking mutations return the superseded path but never delete it. The
+#   transaction layer prunes only after replacement persistence succeeds
+# - snapshot and restore_snapshot provide in-process rollback, while state_dict
+#   and load_state_dict provide strict cross-run continuation
+#
+# Author: Rahul Sawhney
+
 from typing import Literal, cast
 
 import syntheticmind
@@ -18,12 +38,16 @@ type _RankingSnapshot = tuple[
 
 
 class _CheckpointRanking:
+    # Pure top-k state machine composed by the checkpoint transaction. It knows
+    # scores and paths but has no filesystem, logger, or serialization access.
     def __init__(
         self,
         monitor: str | None,
         mode: Literal["min", "max"],
         save_top_k: int
     ) -> None:
+        # Initializes an empty ranking with the direction-specific worst kth
+        # value used before any candidate has been accepted.
         self.monitor: str | None = monitor
         self.mode: Literal["min", "max"] = mode
         self.save_top_k: int = save_top_k
@@ -39,6 +63,8 @@ class _CheckpointRanking:
         trainer: syntheticmind.Trainer,
         current: torch.Tensor | None
     ) -> bool:
+        # Decides whether a synchronized scalar can enter the configured retained
+        # set without mutating ranking state.
         if current is None or self.save_top_k == 0:
             return False
         if self.save_top_k == -1 or len(self.best_k_models) < self.save_top_k:
@@ -58,6 +84,8 @@ class _CheckpointRanking:
         current: torch.Tensor,
         filepath: str
     ) -> str | None:
+        # Atomically installs a monitored candidate in logical state and returns
+        # the prior kth path eligible for post-commit deletion.
         resolved_current: torch.Tensor = current.detach().cpu().squeeze()
         if bool(torch.isnan(resolved_current)):
             resolved_current: torch.Tensor = torch.tensor(
@@ -89,11 +117,13 @@ class _CheckpointRanking:
         return delete_path
 
     def accept_unmonitored(self, filepath: str) -> str | None:
+        # Tracks the latest path for latest-only unmonitored retention.
         previous_path: str = self.best_model_path
         self.best_model_path: str = filepath
         return previous_path if self.save_top_k == 1 else None
 
     def reset(self) -> None:
+        # Clears ranking paths after an incompatible directory change.
         self.current_score: torch.Tensor | None = None
         self.best_k_models: dict[str, torch.Tensor] = {}
         self.kth_best_model_path: str = ""
@@ -102,6 +132,7 @@ class _CheckpointRanking:
         self.best_model_path: str = ""
 
     def snapshot(self) -> _RankingSnapshot:
+        # Captures an in-process rollback point before persistence begins.
         return (
             self.current_score,
             dict(self.best_k_models),
@@ -112,6 +143,7 @@ class _CheckpointRanking:
         )
 
     def restore_snapshot(self, snapshot: _RankingSnapshot) -> None:
+        # Reinstates the exact logical ranking after failed persistence.
         self.current_score: torch.Tensor | None = snapshot[0]
         self.best_k_models: dict[str, torch.Tensor] = snapshot[1]
         self.kth_best_model_path: str = snapshot[2]
@@ -120,6 +152,7 @@ class _CheckpointRanking:
         self.best_model_path: str = snapshot[5]
 
     def state_dict(self) -> StateDict:
+        # Serializes the full ranking trajectory for callback resumption.
         return {
             "monitor": self.monitor,
             "current_score": self.current_score,
@@ -131,6 +164,8 @@ class _CheckpointRanking:
         }
 
     def load_state_dict(self, state_dict: StateDict) -> None:
+        # Validates scalar scores, path keys, and monitor identity before replacing
+        # the live ranking state.
         monitor_value: StateValue | None = state_dict.get("monitor")
         if monitor_value != self.monitor:
             raise ValueError(
@@ -180,6 +215,7 @@ class _CheckpointRanking:
         )
 
     def _initial_kth_value(self) -> torch.Tensor:
+        # Returns the direction-specific identity for an empty retained set.
         return torch.tensor(torch.inf if self.mode == "min" else -torch.inf)
 
     def _optional_score(
@@ -187,6 +223,7 @@ class _CheckpointRanking:
         value: StateValue | None,
         name: str
     ) -> torch.Tensor | None:
+        # Normalizes an optional Python or tensor scalar to a detached CPU tensor.
         if value is None:
             return None
         if isinstance(value, torch.Tensor) and value.numel() == 1:
@@ -196,6 +233,7 @@ class _CheckpointRanking:
         raise TypeError(f"Checkpoint {name} state must be scalar or None.")
 
     def _required_string(self, state_dict: StateDict, name: str) -> str:
+        # Reads one mandatory path field without coercing foreign checkpoint data.
         value: StateValue | None = state_dict.get(name)
         if not isinstance(value, str):
             raise TypeError(f"Checkpoint {name} state must be a string.")

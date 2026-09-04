@@ -1,3 +1,28 @@
+# This module:
+# 1. Defines the private model-summary report that measures module topology,
+#    parameter counts, storage size, training modes, tensor shapes, and FLOPs
+# 2. Performs example-input forwarding transactionally through the same transfer
+#    and precision semantics used by the trainer
+#
+# Design decisions:
+# - Forward hooks capture only the first observed input and output shape for each
+#   selected layer and remove themselves immediately, limiting interference with
+#   client models
+# - Lazy uninitialized parameters contribute zero with an explicit warning;
+#   example_input_array is the client mechanism for materializing them before
+#   accounting
+# - An attached model uses Trainer precision conversion and canonical
+#   DataModule-over-Module transfer precedence; a detached model executes its
+#   Module transfer hooks directly
+# - Example forwarding runs under no_grad and restores every nested training mode
+#   plus Python, NumPy, torch CPU, CUDA, and MPS random state even when forwarding
+#   or FLOP accounting fails
+# - Report depth controls representation only. Aggregate parameter and mode
+#   totals always describe the complete model, and parameters outside displayed
+#   layers appear in one explicit leftover row
+#
+# Author: Rahul Sawhney
+
 import math
 import warnings
 from collections.abc import Hashable, Sequence
@@ -23,15 +48,20 @@ type _FlopCounts = dict[str, dict[Hashable, int]]
 
 
 class _LayerSummary:
+    # Measurement view over one selected nn.Module. It captures shapes through a
+    # temporary forward hook and derives parameter properties from live tensors.
     _unknown_size: ClassVar[str] = "?"
 
     def __init__(self, module: nn.Module) -> None:
+        # Binds one module without mutating it until attach_hook is requested.
         self._module: nn.Module = module
         self._hook_handle: RemovableHandle | None = None
         self._input_size: SummaryShape | None = None
         self._output_size: SummaryShape | None = None
 
     def attach_hook(self) -> None:
+        # Installs one kwargs-aware shape hook for eager modules; ScriptModule
+        # hook semantics are skipped rather than guessed.
         if isinstance(self._module, torch.jit.ScriptModule):
             return
         self._hook_handle: RemovableHandle | None = (
@@ -42,6 +72,7 @@ class _LayerSummary:
         )
 
     def detach_hook(self) -> None:
+        # Idempotently removes the temporary shape observer.
         if self._hook_handle is None:
             return
         self._hook_handle.remove()
@@ -54,6 +85,8 @@ class _LayerSummary:
         kwargs: dict[str, Batch],
         output: ModelOutput
     ) -> None:
+        # Captures the first realized input and output structure, then removes
+        # the hook so reused layers cannot overwrite the report.
         del module
         input_values: tuple[Batch, ...] = (*args, *kwargs.values())
         inputs: Batch = (
@@ -66,6 +99,8 @@ class _LayerSummary:
         self.detach_hook()
 
     def _batch_shape(self, value: Batch | ModelOutput) -> SummaryShape:
+        # Recursively represents tensor-like shapes and marks unsupported leaves
+        # as unknown without forcing client values into tensors.
         shape: Sequence[int] | None = cast(
             Sequence[int] | None,
             getattr(value, "shape", None)
@@ -80,6 +115,8 @@ class _LayerSummary:
         return self._unknown_size
 
     def _parameter_numel(self, parameter: torch.Tensor) -> int:
+        # Counts initialized parameters and reports incomplete lazy state without
+        # aborting structural inspection.
         if isinstance(parameter, UninitializedParameter):
             try:
                 parameter.shape
@@ -96,6 +133,7 @@ class _LayerSummary:
 
     @property
     def input_size(self) -> SummaryShape:
+        # Returns the captured input structure or the unknown marker.
         return (
             self._unknown_size
             if self._input_size is None
@@ -104,6 +142,7 @@ class _LayerSummary:
 
     @property
     def output_size(self) -> SummaryShape:
+        # Returns the captured output structure or the unknown marker.
         return (
             self._unknown_size
             if self._output_size is None
@@ -112,10 +151,12 @@ class _LayerSummary:
 
     @property
     def layer_type(self) -> str:
+        # Returns the concrete module class used in presentation.
         return type(self._module).__name__
 
     @property
     def num_parameters(self) -> int:
+        # Counts this layer's recursive parameters for the displayed row.
         return sum(
             self._parameter_numel(parameter)
             for parameter in self._module.parameters()
@@ -123,6 +164,7 @@ class _LayerSummary:
 
     @property
     def trainable_parameters(self) -> int:
+        # Counts recursive parameters currently participating in optimization.
         return sum(
             self._parameter_numel(parameter)
             for parameter in self._module.parameters()
@@ -131,6 +173,7 @@ class _LayerSummary:
 
     @property
     def parameter_bytes(self) -> int:
+        # Measures recursive initialized parameter storage in bytes.
         total_bytes: int = 0
         parameter: torch.nn.Parameter
         for parameter in self._module.parameters():
@@ -143,15 +186,20 @@ class _LayerSummary:
 
     @property
     def training(self) -> bool:
+        # Captures the layer's current train or evaluation mode.
         return self._module.training
 
 
 class _ModelSummaryReport:
+    # Canonical structural and computational report consumed by both plain and
+    # Rich callbacks. Construction performs any required example forward once.
     _parameter_count_units: ClassVar[tuple[str, ...]] = (" ", "K", "M", "B", "T")
     _leftover_parameters_name: ClassVar[str] = "other params"
     _not_applicable: ClassVar[str] = "n/a"
 
     def __init__(self, model: Module, max_depth: int = 1) -> None:
+        # Selects report depth, initializes FLOP accounting, and materializes all
+        # layer summaries under one transactional example-forward operation.
         if type(max_depth) is not int or max_depth < -1:
             raise ValueError(f"`max_depth` can be -1, 0 or greater, got {max_depth}.")
         self._model: Module = model
@@ -165,50 +213,64 @@ class _ModelSummaryReport:
 
     @property
     def layer_names(self) -> list[str]:
+        # Returns selected module paths in model traversal order.
         return list(self._layers)
 
     @property
     def layer_types(self) -> list[str]:
+        # Returns concrete class names aligned with layer_names.
         return [layer.layer_type for layer in self._layers.values()]
 
     @property
     def input_sizes(self) -> list[SummaryShape]:
+        # Returns captured input structures aligned with layer_names.
         return [layer.input_size for layer in self._layers.values()]
 
     @property
     def output_sizes(self) -> list[SummaryShape]:
+        # Returns captured output structures aligned with layer_names.
         return [layer.output_size for layer in self._layers.values()]
 
     @property
     def parameter_counts(self) -> list[int]:
+        # Returns recursive row parameter counts aligned with layer_names.
         return [layer.num_parameters for layer in self._layers.values()]
 
     @property
     def training_modes(self) -> list[bool]:
+        # Returns captured row modes aligned with layer_names.
         return [layer.training for layer in self._layers.values()]
 
     @property
     def total_training_modes(self) -> dict[str, int]:
+        # Counts train and evaluation modes across all descendants.
         modes: list[bool] = [module.training for module in self._model.modules()][1:]
         return {"train": modes.count(True), "eval": modes.count(False)}
 
     @property
     def total_parameters(self) -> int:
+        # Counts every model parameter from the root view.
         return self._root_summary.num_parameters
 
     @property
     def trainable_parameters(self) -> int:
+        # Counts all root parameters currently requiring gradients.
         return self._root_summary.trainable_parameters
 
     @property
     def model_size(self) -> float:
+        # Converts initialized root parameter storage to decimal megabytes.
         return self._root_summary.parameter_bytes * 1e-6
 
     @property
     def total_flops(self) -> int:
+        # Returns FLOPs observed during the example forward, or zero when no
+        # example input was supplied.
         return self._flop_counter.get_total_flops()
 
     def summary_data(self) -> SummaryData:
+        # Builds aligned presentation columns and appends shape columns only when
+        # a client example input made those observations meaningful.
         arrays: SummaryData = [
             (" ", [str(index) for index in range(len(self._layers))]),
             ("Name", self.layer_names),
@@ -233,6 +295,7 @@ class _ModelSummaryReport:
 
     @classmethod
     def human_readable_count(cls, number: int) -> str:
+        # Formats non-negative counts using compact thousand-power units.
         if number < 0:
             raise ValueError(f"number must be non-negative, got {number}")
         digit_count: int = int(
@@ -253,10 +316,13 @@ class _ModelSummaryReport:
 
     @classmethod
     def formatted_model_size(cls, model_size: float) -> str:
+        # Formats decimal megabytes with stable precision for both renderers.
         del cls
         return f"{model_size:,.3f}"
 
     def _named_modules(self) -> list[tuple[str, nn.Module]]:
+        # Selects direct children or the full descendant traversal before final
+        # maximum-depth filtering.
         if self._max_depth == 0:
             return []
         if self._max_depth == 1:
@@ -264,6 +330,8 @@ class _ModelSummaryReport:
         return list(self._model.named_modules())[1:]
 
     def _summarize_layers(self) -> dict[str, _LayerSummary]:
+        # Attaches temporary hooks, performs at most one example forward, removes
+        # every hook in a finally path, and applies the display-depth boundary.
         summaries: dict[str, _LayerSummary] = {}
         try:
             name: str
@@ -287,6 +355,8 @@ class _ModelSummaryReport:
         return summaries
 
     def _forward_example_input(self) -> None:
+        # Runs a state-neutral example forward through attached Trainer semantics
+        # or detached Module hooks, restoring modes and random streams afterward.
         example_input: Batch = cast(Batch, self._model.example_input_array)
         trainer: syntheticmind.Trainer | None = self._model._trainer
         training_modes: dict[str, bool] = self._model._capture_training_modes()
@@ -345,6 +415,7 @@ class _ModelSummaryReport:
             randomness.restore(random_state)
 
     def _layer_flops(self) -> list[int]:
+        # Aligns FlopCounterMode's qualified module mapping with displayed paths.
         flop_counts: _FlopCounts = cast(
             _FlopCounts,
             self._flop_counter.get_flop_counts()
@@ -360,6 +431,8 @@ class _ModelSummaryReport:
         arrays: SummaryData,
         leftover_parameters: int
     ) -> None:
+        # Represents parameters owned outside displayed rows without falsifying
+        # layer attribution or aggregate totals.
         columns: dict[str, list[str]] = dict(arrays)
         columns[" "].append(" ")
         columns["Name"].append(self._leftover_parameters_name)

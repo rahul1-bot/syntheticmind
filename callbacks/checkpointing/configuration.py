@@ -1,3 +1,22 @@
+# This module:
+# 1. Defines the strict immutable configuration model used to construct a
+#    ModelCheckpoint policy
+# 2. Resolves default trigger cadence and validates cross-field ranking and
+#    scheduling invariants before callback state exists
+#
+# Design decisions:
+# - Construction uses one frozen Pydantic boundary so invalid public arguments
+#   fail atomically instead of leaving partially initialized path, ranking, or
+#   schedule components
+# - Step, epoch, and wall-time triggers are mutually exclusive; one checkpoint
+#   instance therefore has one unambiguous periodic clock
+# - With no explicit trigger, epoch cadence resolves to one and step cadence to
+#   zero, matching the conventional save-after-each-epoch training policy
+# - Unmonitored retention supports only save-all, disabled, or latest-only
+#   semantics because scalar top-k ordering requires a monitor
+#
+# Author: Rahul Sawhney
+
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
@@ -8,6 +27,9 @@ __all__: list[str] = []
 
 
 class _ModelCheckpointConfiguration(BaseModel):
+    # Internal validation boundary for ModelCheckpoint.__init__. The public
+    # callback exposes ordinary Python arguments; this model never enters the
+    # runtime or checkpoint state as a second configuration authority.
     dirpath: str | Path | None = None
     filename: str | None = None
     monitor: str | None = None
@@ -34,6 +56,8 @@ class _ModelCheckpointConfiguration(BaseModel):
     @field_validator("filename", "monitor")
     @classmethod
     def _validate_optional_name(cls, value: str | None) -> str | None:
+        # Rejects blank templates and monitor names while preserving None as the
+        # explicit request for default naming or unmonitored retention.
         del cls
         if value is not None and not value.strip():
             raise ValueError("Checkpoint filename and monitor must be non-empty when provided.")
@@ -45,6 +69,7 @@ class _ModelCheckpointConfiguration(BaseModel):
         cls,
         value: timedelta | None
     ) -> timedelta | None:
+        # Requires a positive wall-time cadence when time-based saving is used.
         del cls
         if value is not None and value.total_seconds() <= 0.0:
             raise ValueError("Checkpoint time interval must be positive.")
@@ -52,6 +77,8 @@ class _ModelCheckpointConfiguration(BaseModel):
 
     @model_validator(mode="after")
     def _validate_trigger_and_ranking(self) -> _ModelCheckpointConfiguration:
+        # Enforces the checkpoint policy's cross-field semantics after every
+        # field has passed strict individual validation.
         trigger_count: int = sum(
             (
                 self.every_n_train_steps is not None
@@ -68,6 +95,8 @@ class _ModelCheckpointConfiguration(BaseModel):
 
     @property
     def resolved_every_n_train_steps(self) -> int:
+        # Produces the runtime step cadence, including the zero step component of
+        # the implicit once-per-epoch default.
         if (
             self.every_n_train_steps is None
             and self.every_n_epochs is None
@@ -78,6 +107,8 @@ class _ModelCheckpointConfiguration(BaseModel):
 
     @property
     def resolved_every_n_epochs(self) -> int:
+        # Produces the runtime epoch cadence, resolving no explicit trigger to
+        # the conventional value of one.
         if (
             self.every_n_train_steps is None
             and self.every_n_epochs is None

@@ -1,3 +1,25 @@
+# This module:
+# 1. Defines ThroughputMonitor, the callback that measures synchronized training
+#    sample throughput, batch throughput, and batch latency over rolling windows
+#    and complete epochs
+# 2. Infers batch cardinality from nested tensor batches or delegates cardinality
+#    semantics to a client-supplied function
+#
+# Design decisions:
+# - Timing is restricted to global zero and scaled by Strategy.data_parallel_size,
+#   producing one global sample-rate series without duplicate logger writes
+# - CUDA and MPS work is synchronized at each timing boundary because host clock
+#   measurements around asynchronous kernels otherwise report fictional speed
+# - Fit-time validation pauses the training interval; validation latency is not
+#   silently charged to the next training batch
+# - Automatic batch-size inference requires every tensor leaf to agree on the
+#   leading dimension. Ragged or domain-specific batches must provide
+#   batch_size_fn instead of receiving a guessed cardinality
+# - Rolling counters reset only after emission, while epoch counters accumulate
+#   independently for a stable whole-epoch rate
+#
+# Author: Rahul Sawhney
+
 import time
 from collections.abc import Callable
 from typing import override
@@ -14,11 +36,19 @@ __all__: list[str] = ["ThroughputMonitor"]
 
 
 class ThroughputMonitor(Callback):
+    # Rank-zero training-rate observer. Clients with unusual batch semantics,
+    # such as packed sequences or graph batches, supply batch_size_fn to define
+    # how many samples one batch represents.
     def __init__(
         self,
         batch_size_fn: Callable[[Batch], int] | None = None,
         log_every_n_steps: int = 10
     ) -> None:
+        # Args:
+        #     batch_size_fn: Optional cardinality function for one client batch.
+        #         It must return a non-negative integer. Default: ``None``.
+        #     log_every_n_steps: Positive optimizer-step cadence for rolling
+        #         throughput metrics. Default: ``10``.
         if batch_size_fn is not None and not callable(batch_size_fn):
             raise TypeError("`batch_size_fn` must be callable or None.")
         if type(log_every_n_steps) is not int or log_every_n_steps < 1:
@@ -40,6 +70,7 @@ class ThroughputMonitor(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Rejects a monitor with no destination before training begins.
         del module
         if not trainer.loggers:
             raise MisconfigurationError(
@@ -52,6 +83,7 @@ class ThroughputMonitor(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Opens a fresh synchronized timing window for the epoch on global zero.
         del module
         if not trainer.is_global_zero:
             return
@@ -74,6 +106,8 @@ class ThroughputMonitor(Callback):
         batch: Batch,
         batch_idx: int
     ) -> None:
+        # Closes one device-synchronized batch interval, scales local sample
+        # cardinality across the data-parallel axis, and emits on step cadence.
         del module, outputs, batch_idx
         if not trainer.is_global_zero:
             return
@@ -107,6 +141,8 @@ class ThroughputMonitor(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Publishes the complete epoch rate without discarding a partial rolling
+        # window that has not yet reached its logging cadence.
         del module
         if not trainer.is_global_zero or self._epoch_seconds <= 0.0:
             return
@@ -128,6 +164,7 @@ class ThroughputMonitor(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Pauses fit-time training timing before validation begins.
         del module
         if not trainer.is_global_zero or trainer.state.stage != "fit":
             return
@@ -140,6 +177,7 @@ class ThroughputMonitor(Callback):
         trainer: syntheticmind.Trainer,
         module: Module
     ) -> None:
+        # Reopens the training interval after fit-time validation completes.
         del module
         if not trainer.is_global_zero or trainer.state.stage != "fit":
             return
@@ -147,6 +185,8 @@ class ThroughputMonitor(Callback):
         self._interval_started_at: float | None = time.perf_counter()
 
     def _emit_window(self, trainer: syntheticmind.Trainer) -> None:
+        # Emits and clears only the rolling window, preserving the independent
+        # epoch totals for the epoch-end report.
         if self._window_seconds <= 0.0 or self._window_batches == 0:
             return
         metrics: dict[str, float] = {
@@ -166,6 +206,8 @@ class ThroughputMonitor(Callback):
         self._window_seconds: float = 0.0
 
     def _infer_batch_size(self, batch: Batch) -> int:
+        # Resolves client-defined cardinality first, then enforces agreement
+        # across every tensor leaf in a standard nested batch.
         if self._batch_size_fn is not None:
             batch_size: int = self._batch_size_fn(batch)
             if type(batch_size) is not int or batch_size < 0:
@@ -182,6 +224,8 @@ class ThroughputMonitor(Callback):
         return sizes[0]
 
     def _collect_batch_sizes(self, batch: Batch) -> list[int]:
+        # Walks the closed Batch union recursively; scalars count as one sample
+        # and empty non-tensor containers fall back to their container length.
         if isinstance(batch, torch.Tensor):
             return [1 if batch.ndim == 0 else int(batch.shape[0])]
         if isinstance(batch, dict):
@@ -201,6 +245,7 @@ class ThroughputMonitor(Callback):
         return []
 
     def _synchronize(self, trainer: syntheticmind.Trainer) -> None:
+        # Flushes asynchronous accelerator work before reading the host clock.
         device: torch.device = trainer.strategy.root_device
         if device.type == "cuda" and torch.cuda.is_available():
             torch.cuda.synchronize(device)
@@ -209,6 +254,7 @@ class ThroughputMonitor(Callback):
 
     @override
     def __repr__(self) -> str:
+        # Exposes both batch semantics and emission cadence in diagnostics.
         return (
             f"ThroughputMonitor(batch_size_fn={self._batch_size_fn!r}, "
             f"log_every_n_steps={self.log_every_n_steps})"
