@@ -212,3 +212,11 @@
     2. Persisted callback state now describes the save being written rather than the preceding save, restores after transport failure, and records consumed deferred-validation triggers correctly.
     3. Final training state refreshes a stale last artifact even when the configured cadence last fired at an earlier optimizer step.
     4. Local, remote, asynchronous, DDP, and sharded model-parallel execution establish the reconstructed boundary across every supported persistence topology.
+
+| Strategic Note | Profiler Measurement Boundary | Date: 04 September 2026 | Time: 02:11 PM | Name: Ghost |
+
+    1. Trainer and loops name execution actions, while profilers measure and report them without acquiring ownership of hooks, data loading, optimization, or persistence operations.
+    2. Wall-clock, cProfile, and PyTorch operator traces remain distinct selectable measurement techniques under one deterministic lifecycle base.
+    3. Stage-aware PyTorch scheduling prevents sanity validation and one stage's step count from consuming another stage's requested trace window.
+    4. Trace export, remote artifacts, module instrumentation, schedule output, and cleanup failures now fail visibly rather than disappearing behind ignored options or destructor behavior.
+    5. XLA profiling remains absent until an executable SyntheticMind XLA runtime exists and can provide real lifecycle evidence.

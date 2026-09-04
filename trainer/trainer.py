@@ -45,7 +45,13 @@ from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.plugins import Plugin
 from syntheticmind.plugins.checkpoint_io import CheckpointStorageOptions
 from syntheticmind.plugins.layer_sync import LayerSync
-from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
+from syntheticmind.profilers import (
+    AdvancedProfiler,
+    PassThroughProfiler,
+    Profiler,
+    PyTorchProfiler,
+    SimpleProfiler
+)
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
@@ -453,7 +459,7 @@ class Trainer:
             fast_dev_run_enabled,
             enable_autolog_hparams
         )
-        self.profiler: Profiler = _resolve_profiler(profiler)
+        self.profiler: Profiler = self._resolve_profiler(profiler)
         self._data_connector: _DataConnector = _DataConnector(
             self.strategy,
             self.profiler,
@@ -1358,6 +1364,28 @@ class Trainer:
             f"syntheticmind · {stage} · barebones"
         )
 
+    def _resolve_profiler(self, profiler: Profiler | str | None) -> Profiler:
+        if profiler is None:
+            return PassThroughProfiler()
+        if isinstance(profiler, Profiler):
+            return profiler
+        if not isinstance(profiler, str):
+            raise TypeError(
+                "`profiler` must be a Profiler instance, a supported string, or None."
+            )
+        match profiler.lower():
+            case "simple":
+                return SimpleProfiler()
+            case "advanced":
+                return AdvancedProfiler()
+            case "pytorch":
+                return PyTorchProfiler()
+            case unsupported_name:
+                raise MisconfigurationError(
+                    "When passing a profiler name, expected 'simple', 'advanced', "
+                    f"or 'pytorch', got {unsupported_name!r}."
+                )
+
     def _setup_profiler(self, stage: TrainerStage, module: Module) -> None:
         if self._profiler_is_setup:
             raise RuntimeError("The profiler is already active for another Trainer stage.")
@@ -1381,7 +1409,7 @@ class Trainer:
                     f"{type(teardown_exception).__name__}: {teardown_exception}"
                 )
             raise
-        self._profiler_is_setup = True
+        self._profiler_is_setup: bool = True
 
     def _teardown_profiler(self) -> None:
         if not self._profiler_is_setup:
@@ -1389,7 +1417,7 @@ class Trainer:
         try:
             self.profiler.describe()
         finally:
-            self._profiler_is_setup = False
+            self._profiler_is_setup: bool = False
 
     def _call_callback_hook[ReturnT](
         self,

@@ -175,15 +175,12 @@
     1. ✅ Evaluation context selection moved to Loop and process-wide deterministic or benchmark configuration moved to Trainer; both one-function utility modules were removed.
     2. ✅ Local stage execution, deterministic flag transitions, and spawned distributed evaluation pass after the ownership change.
 
-| Progress Complete | Checkpoint Serialization Ownership | Date: 04 September 2026 | Time: 11:22 AM | Name: Ghost |
+| Progress Complete | Checkpoint Transport and Filesystem Ownership | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
 
     1. ✅ Local and remote torch serialization moved onto `TorchCheckpointIO`, model-parallel metadata composes that owner, and the free checkpoint utility module was removed.
     2. ✅ Model hydration, asynchronous snapshot isolation, sharded two-rank persistence, and injected distributed failure atomicity pass after consolidation.
-
-| Progress Complete | Filesystem Storage Boundary | Date: 04 September 2026 | Time: 11:23 AM | Name: Ghost |
-
-    1. ✅ Filesystem and artifact operations moved from utilities to the explicit storage boundary with every production and verification import updated.
-    2. ✅ Local and remote checkpoint transport, model hydration, and metric lifecycle execution pass through the new canonical path.
+    3. ✅ Filesystem and artifact operations moved from utilities to the explicit storage boundary with every production and verification import updated.
+    4. ✅ Local and remote checkpoint transport, model hydration, profiler artifacts, and metric lifecycle execution pass through the canonical storage path.
 
 | Progress Complete | Cross-Subsystem Contract Placement | Date: 04 September 2026 | Time: 11:41 AM | Name: Ghost |
 
@@ -228,12 +225,15 @@
     5. ✅ Default Trainer execution, callback configuration, metric views, MPS transfer, and spawned DDP exactly-once rank-zero presentation pass.
     6. ✅ The final utility source, package initializer, README, and generated cache were removed; no `utilities/` path remains in production or verification imports.
 
-| Progress Complete | Callback Capability Topology | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
+| Progress Complete | Profiler Runtime Reconstruction | Date: 04 September 2026 | Time: 02:11 PM | Name: Ghost |
 
-    1. ✅ DataLeakageGuard, WatchdogCallback, and callback-based RuntimeProfiler were deleted after their runtime semantics failed the general training-capability admission test.
-    2. ✅ RuntimeProfiler-only Trainer timing state and loop measurements were removed, while canonical profiler action contexts remain intact.
-    3. ✅ Callback package width fell to eleven direct modules; the existing model-summary package remains the only multi-module callback family because its lifecycle, report, and optional renderer are independently meaningful.
-    4. ✅ SimpleProfiler still records dataloader and training-step actions, and local execution, spawned DDP metric views, progress rendering, and sharded model parallelism pass.
+    1. ✅ The stateful Profiler hierarchy no longer uses an ABC, deterministic teardown replaces destructor cleanup, and the vague `base.py` module was removed.
+    2. ✅ Profiler selection moved from a free initializer function onto Trainer composition, while pass-through, wall-clock, cProfile, and PyTorch implementations retain one public profiler contract.
+    3. ✅ SimpleProfiler isolates each Trainer stage, AdvancedProfiler preserves nested attribution and raw-stat export, and both retain completed-stage evidence for inspection.
+    4. ✅ PyTorch profiling owns strict backend options, operator tables, module ranges, stage-local schedules, Chrome traces, optional flame stacks, remote artifacts, and reversible cleanup in one semantic subpackage.
+    5. ✅ XLAProfiler and the public module-recorder helper were removed because neither had a complete current SyntheticMind runtime or public consumer.
+    6. ✅ Invalid configuration, invalid schedule output, operation failure, hook cleanup, custom trace handling, remote persistence, and absent stack capture fail or recover at the correct boundary.
+    7. ✅ CPU, local multi-stage, external two-rank DDP, internal DDP spawn, per-rank report, per-rank trace, and profiler serialization paths pass without static-analysis tools.
 
 | Progress Complete | Transactional Model Checkpoint Policy | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
 

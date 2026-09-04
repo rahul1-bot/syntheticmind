@@ -212,14 +212,15 @@
     5. The former public utility functions, duplicate report name, generic annotations, module constants, local imports, and utility import paths were removed. The final tracked utility files and generated cache were deleted, leaving no `utilities/` package.
     6. Plain and Rich rendering, lazy parameters, hook cleanup, failure rollback, MPS transfer and random state, default Trainer integration, callback configuration, metric regression, and exactly-once spawned rank-zero presentation pass.
 
-| Architecture Decision | Callback Baggage Removal | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
+| Architecture Decision | Profiler Runtime Ownership and Callback Subtraction | Date: 04 September 2026 | Time: 02:11 PM | Name: Ghost |
 
-    1. `DataLeakageGuard` was deleted because its sample-identifier batch schema is project-specific, its evidence disappears on resume, and it cannot establish general dataset split integrity from a Trainer callback.
-    2. `WatchdogCallback` was deleted because it could observe a long gap only after execution resumed and therefore did not detect, interrupt, or recover a live stall despite its name.
-    3. The callback `RuntimeProfiler` and its accumulator were deleted because the canonical profiler subsystem already measures dataloader and step actions, while the callback duplicated logger emission, artifact persistence, device telemetry, and timing state through private Trainer coupling.
-    4. The RuntimeProfiler-only dataloader timing dictionaries, accessors, and loop measurements were removed. Existing profiler action contexts remain the single timing authority.
-    5. Callback package width fell from fourteen to eleven direct modules, below the hard topology limit. No additional folder was created because the remaining direct modules are independently selectable training concepts rather than fragments of one capability.
-    6. SimpleProfiler action evidence, local stage execution, spawned DDP metrics and progress, and sharded model parallelism pass after deletion.
+    1. `DataLeakageGuard`, `WatchdogCallback`, and callback-based `RuntimeProfiler` remain deleted because they lacked general executable semantics or duplicated the canonical profiler action lifecycle.
+    2. `Profiler` is now a regular stateful framework base rather than an ABC; it owns scoped actions, stage and rank identity, report output, module attachment, causal failure notes, and deterministic teardown, while `PassThroughProfiler` remains the explicit disabled policy.
+    3. `SimpleProfiler` resets wall-clock state per Trainer stage, and `AdvancedProfiler` preserves properly nested mutually exclusive cProfile regions, stage reset, raw-stat export, and launcher-safe reconstruction.
+    4. PyTorch operator profiling forms one semantic subpackage whose private schedule tracks training, validation, test, and prediction independently and excludes fit sanity validation, while its private module recorder owns reversible forward-hook instrumentation.
+    5. PyTorch profiler configuration rejects misspelled backend options, invalid tables, invalid schedules, ignored NVTX options, and empty flame-graph results instead of silently degrading requested behavior.
+    6. XLA profiling was removed because SyntheticMind has no executable XLA accelerator or strategy; backend-specific surface without a backend lifecycle is compatibility theater rather than a training capability.
+    7. CPU, local stage reuse, MPS-adjacent timing, remote fsspec output, failure cleanup, custom and stage-aware schedules, external DDP, and spawned DDP reports and traces pass; macOS fork remains bounded by the independently reproduced MPSGraph fork-safety failure.
 
 | Architecture Decision | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
 
