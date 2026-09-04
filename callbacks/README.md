@@ -18,4 +18,4 @@
 
 ## Related Components
 
-Callbacks are composed by `../trainer/connectors/callback_connector.py`, dispatched by `../trainer/trainer.py`, and persisted by the Trainer checkpoint connector.
+Callbacks are composed by `../trainer/connectors/callback_connector.py`, invoked by the profiler-aware `../trainer/hook_dispatcher.py`, scheduled by Trainer and its loops, and persisted by the Trainer checkpoint connector.

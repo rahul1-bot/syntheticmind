@@ -135,10 +135,10 @@
     5. Package width is harmless when each file is a selectable recognized implementation, as with callbacks or strategies. The same width is architectural debt when files are fragments created to satisfy numeric budgets.
     6. Concept-first decomposition still requires directed dependencies, bounded public surface, explicit state ownership, and runtime evidence; it overrides mechanical splitting, not correctness or maintainability review.
 
-| Memory | Callback Composition Without Trainer Coupling | Date: 04 September 2026 | Time: 09:13 AM | Name: Ghost |
+| Memory | Callback Contracts Without Circular Trainer Coupling | Date: 04 September 2026 | Time: 04:40 PM | Name: Ghost |
 
-    1. Callback configuration and callback execution are separate concepts: the connector owns selection, defaults, replacement, ordering, and identity, while Trainer owns when lifecycle hooks execute.
-    2. Passing a bound hook operation into the connector preserves profiling and module hook context without letting the connector reach into the entire Trainer or requiring a circular annotation dependency.
+    1. Callback vocabulary, callback configuration, hook timing, and hook invocation are separate concepts: Callback defines signatures, the connector owns selection and identity, loops and Trainer choose transitions, and HookDispatcher owns profiled calls.
+    2. Python 3.14 lazy annotations can reference `syntheticmind.Trainer` and `syntheticmind.Module` through the package during circular construction without a future import, `TYPE_CHECKING`, quoted annotation, or weakened host Protocol.
     3. Model callback replacement must remove callbacks by compatible parent type, not merely exact class identity, while preserving unrelated Trainer callbacks and placing checkpoint callbacks last.
     4. Connector state must clear after configuration failure and after every stage so a rejected callback declaration cannot poison later validation, testing, or prediction.
 
