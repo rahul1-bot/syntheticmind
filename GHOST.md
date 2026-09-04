@@ -17,13 +17,13 @@
     6. Callback parameters use the SyntheticMind-owned name `module`; Lightning-branded `pl_module`, `use_pl_optimizer`, and equivalent copied identifiers remain prohibited.
     7. Internal architecture follows `/Users/rahulsawhney/Library/CloudStorage/OneDrive-Personal/Documents/StudyDocuments/Rahul/code-guidelines.md` without blindly reproducing Lightning internals. Historical repository-local guideline copies are not authoritative.
 
-| Repository Policy | Private Development and Reference Boundaries | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Repository Policy | Private Development and Reference Boundaries | Date: 04 September 2026 | Time: 06:28 PM | Name: Ghost |
 
     1. The GitHub repository is private, `origin` is canonical, `main` is the stable baseline, and active implementation occurs on `dev`.
     2. Every completed development phase must be committed locally, pushed to `origin/dev`, and verified to leave local `dev` and `origin/dev` at the same commit.
     3. Promotion to `main` requires an explicit stabilization decision; ordinary hardening commits do not enter `main` automatically.
-    4. The complete `docs/` tree is ignored. The pinned PyTorch Lightning checkout under `docs/references/code/pytorch_lightning/pytorch-lightning` remains read-only comparative evidence.
-    5. Additional source references may be cloned only into ignored `external/` when they answer a concrete unresolved engineering question.
+    4. Comparative source checkouts live only under ignored `external/`; the active PyTorch Lightning reference is pinned there at revision `21ac84116633b8c629da03c41e6d6ec2cfb15241` and remains read-only evidence.
+    5. The obsolete two-gigabyte ignored `docs/` reference clone, stale optimization cache, and generated parent-scope probe artifacts were moved to recoverable Trash; additional source references may enter only `external/` for a concrete unresolved question.
     6. The four ledgers contain current direction, durable decisions, reusable knowledge, and live progress. Git commits, diffs, and logs are the authoritative chronology.
 
 | Execution Doctrine | Sequential Capability Reconstruction | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
@@ -77,7 +77,7 @@
     3. `SingleDeviceStrategy` is a named execution policy with inherited single-device semantics; `DDPStrategy` contains only DDP wrapping, layer synchronization, and manual-optimization forward behavior; `ModelParallelStrategy` exposes named data and tensor mesh axes for researcher-owned tensor-parallel, composable FSDP2, or hybrid plans and rejects legacy FSDP1.
     4. The strategy-owned ModuleInitializer now intercepts the dynamic PyTorch override contract through a named recursive torch-function value schema, validates mode state, preserves RNG under empty initialization, and materializes meta parameters through explicit reset operations without `object` escape hatches.
     5. Direct source comparison found thirty-one method names repeated across all three former concrete strategies, nine identical method bodies across all three, and twenty-three identical bodies between DDP and model parallelism; the new hierarchy removes that duplication through true semantic inheritance.
-    6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, tensor-parallel full and sharded resume, and composable FSDP2 distributed-checkpoint resume produce exact trajectories.
+    6. Empty and normal initialization RNG behavior, precision-directed construction, meta materialization, CPU and MPS execution, two-rank DDP, spawn and fork launch, nonzero-node multiprocessing rank derivation, tensor-parallel resume, and composable FSDP2 distributed-checkpoint resume pass.
 
 | Architecture Decision | Accelerator, Precision, and Connector Ownership | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
 

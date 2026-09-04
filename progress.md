@@ -71,7 +71,7 @@
     4. ✅ ModuleInitializer now uses a named recursive torch-function contract, validates its mode, preserves RNG during empty initialization, and materializes meta tensors through precise reset operations without `Any`, `object`, static utility methods, or source prose.
     5. ✅ Process groups persist safely across sequential distributed stages and live DTensor access, while owned failure and process-exit paths retain deterministic cleanup.
     6. ✅ Direct two-rank DDP execution covers automatic and manual optimization, multiple dataloaders, distributed metrics, all-rank and any-rank decisions, wrapped and inner forward hooks, checkpoint selection, validation, test, and prediction.
-    7. ✅ Subprocess, spawn, fork, and direct external launch modes pass; SIGTERM reaches the local worker group and leaves no surviving probe process.
+    7. ✅ Subprocess, spawn, fork, and direct external launch modes pass; multiprocessing on a simulated nonzero node derives global rank from node and local coordinates, while SIGTERM reaches the local worker group and leaves no surviving probe process.
     8. ✅ Empty, normal, precision-directed, and meta initialization plus tensor-parallel and composable FSDP2 baseline, interrupted, and distributed-checkpoint-resumed runs pass with exact final state; failure injection preserves the active generation and asynchronous snapshots preserve pre-mutation tensors.
 
 | Progress Complete | Accelerator and Execution Plugin Contracts | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |

@@ -57,9 +57,14 @@ class _MultiprocessingWorker:
         output_path: Path,
         initial_global_state: _GlobalState
     ) -> None:
-        worker_environment: dict[str, str] = dict(environment)
-        worker_environment["LOCAL_RANK"]: str = str(local_rank)
-        worker_environment["RANK"]: str = str(local_rank)
+        del cls
+        launch_strategy: LaunchStrategy = cast(
+            LaunchStrategy,
+            trainer.strategy
+        )
+        worker_environment: dict[str, str] = _DistributedEnvironment(
+            launch_strategy
+        ).rank_values(environment, local_rank)
         os.environ.update(worker_environment)
         torch.set_num_threads(int(worker_environment["OMP_NUM_THREADS"]))
         _WorkerStateTransfer.restore_global_state(trainer, initial_global_state)

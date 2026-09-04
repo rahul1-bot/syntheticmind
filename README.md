@@ -1,6 +1,6 @@
 # syntheticmind: The PyTorch Training Framework
 
-`syntheticmind/` is an independent PyTorch research framework and the training substrate of the VOCODE study. It is study-agnostic by design: nothing in this package references vocoders, audio, or the `vocode` package, so the framework boundary separates reusable training machinery from experiment-specific logic.
+`syntheticmind/` is an independent PyTorch research framework for constructing and controlling machine-learning training systems. It is project-agnostic by design: domain models, datasets, simulation environments, and experiment policy remain downstream of the framework contracts rather than leaking into the reusable training lifecycle.
 
 | Subpackage | Contents |
 |---|---|
@@ -32,4 +32,4 @@ Checkpoint schema version 2 is native and resumable. A durable training checkpoi
 
 ## Related Components
 
-Each subpackage carries its own `README.md`. The study client in `../vocode/` layers on this framework, and the test suite under `../tests/` exercises the framework through that client.
+Each semantic subpackage carries its own `README.md`. Downstream research projects consume the package-root contracts and specialize models, data, callbacks, and parallelization plans without changing framework ownership. Focused runtime probes and source references remain outside the tracked production package.

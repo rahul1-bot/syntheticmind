@@ -109,7 +109,7 @@
     2. DDP and model parallelism are independent parallel strategies. Their common process-group resource, launcher capability, and forward-redirection algorithm are composed explicitly rather than represented through false DDP inheritance.
     3. Local and model-parallel checkpoints implement one restoration and persistence contract, while interchangeable storage plugins implement a separate `CheckpointIO` contract. The boundary prevents duplicated strategy aliases and retains distinct distributed-state semantics.
     4. Broad annotations were removed from Strategy, launcher, and model-initialization boundaries through named batch, optimizer, backward, state, stage, storage, and recursive torch-function value contracts.
-    5. Process-group lifetime now follows the participating process rather than an individual Trainer stage, which preserves sequential distributed stages and live DTensor access while retaining exception and exit cleanup.
+    5. Process-group lifetime follows the participating process rather than an individual stage, and one environment owner derives global rank from node and local coordinates consistently for subprocess and multiprocessing launch.
     6. Empty initialization preserves RNG, precision contexts direct construction dtype, meta tensors materialize through reset operations, and exact two-rank tensor-parallel plus composable FSDP2 distributed-checkpoint trajectories pass.
 
 | Strategic Note | Execution Collaborator Reconstruction | Date: 04 September 2026 | Time: 05:04 PM | Name: Ghost |
