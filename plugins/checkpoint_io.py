@@ -76,9 +76,8 @@ class TorchCheckpointIO(CheckpointIO):
         resolved_map_location: MapLocation = (
             "cpu" if map_location is None else map_location
         )
-        checkpoint: CheckpointValue
         if StoragePath(path).is_local:
-            checkpoint = cast(
+            checkpoint: CheckpointValue = cast(
                 CheckpointValue,
                 torch.load(
                     Path(StoragePath(path).normalized),
@@ -87,7 +86,7 @@ class TorchCheckpointIO(CheckpointIO):
                 )
             )
         else:
-            checkpoint = self._load_remote(
+            checkpoint: CheckpointValue = self._load_remote(
                 path,
                 resolved_map_location,
                 weights_only
@@ -109,12 +108,12 @@ class TorchCheckpointIO(CheckpointIO):
     def _save_local(self, checkpoint: CheckpointDict, path: CheckpointPath) -> None:
         local_path: Path = Path(StoragePath(path).normalized)
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        file_descriptor: int
-        temporary_path_string: str
-        file_descriptor, temporary_path_string = tempfile.mkstemp(
+        temporary_file: tuple[int, str] = tempfile.mkstemp(
             dir=str(local_path.parent),
             suffix=".tmp"
         )
+        file_descriptor: int = temporary_file[0]
+        temporary_path_string: str = temporary_file[1]
         os.close(file_descriptor)
         temporary_path: Path = Path(temporary_path_string)
         try:

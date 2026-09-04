@@ -75,9 +75,8 @@ class HyperparametersMixin:
             for key, value in captured_arguments.items()
             if key not in ignored_names
         }
-        hyperparameters: _HyperparameterContainer
         if not args:
-            hyperparameters = filtered_arguments
+            hyperparameters: _HyperparameterContainer = filtered_arguments
             self._hparams_name: str | None = "kwargs" if hyperparameters else None
         else:
             non_string_indices: list[int] = [
@@ -89,7 +88,10 @@ class HyperparametersMixin:
                 selected_container: str | _HyperparameterContainer = args[
                     non_string_indices[0]
                 ]
-                hyperparameters = cast(_HyperparameterContainer, selected_container)
+                hyperparameters: _HyperparameterContainer = cast(
+                    _HyperparameterContainer,
+                    selected_container
+                )
                 self._hparams_name: str | None = self._argument_name(
                     filtered_arguments,
                     hyperparameters
@@ -100,7 +102,7 @@ class HyperparametersMixin:
                 for argument in args:
                     if isinstance(argument, str):
                         selected_hyperparameters[argument] = filtered_arguments[argument]
-                hyperparameters = selected_hyperparameters
+                hyperparameters: _HyperparameterContainer = selected_hyperparameters
                 self._hparams_name: str | None = "kwargs"
         self._set_hparams(hyperparameters)
         self._remove_ignored_hparams(ignored_names)
@@ -162,9 +164,12 @@ class HyperparametersMixin:
         current_frame: types.FrameType | None = frame
         inside_initialization: bool = False
         while current_frame is not None:
-            local_instance: HyperparametersMixin | None
-            local_arguments: HyperparameterDict
-            local_instance, local_arguments = self._frame_arguments(current_frame)
+            frame_arguments: tuple[
+                HyperparametersMixin | None,
+                HyperparameterDict
+            ] = self._frame_arguments(current_frame)
+            local_instance: HyperparametersMixin | None = frame_arguments[0]
+            local_arguments: HyperparameterDict = frame_arguments[1]
             if local_instance is self:
                 captured_arguments.update(local_arguments)
                 inside_initialization: bool = True

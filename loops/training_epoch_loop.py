@@ -9,7 +9,8 @@ import torch
 from torch import nn
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.core.module import LoggedMetric, Module
+from syntheticmind.core.metric import LoggedMetric
+from syntheticmind.core.module import Module
 from syntheticmind.core.optimizer import SyntheticOptimizer
 from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop

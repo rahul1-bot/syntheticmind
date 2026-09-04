@@ -50,9 +50,9 @@ class CUDAAccelerator(Accelerator):
             f"cuda/{key}": float(memory_statistics.get(key, 0))
             for key in selected_keys
         }
-        free_bytes: int
-        total_bytes: int
-        free_bytes, total_bytes = torch.cuda.mem_get_info(device_index)
+        memory_info: tuple[int, int] = torch.cuda.mem_get_info(device_index)
+        free_bytes: int = memory_info[0]
+        total_bytes: int = memory_info[1]
         statistics["cuda/free_bytes"] = float(free_bytes)
         statistics["cuda/total_bytes"] = float(total_bytes)
         return statistics

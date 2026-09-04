@@ -172,14 +172,13 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     ) -> torch.Tensor:
         if not dist.is_initialized():
             return tensor
-        operation: dist.ReduceOp.RedOpType
         match reduce_op:
             case "mean" | "sum":
-                operation = dist.ReduceOp.SUM
+                operation: dist.ReduceOp.RedOpType = dist.ReduceOp.SUM
             case "min":
-                operation = dist.ReduceOp.MIN
+                operation: dist.ReduceOp.RedOpType = dist.ReduceOp.MIN
             case "max":
-                operation = dist.ReduceOp.MAX
+                operation: dist.ReduceOp.RedOpType = dist.ReduceOp.MAX
             case _:
                 raise ValueError(
                     f"Unsupported reduction {reduce_op!r}; expected mean, sum, min, or max."

@@ -132,7 +132,7 @@ class _MaxSize(_ModeIterator):
         for index in range(len(self.iterators)):
             try:
                 values[index] = self._next(index)
-                yielded_value = True
+                yielded_value: bool = True
             except StopIteration:
                 continue
         if not yielded_value:
@@ -175,7 +175,7 @@ class _MaxSizeCycle(_ModeIterator):
                     raise
                 self.iterators[index] = iter(iterable)
                 self.counts[index] = 0
-                value = self._next(index)
+                value: Batch = self._next(index)
             values.append(value)
         batch_idx: int = self.yielded
         self.yielded += 1
@@ -260,15 +260,15 @@ class CombinedLoader(Iterator[_IteratorOutput]):
                 f"Unsupported mode {mode!r}; expected min_size, max_size_cycle, "
                 "max_size, or sequential."
             )
-        flattened: list[_IterableLeaf]
-        spec: _pytree.TreeSpec
-        flattened, spec = cast(
+        flattened_tree: tuple[list[_IterableLeaf], _pytree.TreeSpec] = cast(
             tuple[list[_IterableLeaf], _pytree.TreeSpec],
             _pytree.tree_flatten(
                 iterables,
                 is_leaf=self._is_primitive_collection
             )
         )
+        flattened: list[_IterableLeaf] = flattened_tree[0]
+        spec: _pytree.TreeSpec = flattened_tree[1]
         self._iterables: _IterableCollection = iterables
         self._flattened: list[_IterableLeaf] = flattened
         self._spec: _pytree.TreeSpec = spec
@@ -335,7 +335,8 @@ class CombinedLoader(Iterator[_IteratorOutput]):
             limit_values: Sequence[_Limit] = cast(Sequence[_Limit], limits)
             if len(limit_values) != len(self._flattened):
                 raise ValueError(
-                    f"Limit count {len(limit_values)} does not match {len(self._flattened)} iterables."
+                    f"Limit count {len(limit_values)} does not match "
+                    f"{len(self._flattened)} iterables."
                 )
             normalized_limits: list[_Limit] = []
             limit: _Limit
@@ -416,10 +417,10 @@ class CombinedLoader(Iterator[_IteratorOutput]):
     def __next__(self) -> _IteratorOutput:
         if self._iterator is None:
             raise RuntimeError("CombinedLoader must be iterated before requesting a batch.")
-        output: Batch
-        batch_idx: int
-        dataloader_idx: int
-        output, batch_idx, dataloader_idx = next(self._iterator)
+        iterator_output: _IteratorOutput = next(self._iterator)
+        output: Batch = iterator_output[0]
+        batch_idx: int = iterator_output[1]
+        dataloader_idx: int = iterator_output[2]
         if self._mode != "sequential":
             output: Batch = cast(
                 Batch,
@@ -435,7 +436,10 @@ class CombinedLoader(Iterator[_IteratorOutput]):
             raise RuntimeError("CombinedLoader must be iterated before requesting its length.")
         length: int | None = self._length()
         if length is None:
-            raise TypeError("CombinedLoader length is unknown because at least one active iterable is unsized.")
+            raise TypeError(
+                "CombinedLoader length is unknown because at least one active "
+                "iterable is unsized."
+            )
         return length
 
     def _dataset_length(self) -> int:
@@ -542,11 +546,16 @@ class CombinedLoader(Iterator[_IteratorOutput]):
                 return _Sequential
 
     def _is_primitive_collection(self, value: _TreeNode) -> bool:
-        children: Iterable[_TreeNode]
         if isinstance(value, dict):
-            children = cast(dict[str, _TreeNode], value).values()
+            children: Iterable[_TreeNode] = cast(
+                dict[str, _TreeNode],
+                value
+            ).values()
         elif isinstance(value, list | tuple):
-            children = cast(list[_TreeNode] | tuple[_TreeNode, ...], value)
+            children: Iterable[_TreeNode] = cast(
+                list[_TreeNode] | tuple[_TreeNode, ...],
+                value
+            )
         else:
             return False
         child: _TreeNode

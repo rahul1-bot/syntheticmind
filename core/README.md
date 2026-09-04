@@ -4,12 +4,13 @@
 
 | Module | Contents |
 |---|---|
-| `module.py` | `Module`, the model contract, with its live `LoggedMetric` records. |
+| `module.py` | `Module`, the researcher-facing model, stage-step, optimization-access, metric-production, device, and distributed-runtime contract. |
+| `metric.py` | `LoggedMetric`, one live scalar or TorchMetrics observation with naming, cadence, reduction, graph, and distributed semantics. |
 | `datamodule.py` | `DataModule`, the data contract, and `DatasetDataModule`. |
-| `data_transfer.py` | Recursive tensor and tensor-like batch placement used by data-transfer hooks and prediction output collection. |
 | `hooks.py` | The `ModelHooks`, `DataHooks`, and `CheckpointHooks` lifecycle contracts. |
 | `optimizer.py` | Managed optimizer access, accepted `configure_optimizers` declarations, scheduler configuration, and declaration parsing. |
 | `saving.py` | Model reconstruction from canonical SyntheticMind checkpoints and explicit hyperparameter sources. |
+| `hyperparameters.py` | Constructor hyperparameter capture, filtering, cleaning, and model or DataModule checkpoint identity. |
 
 `Trainer` binds these contracts from `../trainer/trainer.py`. Its connectors own accelerator composition, callback composition, data execution, experiment observation, checkpoint trajectories, and signal lifecycle.
 

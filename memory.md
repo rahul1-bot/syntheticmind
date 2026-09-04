@@ -151,15 +151,15 @@
     5. Scalar run-policy validation and resolution belong to one immutable Trainer configuration boundary, while applying a resolved stage limit belongs to DataConnector because only that owner knows whether the loader is sized, unsized, nested, or distributed.
     6. Configuration must not absorb live runtime objects merely to shorten a constructor; accelerators, strategies, loggers, profilers, callbacks, dataloaders, and optimizers retain behavioral owners and are composed after scalar policy resolution.
 
-| Memory | Metric Production, Weighting, Routing, and Persistence | Date: 04 September 2026 | Time: 04:33 PM | Name: Ghost |
+| Memory | Metric Production, Observation, Weighting, and Routing | Date: 04 September 2026 | Time: 05:39 PM | Name: Ghost |
 
-    1. Metric production belongs to Module hooks, reduction cadence belongs to loops, scalar and batch-weight reduction belongs to MetricAccumulator, view routing belongs to the logger connector, and durable output belongs to concrete loggers.
+    1. Module creates metric observations, LoggedMetric owns each observation's identity and step or epoch semantics, loops own cadence, MetricAccumulator owns windows and weighting, the connector owns views and rank routing, and concrete loggers own persistence.
     2. Batch-size inference is part of mean-reduction semantics rather than a loop utility; nested tensors with contradictory leading dimensions must fail and request explicit `batch_size` instead of silently selecting the first candidate.
     3. Sanity validation must clear every observable metric view after execution so early diagnostic batches cannot alter checkpoint ranking, early stopping, progress output, or experiment records.
     4. Global-rank persistence belongs in the connector rather than every callback and loop call site; callbacks may retain rank-local observations while one central gate prevents duplicate durable writes.
     5. Multiprocessing launch must transfer metric views, presentation state, and one-time hyperparameter progress; a later worker otherwise repeats run metadata or widens a CSV file from stale parent schema.
     6. CSV schema widening is a commit operation: adopt the existing header, serialize all prior rows under the union, atomically replace the file, and roll back live field state if promotion fails.
-    7. TorchMetrics objects retain their own update and reset lifecycle, while scalar observations retain differentiable tensors only when explicitly requested; neither path may hide its value behind `object` or an unearned Protocol.
+    7. A 200-line live observation with several independent consumers earns a semantic module; Module logging remains one public operation decomposed into private transitions rather than a service, manager, Pydantic request family, or 228-line god method.
 
 | Memory | Checkpoint Trajectory, Configuration, and Randomness | Date: 04 September 2026 | Time: 04:26 PM | Name: Ghost |
 

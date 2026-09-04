@@ -146,12 +146,12 @@
     2. ✅ Training limits, batch limits, fast-development, overfit, barebones, gradient, validation, logging, deterministic, sampling, and reload policies have one configuration owner; four duplicate Trainer normalization methods were deleted.
     3. ✅ Trainer construction retains accelerator, Strategy, precision, callback, logger, profiler, data, loop, seed, and torch-side-effect composition, while every Trainer assignment is now explicitly annotated.
 
-| Progress Complete | Core Research Surface Reconstruction | Date: 04 September 2026 | Time: 11:04 AM | Name: Ghost |
+| Progress Complete | Core Module and Metric Reconstruction | Date: 04 September 2026 | Time: 05:39 PM | Name: Ghost |
 
-    1. ✅ Core now exposes only model, data, hook, optimizer, hyperparameter, and model-hydration concepts; standalone deployment exporters and the redundant checkpoint-loader module were removed.
-    2. ✅ Model, data, and checkpoint hooks remain explicit inherited lifecycle contracts, while unused logging models, duplicate hook implementations, broad core annotations, and newly introduced conditional type imports were eliminated.
-    3. ✅ Project-owned ALL_CAPS assignments and terminal trailing commas are absent, serialized checkpoint key values remain stable, and the public package root exposes Trainer, Module, DataModule, and DatasetDataModule.
-    4. ✅ Local and spawned distributed verification covers package construction, callbacks, logging, TorchMetrics, optimizer execution, direct and nested datasets, stateful continuation, checkpoint hydration, and model-parallel setup through the reconstructed hook surface.
+    1. ✅ LoggedMetric moved to its semantic core module with independent loop and logger consumers, while `core.module` explicitly re-exports the same class for compatibility and Module remains the sole public metric-production API.
+    2. ✅ Module.log decomposes into request, hook context, reduction, TorchMetrics registration, scalar normalization, and observation registration transitions; all fifty-five public Module signatures remain stable and no method exceeds one hundred lines.
+    3. ✅ The complete production tree has zero future imports, conditional type imports, broad `Any` or `object`, source comments, static methods, module functions, lambdas, and unannotated assignments.
+    4. ✅ CPU, MPS, DDP, spawn, scalar and TorchMetrics logging, warning and failure paths, runtime access, differentiable gather, optimizer execution, checkpoint hydration, direct and nested data, exact continuation, and model parallelism pass.
 
 | Progress Complete | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
 

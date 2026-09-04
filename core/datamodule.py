@@ -193,7 +193,10 @@ class DatasetDataModule(DataModule):
             and isinstance(datasets, Iterable)
             and not isinstance(datasets, (dict, list, tuple, str, bytes))
         ):
-            resolved_datasets = cast(DatasetSource, list(datasets))
+            resolved_datasets: DatasetSource = cast(
+                DatasetSource,
+                list(datasets)
+            )
         combined_loader: CombinedLoader = CombinedLoader(resolved_datasets)
         flattened_datasets: list[DatasetSource] = cast(
             list[DatasetSource],
@@ -216,5 +219,5 @@ class DatasetDataModule(DataModule):
                 pin_memory=True
             )
             dataloaders.append(dataloader)
-        combined_loader.flattened = dataloaders
+        combined_loader.flattened: list[DataLoader[Batch]] = dataloaders
         return cast(DataLoaderSource, combined_loader.iterables)

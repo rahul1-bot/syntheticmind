@@ -30,12 +30,12 @@ class ConsoleRenderer:
         return self._enabled
 
     def reset(self) -> None:
-        self._stream = sys.stderr
-        self._interactive = self._stream.isatty()
-        self._enabled = True
-        self._active_line = False
-        self._spinner_index = 0
-        self._last_render_time = 0.0
+        self._stream: TextIO = sys.stderr
+        self._interactive: bool = self._stream.isatty()
+        self._enabled: bool = True
+        self._active_line: bool = False
+        self._spinner_index: int = 0
+        self._last_render_time: float = 0.0
 
     def __getstate__(self) -> dict[str, float]:
         return {"refresh_interval": self.refresh_interval}
@@ -44,7 +44,18 @@ class ConsoleRenderer:
         self.__init__(state["refresh_interval"])
 
     def next_spinner(self) -> str:
-        frames: tuple[str, ...] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        frames: tuple[str, ...] = (
+            "⠋",
+            "⠙",
+            "⠹",
+            "⠸",
+            "⠼",
+            "⠴",
+            "⠦",
+            "⠧",
+            "⠇",
+            "⠏"
+        )
         frame: str = frames[self._spinner_index % len(frames)]
         self._spinner_index += 1
         return frame
@@ -74,19 +85,19 @@ class ConsoleRenderer:
         whole_seconds: int = int(seconds)
         if whole_seconds < 60:
             return f"{whole_seconds}s"
-        minutes: int
-        remaining_seconds: int
-        minutes, remaining_seconds = divmod(whole_seconds, 60)
+        minute_parts: tuple[int, int] = divmod(whole_seconds, 60)
+        minutes: int = minute_parts[0]
+        remaining_seconds: int = minute_parts[1]
         if minutes < 60:
             return f"{minutes}m{remaining_seconds:02d}s"
-        hours: int
-        remaining_minutes: int
-        hours, remaining_minutes = divmod(minutes, 60)
+        hour_parts: tuple[int, int] = divmod(minutes, 60)
+        hours: int = hour_parts[0]
+        remaining_minutes: int = hour_parts[1]
         if hours < 24:
             return f"{hours}h{remaining_minutes:02d}m"
-        days: int
-        remaining_hours: int
-        days, remaining_hours = divmod(hours, 24)
+        day_parts: tuple[int, int] = divmod(hours, 24)
+        days: int = day_parts[0]
+        remaining_hours: int = day_parts[1]
         return f"{days}d{remaining_hours:02d}h"
 
     def write_live(self, line: str, force: bool) -> None:
@@ -95,14 +106,14 @@ class ConsoleRenderer:
         current_time: float = time.perf_counter()
         if not force and current_time - self._last_render_time < self.refresh_interval:
             return
-        self._last_render_time = current_time
+        self._last_render_time: float = current_time
         rendered: str = self._fit_terminal(line)
         try:
             self._stream.write(f"\r\x1b[2K{rendered}")
             self._stream.flush()
-            self._active_line = True
+            self._active_line: bool = True
         except (OSError, ValueError):
-            self._enabled = False
+            self._enabled: bool = False
 
     def write_permanent(self, line: str) -> None:
         if not self._enabled:
@@ -112,9 +123,9 @@ class ConsoleRenderer:
         try:
             self._stream.write(f"{prefix}{rendered}\n")
             self._stream.flush()
-            self._active_line = False
+            self._active_line: bool = False
         except (OSError, ValueError):
-            self._enabled = False
+            self._enabled: bool = False
 
     def write_record(self, label: str, fields: list[str]) -> None:
         record: str = " · ".join((label, *fields))
@@ -159,9 +170,9 @@ class ConsoleRenderer:
         try:
             self._stream.write("\r\x1b[2K")
             self._stream.flush()
-            self._active_line = False
+            self._active_line: bool = False
         except (OSError, ValueError):
-            self._enabled = False
+            self._enabled: bool = False
 
     def _fit_terminal(self, line: str) -> str:
         width: int = self._terminal_width()

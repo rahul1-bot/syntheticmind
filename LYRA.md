@@ -142,12 +142,12 @@
     3. Callback and persistence gates use Trainer rank state instead of ambient process globals, while collective participation remains symmetric before rank-specific output decisions.
     4. The distributed utility namespace and aliases were removed; the remaining utility evacuation concerns hook inspection, module-mode restoration, and model-summary ownership.
 
-| Strategic Note | Hook and Module State Ownership | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+| Strategic Note | Hook, Module, and Metric State Ownership | Date: 04 September 2026 | Time: 05:39 PM | Name: Ghost |
 
     1. Exact nested training modes now belong to Module and remain restorable both by normal loop completion and by Trainer failure cleanup.
-    2. Hook signature knowledge belongs to Module, while general override discovery belongs beside Trainer hook dispatch; narrow callback and model-parallel cases use direct contract comparison.
-    3. The generic model-helper module, its state holder, and its free functions were deleted without exporting a substitute abstraction family.
-    4. Model-summary computation and rendering are the final behaviors remaining under utilities and form the next concept-first ownership slice.
+    2. Hook signature knowledge and metric production belong to Module, HookDispatcher owns general override discovery, and LoggedMetric owns one observation's name, cadence, reduction, graph, scalar or TorchMetrics value, and computed views.
+    3. Module.log now exposes one unchanged public contract over bounded private validation, context, reduction, value, registration, and warning transitions without a configuration-model or manager explosion.
+    4. LoggedMetric has an independent semantic module and the former import remains an explicit class re-export; CPU, MPS, DDP, spawn, checkpoint, optimizer, runtime, gather, and metric evidence passes.
 
 | Strategic Note | Model Inspection and Utility Elimination | Date: 04 September 2026 | Time: 04:59 PM | Name: Ghost |
 

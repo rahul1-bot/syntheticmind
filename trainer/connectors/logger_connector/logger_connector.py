@@ -5,7 +5,8 @@ from pathlib import Path
 import torch
 
 from syntheticmind.core.datamodule import DataModule
-from syntheticmind.core.module import LoggedMetric, Module
+from syntheticmind.core.metric import LoggedMetric
+from syntheticmind.core.module import Module
 from syntheticmind.loggers.csv_logger import CSVLogger
 from syntheticmind.loggers.logger import Logger
 from syntheticmind.loggers.tensorboard import TensorBoardLogger
