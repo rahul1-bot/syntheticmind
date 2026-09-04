@@ -289,3 +289,12 @@
     3. Callback persistence admission uses direct class-contract comparison, while model parallelism compares the concrete `configure_model` implementation against `ModelHooks`; neither narrow case requires the complete generic inspection algorithm.
     4. The former `ModuleMode` data holder and three module-level helper functions were deleted with `utilities/model_helpers.py`. No new class, Protocol, module, public entrypoint, conditional import, or generic annotation replaced them.
     5. Inherited and overridden hooks, decorated and partial callables, DataModule transfer precedence, batch-index adaptation, exact mixed child modes on success and failure, model-summary forwarding, callback state, spawned DDP, and sharded model parallelism pass after consolidation.
+
+| Architecture Decision | Model Summary Capability Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+
+    1. Model-summary lifecycle, inspection, and optional rendering now form the semantic `callbacks/model_summary/` package with separate callback, private report, and Rich adapter modules; the callback remains the canonical public lifecycle entrypoint.
+    2. Layer shape collection uses a bound inspector method rather than a nested forward-hook function, and deterministic `finally` cleanup replaces destructor-dependent hook removal.
+    3. Model size now sums each realized parameter's actual storage bytes instead of inferring storage from Trainer precision labels, preserving correct mixed-precision and custom-dtype accounting without a lookup table.
+    4. Example-input forwarding transactionally restores every nested module mode plus Python, NumPy, torch CPU, CUDA, or MPS random state after success or failure.
+    5. The former public utility functions, duplicate report name, generic annotations, module constants, local imports, and utility import paths were removed. The final tracked utility files and generated cache were deleted, leaving no `utilities/` package.
+    6. Plain and Rich rendering, lazy parameters, hook cleanup, failure rollback, MPS transfer and random state, default Trainer integration, callback configuration, metric regression, and exactly-once spawned rank-zero presentation pass.

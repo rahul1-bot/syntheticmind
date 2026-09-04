@@ -279,3 +279,11 @@
     3. Narrow contract checks should stay narrow: callback persistence can compare concrete class methods and model parallelism can compare `configure_model` against its established hook base without importing a generic inspection subsystem.
     4. Wrapped and partial callable unwrapping remains necessary for general Trainer dispatch, but it does not justify a public function, stateless inspector class, Protocol, or utility module.
     5. Mode restoration requires both loop-level normal completion and Trainer-level failure recovery because stage setup can fail before a loop gains control.
+
+| Memory | Model Summary Is Inspection Plus Presentation | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+
+    1. Model-summary callback timing, layer and model inspection, and optional Rich presentation are related but independently changing responsibilities that justify one semantic capability package rather than a utility module or one oversized callback file.
+    2. Forward-hook ownership must be explicit and deterministic: a bound method records the first shape observation, and report-level `finally` cleanup removes every surviving hook without relying on garbage collection.
+    3. Parameter storage size should derive from realized parameter `numel()` and `element_size()` rather than a precision-name table because mixed precision and custom dtypes decouple execution policy from stored parameter dtype.
+    4. Example-input inspection is an observational transaction and must restore model modes and every random generator it may consume even when transfer, forward, hook, or FLOP measurement fails.
+    5. Optional rendering dependencies belong in their adapter module and must not become mandatory imports for the base callback or Trainer construction.

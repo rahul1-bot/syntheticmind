@@ -148,3 +148,10 @@
     2. Hook signature knowledge belongs to Module, while general override discovery belongs beside Trainer hook dispatch; narrow callback and model-parallel cases use direct contract comparison.
     3. The generic model-helper module, its state holder, and its free functions were deleted without exporting a substitute abstraction family.
     4. Model-summary computation and rendering are the final behaviors remaining under utilities and form the next concept-first ownership slice.
+
+| Strategic Note | Model Inspection and Utility Elimination | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+
+    1. Model summary is now a callback capability family whose lifecycle, private inspection report, and optional Rich renderer have explicit ownership.
+    2. Inspection measures actual parameter storage and executes example-input forwarding as a reversible observation transaction across model modes, hooks, and random generators.
+    3. The generic utility package has been eliminated completely; every surviving behavior now belongs to an ML lifecycle, execution policy, core contract, callback, or infrastructure boundary.
+    4. Callback topology is the next audit because its remaining flat package width crosses the generic review boundary and must be judged by selectable training concepts rather than file count alone.

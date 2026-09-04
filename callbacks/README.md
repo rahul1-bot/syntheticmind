@@ -14,6 +14,7 @@
 | `ema.py` | `EMACallback`, which maintains an exponential moving average of model weights. |
 | `lr_monitor.py` | `LearningRateMonitor`, which records per-group learning rates. |
 | `progress_bar.py` | `ProgressBarCallback`, which reports stage progress. |
+| `model_summary/` | The `ModelSummary` callback, layer and model inspection report, and optional Rich renderer. |
 | `throughput_monitor.py` | `ThroughputMonitor`, which records samples-per-second telemetry. |
 | `device_stats_monitor.py` | `DeviceStatsMonitor`, which records device utilization. |
 | `runtime_profiler.py` | `RuntimeProfiler` with `RuntimeMetricAccumulator`, which produces runtime profiling artifacts for post-run inspection. |

@@ -219,8 +219,18 @@
     5. ✅ Spawned DDP callback configuration and runtime state plus sharded model-parallel configuration pass through the consolidated owners.
     6. ✅ Stale Active and Queued ledger entries whose matching Complete records already existed were removed during mandatory ledger consolidation.
 
-| Progress Active | Model Summary Ownership | Date: 04 September 2026 | Time: 12:11 PM | Name: Ghost |
+| Progress Complete | Model Summary Ownership | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
 
-    1. `utilities/model_summary.py` is the final executable utility module and mixes layer inspection, forward-hook measurement, formatting, terminal output, count conversion, and public free functions.
-    2. The next bounded phase must preserve model introspection and callback extension semantics while moving computation and rendering to the model-summary callback family without creating a generic formatting or utility package.
-    3. The public `ModelSummary` callback, `RichModelSummary`, forward-shape capture, parameter accounting, FLOP accounting, exact model and random state restoration, and rank-zero presentation require direct verification before deleting `utilities/`.
+    1. ✅ Model summary now lives in the semantic callback capability package with a public lifecycle callback, private inspection report, and isolated optional Rich renderer.
+    2. ✅ Nested hook functions, destructor cleanup, module functions, module constants, `Any`, generic `object`, local imports, duplicate report naming, and obsolete utility exports were removed from the reconstructed capability.
+    3. ✅ Parameter and trainable counts, actual storage-byte size, shapes, FLOPs, module modes, plain output, Rich output, depth validation, and lazy-parameter diagnostics execute through the new owners.
+    4. ✅ Exact nested module modes and Python, NumPy, torch CPU, and MPS random state restore after successful and failed inspection, and every registered shape hook detaches deterministically.
+    5. ✅ Default Trainer execution, callback configuration, metric views, MPS transfer, and spawned DDP exactly-once rank-zero presentation pass.
+    6. ✅ The final utility source, package initializer, README, and generated cache were removed; no `utilities/` path remains in production or verification imports.
+
+| Progress Active | Callback Capability Topology | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+
+    1. The callback package still exceeds the generic direct-module width limit and mixes persistence, optimization policy, monitoring, guarding, terminal presentation, and failure supervision as flat siblings.
+    2. The next bounded phase must census each callback against recognized training concepts, preserve selectable callback identities, and group only stable capability families whose members share lifecycle, dependencies, and reason to change.
+    3. The audit must also remove stale names, broad annotations, free behavior, duplicated rank or metric logic, and invalid state boundaries without copying Lightning's historical callback inventory.
+    4. Verification must cover callback ordering, duplicate state keys, checkpoint restoration, monitoring, progress, failure guards, spawned launchers, and interaction with model-provided callbacks.
