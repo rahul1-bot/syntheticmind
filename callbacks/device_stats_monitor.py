@@ -24,7 +24,7 @@ from syntheticmind.utilities.distributed import is_rank_zero
 from syntheticmind.utilities.types import Batch, StepOutput
 
 if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = ["DeviceStatsMonitor"]
 

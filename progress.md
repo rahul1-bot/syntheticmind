@@ -241,3 +241,16 @@
     2. The next phase must move Trainer to `trainer/trainer.py`, move `TrainerState` to `trainer/states.py`, update all production dependency directions, and remove the top-level `state/` package without leaving a compatibility re-export façade.
     3. Existing conditional annotation blocks may update their Trainer import path under the explicit project topology authority, but no new `TYPE_CHECKING` occurrence may be introduced.
     4. Verification must cover production imports, Module and DataModule back-references, callbacks, loops, launchers, serialization, subprocess, spawn, fork, checkpoints, logging, and model parallelism through the canonical path.
+
+| Progress Complete | Canonical Trainer Package Migration | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
+
+    1. ✅ Trainer and Trainer state moved to their canonical `trainer/` modules, while the former core Trainer module and top-level state package were removed without compatibility façades.
+    2. ✅ All production and verification imports now use the canonical paths, including every existing conditional annotation block and serialized launcher dependency.
+    3. ✅ Direct imports, callbacks, metrics, subprocess DDP, spawn, fork, stateful checkpoint continuation, and sharded model parallelism pass after relocation.
+
+| Progress Active | Core Research Surface Reconstruction | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
+
+    1. `core/` still contains standalone checkpoint reconstruction, TorchScript and ONNX export services, TensorRT compiler services, a wide multiple-inheritance Module, broad data contracts, and oversized hook and hyperparameter implementations.
+    2. The next phase must preserve only researcher-facing model, data, optimizer, saving, hook, and hyperparameter concepts and remove deployment or compatibility baggage that is not part of the training harness objective.
+    3. Standalone `load_from_checkpoint` remains only if its model-hydration semantics justify residence in `saving.py`; TorchScript, ONNX, and TensorRT convenience surfaces are removed unless an active training requirement proves otherwise.
+    4. Verification must cover Module inheritance and `forward`, all stage steps, DataModule ownership, hook dispatch, optimizer declarations, checkpoint hydration if retained, batch transfer, logging, callbacks, launchers, and model parallelism.

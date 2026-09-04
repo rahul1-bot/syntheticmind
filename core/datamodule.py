@@ -37,7 +37,7 @@ from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.types import Batch, StateDict, TrainerStage
 
 if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = ["DataModule", "DatasetDataModule"]
 

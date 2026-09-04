@@ -18,7 +18,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = ["Loop"]
 

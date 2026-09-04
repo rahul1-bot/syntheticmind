@@ -41,12 +41,12 @@ from syntheticmind.callbacks.early_stopping import EarlyStopping
 from syntheticmind.core.module import LoggedMetric, Module
 from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
-from syntheticmind.state.trainer_state import TrainerState
+from syntheticmind.trainer.states import TrainerState
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
 
 if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = ["FitLoop"]
 

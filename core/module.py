@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
     from torchmetrics import Metric, MetricCollection
 
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
     from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 
 __all__: list[str] = ["Module", "MetricLoggingConfiguration", "LoggedMetric"]

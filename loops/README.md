@@ -16,4 +16,4 @@ Batch limits (`limit_train_batches`, `limit_val_batches`, `limit_test_batches`, 
 
 ## Related Components
 
-The loops are dispatched by `../core/trainer.py`, transfer batches through `../utilities/data_transfer.py`, and aggregate metrics through `../utilities/metric_accumulator.py`.
+The loops are dispatched by `../trainer/trainer.py`, transfer batches through the data hook boundary, and aggregate metrics through the current metric owner.

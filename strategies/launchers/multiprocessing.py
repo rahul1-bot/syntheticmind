@@ -34,7 +34,7 @@ from syntheticmind.utilities.types import TrainerStage
 if TYPE_CHECKING:
     from syntheticmind.core.datamodule import DataModule
     from syntheticmind.core.module import Module
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
     from syntheticmind.strategies.ddp import DDPStrategy
 
 __all__: list[str] = []

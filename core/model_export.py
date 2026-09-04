@@ -10,7 +10,7 @@ import torch
 
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.module import Module
-from syntheticmind.core.trainer import Trainer
+from syntheticmind.trainer.trainer import Trainer
 from syntheticmind.utilities.filesystem import (
     basename,
     copy_local_file,

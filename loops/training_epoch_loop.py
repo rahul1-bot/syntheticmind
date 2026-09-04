@@ -18,7 +18,7 @@ from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
 from syntheticmind.loops.optimization.automatic import _AutomaticOptimization
 from syntheticmind.loops.optimization.manual import _ManualOptimization
-from syntheticmind.state.trainer_state import TrainerState
+from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.combined_loader import CombinedLoader
 from syntheticmind.utilities.distributed import DistributedUtils
@@ -40,7 +40,7 @@ from syntheticmind.utilities.types import (
 )
 
 if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = ["TrainingEpochLoop"]
 

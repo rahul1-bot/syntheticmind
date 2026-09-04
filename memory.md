@@ -253,3 +253,10 @@
     4. PyTorch optimizer closures remain ordinary callables, but SyntheticMind can supply a bound `run` method instead of defining a custom callable object or nested function.
     5. Strategy and precision jointly own the actual optimizer step because wrapping, sharding, scaling, unscaling, and overflow behavior depend on execution topology and numerical policy.
     6. Scheduler cadence belongs to the training epoch lifecycle, while `Module.lr_scheduler_step` remains the explicit extension hook for schedulers outside the standard PyTorch API.
+
+| Memory | Canonical Import Paths Express Ownership | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
+
+    1. Moving a class without removing its former import path preserves ambiguous ownership. A ground-up private framework should update consumers directly and leave exactly one canonical implementation path.
+    2. Trainer state is not a general state-domain package; its status, stage, counters, interruption, and stop flag change with Trainer lifecycle and therefore belong beside Trainer.
+    3. Connector extraction should precede canonical Trainer relocation when it materially shrinks the orchestration module and establishes the package's conceptual contents before imports move.
+    4. Subprocess and multiprocessing launchers are mandatory relocation tests because serialized module paths and conditional annotations can remain stale after local imports appear successful.

@@ -4,7 +4,7 @@
 
 | Module | Contents |
 |---|---|
-| `callback.py` | `Callback`, the abstract hook surface every callback implements. |
+| `callback.py` | `Callback`, the hook surface every callback selectively overrides. |
 | `model_checkpoint.py` | `ModelCheckpoint`, which writes durable checkpoints on a configured cadence with monitored-metric selection; this is the mechanism behind the study's registered checkpoint gate. |
 | `early_stopping.py` | `EarlyStopping`, which stops a run on a monitored metric with patience. |
 | `timer.py` | `TimerCallback`, which enforces wall-time budgets. |
@@ -20,4 +20,4 @@
 
 ## Related Components
 
-Callbacks are attached through the trainer in `../core/trainer.py`, and their persisted state travels inside the checkpoint contract defined in `../state/`.
+Callbacks are composed by `../trainer/connectors/callback_connector.py`, dispatched by `../trainer/trainer.py`, and persisted by the Trainer checkpoint connector.

@@ -20,7 +20,7 @@ from syntheticmind.utilities.model_helpers import ModuleMode
 from syntheticmind.utilities.types import Batch
 
 if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+    from syntheticmind.trainer.trainer import Trainer
 
 __all__: list[str] = [
     "LayerSummary",

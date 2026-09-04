@@ -46,7 +46,7 @@ from syntheticmind.plugins import Plugin
 from syntheticmind.plugins.io import CheckpointStorageOptions
 from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
-from syntheticmind.state.trainer_state import TrainerState
+from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.launcher import _ProcessLauncher
 from syntheticmind.strategies.parallel import ParallelStrategy

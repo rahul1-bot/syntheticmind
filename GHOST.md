@@ -244,3 +244,11 @@
     4. `SyntheticOptimizer` now uses explicitly connected step and toggle operations. Dynamic `__class__` mutation, generic attribute forwarding, concrete Trainer references, and four optimizer-only Trainer Protocols were removed.
     5. The previous optimizer and scheduler factory configurations and their free-function utility builders were dead parallel APIs that renamed PyTorch algorithms and were deleted.
     6. Automatic, multi-optimizer manual, managed manual DDP, LBFGS repeated closure, accumulation tail, clipping, mixed precision, step scheduling, plateau monitoring, invalid configuration, spawn, fork, full model-parallel resume, and sharded model-parallel resume pass.
+
+| Architecture Decision | Canonical Trainer Package | Date: 04 September 2026 | Time: 10:16 AM | Name: Ghost |
+
+    1. `trainer/trainer.py` is the sole implementation and canonical import path for `Trainer`; `trainer/__init__.py` exposes the same class for the concise public package import.
+    2. `TrainerState` moved to `trainer/states.py`, and the former top-level `state/` package was removed because Trainer status and progress are Trainer lifecycle concepts rather than a cross-cutting state subsystem.
+    3. Every production dependency and verification program now imports the canonical Trainer and Trainer state paths directly. No compatibility module, forwarding alias, or duplicate import surface remains under `core/` or `state/`.
+    4. Existing conditional annotation blocks changed only their Trainer import target under the explicit project topology authority; no new `TYPE_CHECKING` block was introduced.
+    5. Canonical imports, Module and DataModule back-references, callback composition, metric views, subprocess DDP, spawn, fork, stateful checkpoint continuation, and sharded model parallelism pass after relocation.

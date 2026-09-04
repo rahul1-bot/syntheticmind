@@ -1,6 +1,6 @@
 # syntheticmind.trainer: Lifecycle Orchestration
 
-`trainer/` is the active migration target for the complete fit, validation, test, and prediction lifecycles. The public `Trainer` remains temporarily implemented in `core/trainer.py` while its runtime slices move into the connectors below; after that bounded migration, `trainer/trainer.py` becomes its canonical location. `Trainer` remains the single stage entrypoint throughout.
+`trainer/` owns the complete fit, validation, test, and prediction lifecycles. `trainer.py` is the canonical implementation of the single public `Trainer` stage entrypoint, while connectors own its internal runtime composition boundaries.
 
 | Capability | Ownership |
 |---|---|
