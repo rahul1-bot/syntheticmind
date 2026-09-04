@@ -9,9 +9,9 @@ from torch.distributed.nn.functional import all_gather as distributed_all_gather
 
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.plugins.environments import ClusterEnvironment, LocalEnvironment
-from syntheticmind.plugins.io import CheckpointIO
-from syntheticmind.precision.precision import Precision
-from syntheticmind.strategies.launcher import ProcessStartMethod, _ProcessLauncher
+from syntheticmind.plugins.checkpoint_io import CheckpointIO
+from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.strategies.launchers.launcher import ProcessStartMethod, _ProcessLauncher
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.utilities.exceptions import MisconfigurationError

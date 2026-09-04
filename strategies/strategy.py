@@ -7,13 +7,13 @@ from torch import nn
 
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.core.module import Module
-from syntheticmind.plugins.io import CheckpointIO
-from syntheticmind.precision.precision import Precision
+from syntheticmind.plugins.checkpoint_io import CheckpointIO
+from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.strategies.checkpoint import (
     StrategyCheckpoint,
     _SingleFileCheckpoint
 )
-from syntheticmind.strategies.launcher import _ProcessLauncher
+from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
 from syntheticmind.utilities.model_initialization import _ModuleInitializer
 from syntheticmind.utilities.types import (
     BackwardInputs,

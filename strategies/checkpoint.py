@@ -5,7 +5,7 @@ from typing import Protocol, cast, override, runtime_checkable
 import torch
 from torch import nn
 
-from syntheticmind.plugins.io import (
+from syntheticmind.plugins.checkpoint_io import (
     CheckpointIO,
     CheckpointPath,
     CheckpointStorageOptions,

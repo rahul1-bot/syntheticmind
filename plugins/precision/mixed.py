@@ -7,7 +7,7 @@ from typing import Literal, cast, override
 import torch
 
 from syntheticmind.core.module import Module
-from syntheticmind.precision.precision import Precision
+from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.utilities.exceptions import MisconfigurationError
 from syntheticmind.utilities.types import (
     ClipAlgorithm,

@@ -263,3 +263,11 @@
     6. The core model, data, hook, saving, and hyperparameter modules contain no `Any`, generic `object`, or conditional type-only import. Checkpoint-key identifier names are lower snake case while their serialized string values remain unchanged.
     7. Every project-owned ALL_CAPS assignment and terminal trailing comma was removed without renaming external framework constants or environment-variable keys. This naming cleanup is subordinate to the preserved PyTorch and distributed runtime meanings.
     8. Package import, hook inheritance, direct and nested dataset construction, callback composition, metric views, TorchMetrics under spawned two-rank DDP, local checkpoint hydration, optimizer execution, nested distributed loaders, exact stateful-loader resume, and two-rank model parallelism pass after the reconstruction.
+
+| Architecture Decision | Plugin and Launcher Topology | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
+
+    1. Numerical precision is now located under `plugins/precision/` because full, half, mixed, and Transformer Engine policies are interchangeable Trainer plugins controlling numerical execution rather than a peer training lifecycle.
+    2. Checkpoint transport moved from the vague `plugins/io.py` name to `plugins/checkpoint_io.py`. The current plugin family owns only checkpoint persistence, so a generic I/O package would imply unsupported transport concepts and reproduce upstream baggage.
+    3. The process launcher moved from `strategies/launcher.py` into `strategies/launchers/launcher.py`, placing start-method selection, process launch delegation, state transfer, environment reconstruction, child observation, and termination under one distributed-launch concept.
+    4. Public class identities and Trainer configuration meanings remain unchanged, but obsolete import paths were removed without compatibility façades. Precision now explicitly inherits the checkpoint-hook contract and marks its checkpoint hook implementations as overrides.
+    5. Full, half, mixed, and Transformer Engine precision execution, asynchronous checkpoint I/O, local optimizer execution, spawned DDP runtime state, subprocess DDP forward and consensus behavior, and sharded two-rank model parallelism pass through the new canonical paths.

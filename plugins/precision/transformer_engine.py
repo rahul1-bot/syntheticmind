@@ -6,10 +6,10 @@ from typing import override
 import torch
 from torch import nn
 
-from syntheticmind.precision.conversion import _DtypeContext
-from syntheticmind.precision.precision import Precision
-from syntheticmind.precision.transformer_engine_adapter import _TransformerEngineAdapter
-from syntheticmind.precision.transformer_engine_contracts import (
+from syntheticmind.plugins.precision.conversion import _DtypeContext
+from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.plugins.precision.transformer_engine_adapter import _TransformerEngineAdapter
+from syntheticmind.plugins.precision.transformer_engine_contracts import (
     DelayedScalingConfiguration,
     DelayedScalingRecipe
 )

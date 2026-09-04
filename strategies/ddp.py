@@ -9,10 +9,10 @@ from torch.nn.parallel import DistributedDataParallel
 from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.core.module import Module
 from syntheticmind.plugins.environments import ClusterEnvironment
-from syntheticmind.plugins.io import CheckpointIO
+from syntheticmind.plugins.checkpoint_io import CheckpointIO
 from syntheticmind.plugins.layer_sync import LayerSync
-from syntheticmind.precision.precision import Precision
-from syntheticmind.strategies.launcher import ProcessStartMethod
+from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.strategies.launchers.launcher import ProcessStartMethod
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.strategies.strategy import _ForwardRedirection
 

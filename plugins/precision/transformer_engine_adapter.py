@@ -12,7 +12,7 @@ from unittest.mock import patch
 from packaging.version import InvalidVersion, Version
 from torch import nn
 
-from syntheticmind.precision.transformer_engine_contracts import (
+from syntheticmind.plugins.precision.transformer_engine_contracts import (
     DelayedScalingConfiguration,
     DelayedScalingRecipe
 )

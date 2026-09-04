@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from types import FrameType
 from typing import cast, override
 
-from syntheticmind.strategies.launcher import _ProcessLauncher
+from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
 from syntheticmind.strategies.strategy import Strategy
 
 __all__: list[str] = []

@@ -10,13 +10,13 @@ from syntheticmind.accelerators.device_parser import DeviceInput
 from syntheticmind.accelerators.mps import MPSAccelerator
 from syntheticmind.plugins import Plugin
 from syntheticmind.plugins.environments import ClusterEnvironment
-from syntheticmind.plugins.io import CheckpointIO
+from syntheticmind.plugins.checkpoint_io import CheckpointIO
 from syntheticmind.plugins.layer_sync import LayerSync, TorchSyncBatchNorm
-from syntheticmind.precision.double import DoublePrecision
-from syntheticmind.precision.half import HalfPrecision
-from syntheticmind.precision.mixed import MixedPrecision
-from syntheticmind.precision.precision import Precision
-from syntheticmind.precision.transformer_engine import TransformerEnginePrecision
+from syntheticmind.plugins.precision.double import DoublePrecision
+from syntheticmind.plugins.precision.half import HalfPrecision
+from syntheticmind.plugins.precision.mixed import MixedPrecision
+from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.plugins.precision.transformer_engine import TransformerEnginePrecision
 from syntheticmind.strategies.ddp import DDPStrategy
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.strategies.single_device import SingleDeviceStrategy

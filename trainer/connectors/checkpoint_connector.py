@@ -11,8 +11,8 @@ from syntheticmind.callbacks.model_checkpoint import ModelCheckpoint
 from syntheticmind.core.datamodule import DataModule
 from syntheticmind.core.hyperparameters import HyperparametersMixin
 from syntheticmind.core.optimizer import _SchedulerInstance
-from syntheticmind.precision.precision import Precision
-from syntheticmind.plugins.io import (
+from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.plugins.checkpoint_io import (
     CheckpointPath,
     CheckpointStorageOptions
 )

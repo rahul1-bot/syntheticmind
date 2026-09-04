@@ -41,14 +41,14 @@ from syntheticmind.loops.fit_loop import FitLoop
 from syntheticmind.loops.prediction_loop import PredictionLoop
 from syntheticmind.loops.training_epoch_loop import TrainingEpochLoop
 from syntheticmind.loops.validation_schedule import ValidationSchedule
-from syntheticmind.precision.precision import Precision
+from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.plugins import Plugin
-from syntheticmind.plugins.io import CheckpointStorageOptions
+from syntheticmind.plugins.checkpoint_io import CheckpointStorageOptions
 from syntheticmind.plugins.layer_sync import LayerSync
 from syntheticmind.profilers import PassThroughProfiler, Profiler, _resolve_profiler
 from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.ddp import DDPStrategy
-from syntheticmind.strategies.launcher import _ProcessLauncher
+from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.strategies.strategy import Strategy
 from syntheticmind.trainer.connectors.accelerator_connector import (

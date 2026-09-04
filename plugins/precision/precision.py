@@ -1,11 +1,12 @@
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from typing import cast
+from typing import cast, override
 
 import torch
 
 from syntheticmind.core.module import Module
+from syntheticmind.core.hooks import CheckpointHooks
 from syntheticmind.utilities.types import (
     BackwardInputs,
     Batch,
@@ -23,7 +24,7 @@ from syntheticmind.utilities.types import (
 __all__: list[str] = ["Precision"]
 
 
-class Precision:
+class Precision(CheckpointHooks):
     precision: PrecisionType = "32-true"
     scaler: torch.GradScaler | None = None
 
@@ -195,9 +196,11 @@ class Precision:
     def load_state_dict(self, state_dict: StateDict) -> None:
         del state_dict
 
+    @override
     def on_save_checkpoint(self, checkpoint: CheckpointDict) -> None:
         del checkpoint
 
+    @override
     def on_load_checkpoint(self, checkpoint: CheckpointDict) -> None:
         del checkpoint
 

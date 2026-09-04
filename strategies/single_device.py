@@ -3,8 +3,8 @@ from typing import override
 import torch
 
 from syntheticmind.accelerators.accelerator import Accelerator
-from syntheticmind.plugins.io import CheckpointIO
-from syntheticmind.precision.precision import Precision
+from syntheticmind.plugins.checkpoint_io import CheckpointIO
+from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.strategies.strategy import Strategy
 
 __all__: list[str] = ["SingleDeviceStrategy"]

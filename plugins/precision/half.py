@@ -3,8 +3,8 @@ from typing import Literal, override
 
 import torch
 
-from syntheticmind.precision.conversion import _DtypeContext
-from syntheticmind.precision.precision import Precision
+from syntheticmind.plugins.precision.conversion import _DtypeContext
+from syntheticmind.plugins.precision.precision import Precision
 from syntheticmind.utilities.types import Batch, PrecisionType
 
 __all__: list[str] = ["HalfPrecision"]

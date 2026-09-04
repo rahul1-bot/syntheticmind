@@ -1,6 +1,6 @@
-# syntheticmind.precision: Numerical Execution
+# syntheticmind.plugins.precision: Numerical Execution
 
-`precision/` owns parameter conversion, input conversion, forward contexts, backward preparation, gradient scaling, optimizer stepping, clipping, and precision checkpoint state.
+`plugins/precision/` owns parameter conversion, input conversion, forward contexts, backward preparation, gradient scaling, optimizer stepping, clipping, and precision checkpoint state.
 
 | Module | Ownership |
 |---|---|

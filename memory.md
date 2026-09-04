@@ -268,3 +268,10 @@
     3. Cooperative `super()` inside `DataHooks.__init__` has meaning only inside the complete multiple-inheritance graph. It must not be decorated as an override merely because `object.__init__` exists; the concrete MRO must demonstrate that the call initializes the next real framework participant.
     4. Hook dispatch belongs to Trainer and loops, hook implementations belong to modules, data modules, and callbacks, and hook-name logging policy belongs with the hook vocabulary. A separate rule-model family adds no independent state, boundary, or lifecycle.
     5. Serialized checkpoint field strings are durable schema values, while Python identifiers naming those fields are implementation details. Renaming the identifiers to lower snake case removes style debt without migrating the checkpoint format.
+
+| Memory | Plugin Categories and Process Launch Placement | Date: 04 September 2026 | Time: 11:11 AM | Name: Ghost |
+
+    1. Precision is an interchangeable numerical-execution plugin even though its behavior reaches deeply into module initialization, forward contexts, backward execution, optimizer stepping, gradient scaling, and checkpoint state.
+    2. A package name must describe the concepts actually implemented rather than copy the breadth of an upstream framework. `checkpoint_io.py` is correct while checkpoint transport is the only I/O plugin family; `io/` becomes justified only if distinct plugin I/O concepts actually appear.
+    3. Launcher policy and launcher mechanisms form one distributed-systems concept. Keeping the policy module beside Strategy while its subprocess and multiprocessing implementations live in `launchers/` makes ownership harder to infer and creates an artificial package boundary.
+    4. Relocation verification must include importable spawned workers, subprocess workers, Strategy serialization, optional precision adapters, and checkpoint wrappers because local construction cannot expose stale serialized module paths.
