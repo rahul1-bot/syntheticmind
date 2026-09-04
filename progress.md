@@ -245,12 +245,12 @@
     6. ✅ CPU configuration, ranking, retention, final-step, failure, and resume probes plus remote persistence and asynchronous snapshot isolation pass.
     7. ✅ Callback composition, tensor metric state, two-rank DDP checkpoint selection, and two-rank sharded model-parallel uninterrupted-versus-resumed trajectories pass.
 
-| Progress Complete | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+| Progress Complete | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 04:54 PM | Name: Ghost |
 
     1. ✅ `EMACallback` and its pre-placement shadow-model copy were replaced by `EMAWeightAveraging` with strict configuration and optimizer-step-aware update cadence.
     2. ✅ Named parameter and optional buffer state validates exact keys and shapes, averages floating tensors, copies non-floating buffers, and restores live weights after evaluation failure or teardown.
-    3. ✅ Average state uses canonical callback persistence, checkpoints built during a swap preserve live model tensors under the sole `state_dict` key, and callback hooks now run for weights-only checkpoint consistency.
-    4. ✅ CPU, MPS, accumulated optimization, evaluation, failure, full checkpoint, weights-only checkpoint, exact resume, and spawned DDP paths pass.
+    3. ✅ Full training checkpoints preserve captured live tensors even after fit exposes averaged weights, weights-only artifacts preserve the averaged model, and a later fit restores live state before optimization.
+    4. ✅ CPU, MPS, accumulated optimization, evaluation, failure, raw-state full continuation, averaged artifact, exact EMA resume, and two-rank DDP paths pass without future imports or static utilities.
     5. ✅ DTensor and sharded models fail with an explicit unsupported-capability error instead of running an unverified average-state path.
 
 | Progress Complete | Pre-Mutation Finite Value Guard | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |

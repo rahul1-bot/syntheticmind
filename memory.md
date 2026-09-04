@@ -243,13 +243,13 @@
     5. A supplied schedule must not execute during configuration validation, fit sanity steps must not consume the training trace window, and unsupported schedule outputs must fail where the profiler advances the real step.
     6. Requested trace artifacts must contain their promised evidence. When an installed backend captures no stack frames, explicit flame-graph failure is more truthful than a successful zero-byte file.
 
-| Memory | Weight Averaging Is Optimizer-Progress State | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+| Memory | Weight Averaging Is Optimizer-Progress State | Date: 04 September 2026 | Time: 04:54 PM | Name: Ghost |
 
     1. EMA updates must follow actual optimizer-step progress rather than batch count because gradient accumulation and manual optimization decouple batches from parameter changes.
     2. Averaging a deep-copied model before `configure_model`, device placement, or sharding creates stale structure and cross-device operations; named live tensors must be captured only after the real model exists.
-    3. Callback state belongs in the callback-state checkpoint channel. A temporary evaluation swap may rewrite only the canonical model `state_dict` back to live training tensors and must never add a duplicate model-state key.
+    3. Callback average state belongs in the callback channel, while a full resumable checkpoint must pair optimizer state with live training tensors even when the post-fit module or an evaluation stage currently exposes averaged tensors.
     4. Floating and complex tensors admit exponential averaging, while integer and boolean buffers must copy the latest value. Shape and key drift are hard failures rather than silent zip truncation.
-    5. Evaluation swaps require exception and teardown rollback, and weights-only checkpoint hooks must still execute because suppressing callback state does not suppress checkpoint-consistency behavior.
+    5. Evaluation swaps require exception and teardown rollback; full checkpoints substitute live tensors, weights-only artifacts intentionally retain averages, and a later fit restores captured live state before creating new optimizer progress.
     6. Unsupported sharded or DTensor averaging must fail explicitly until average-state representation and distributed checkpoint restoration have executable semantics.
 
 | Memory | Finite Checks Must Precede Mutation | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |

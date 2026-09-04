@@ -163,12 +163,12 @@
     3. Callback preserves the complete established hook surface and every call signature through lazy package annotations; concrete callbacks explicitly declare their overrides and no conditional import or stale source commentary remains in the base contract.
     4. Early stopping, finite checks, learning-rate telemetry, throughput, and device statistics remain independent monitoring concepts and now use owner-bound operations without obsolete annotation imports or static utility methods; timer, weight averaging, and model inspection remain separate audit targets.
 
-| Strategic Note | EMA Weight Averaging Contract | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+| Strategic Note | EMA Weight Averaging Contract | Date: 04 September 2026 | Time: 04:54 PM | Name: Ghost |
 
     1. EMA now follows optimizer-step progress, supports accumulation, validates its configuration and tensor topology, and persists through the standard callback state channel.
-    2. Evaluation uses reversible average-weight swaps, failures restore live tensors, and final training state becomes averaged only after a real update.
-    3. Checkpoints created during an average swap preserve live training state under the canonical schema for both full and weights-only artifacts.
-    4. DDP and MPS paths are verified; sharded and DTensor paths are rejected until their average-state persistence can be represented correctly.
+    2. Evaluation uses reversible average-weight swaps, failures restore live tensors, and post-fit modules expose averaged weights only after a real update while retaining captured live state for continuation.
+    3. Full checkpoints pair live model tensors with optimizer state; weights-only artifacts preserve the averaged model; resumed EMA trajectories remain exact.
+    4. DDP and MPS paths are verified without future imports or static utilities; sharded and DTensor paths remain rejected until their average-state persistence is representable.
 
 | Strategic Note | Preventive Numerical Failure Boundary | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |
 

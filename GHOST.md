@@ -226,15 +226,15 @@
     6. XLA profiling was removed because SyntheticMind has no executable XLA accelerator or strategy; backend-specific surface without a backend lifecycle is compatibility theater rather than a training capability.
     7. CPU, local stage reuse, MPS-adjacent timing, remote fsspec output, failure cleanup, custom and stage-aware schedules, external DDP, and spawned DDP reports and traces pass; macOS fork remains bounded by the independently reproduced MPSGraph fork-safety failure.
 
-| Architecture Decision | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+| Architecture Decision | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 04:54 PM | Name: Ghost |
 
     1. The unvalidated `EMACallback` shadow-model copy was replaced by the standard `EMAWeightAveraging` concept with strict decay, update cadence, starting step, and buffer configuration.
     2. Averaging initializes after model configuration, placement, and checkpoint restoration, advances only when global optimizer-step progress changes, copies the first eligible state exactly, averages floating tensors, and copies non-floating buffers.
-    3. Average tensors, processed step, and update count persist through the canonical callback state channel. Checkpoints created while average weights are active restore the live training tensors under the sole canonical `state_dict` key, including weights-only saves.
-    4. Validation, test, and prediction swap average weights transactionally; exception and teardown paths restore live tensors, while successful training ends with the average state only after at least one real update.
+    3. Average tensors, processed step, and update count persist through callback state. A full training checkpoint always substitutes captured live tensors under the sole model `state_dict`, while a weights-only artifact intentionally records the averaged in-memory model.
+    4. Validation, test, and prediction swap average weights transactionally; exception and teardown restore live tensors, successful training exposes averaged weights after a real update, and a subsequent fit first restores the captured live training state.
     5. DTensor and sharded model state are rejected explicitly because correct distributed average persistence is not implemented; DDP and MPS are supported and verified.
-    6. The cohesive 402-line module and 376-line callback exceed the generic class threshold under the concept-integrity authority; splitting one averaging algorithm into a one-consumer manager or store is rejected.
-    7. CPU parameter and buffer behavior, accumulation cadence, invalid configuration, failure rollback, full and weights-only mid-swap checkpoints, exact interrupted resume, MPS placement, spawned DDP transfer, and model-parallel rejection pass.
+    6. The cohesive 415-line module and 377-line callback exceed the generic class threshold under the concept-integrity authority; splitting one averaging algorithm into a one-consumer manager or store is rejected.
+    7. CPU parameter and buffer behavior, accumulation cadence, failure rollback, full raw-state continuation, averaged weights artifacts, exact interrupted resume, MPS placement, two-rank DDP, and model-parallel rejection pass without future imports or static utilities.
 
 | Architecture Decision | Pre-Mutation Finite Value Guard | Date: 04 September 2026 | Time: 12:41 PM | Name: Ghost |
 

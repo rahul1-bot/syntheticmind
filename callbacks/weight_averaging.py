@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import cast, override
 
 import syntheticmind
@@ -55,6 +53,7 @@ class EMAWeightAveraging(Callback):
         self.use_buffers: bool = use_buffers
         self._average_state: _AveragedState | None = None
         self._original_state: _AveragedState | None = None
+        self._finalized_training_state: _AveragedState | None = None
         self._last_processed_step: int = 0
         self._num_averaged: int = 0
         self._state_restored: bool = False
@@ -76,6 +75,9 @@ class EMAWeightAveraging(Callback):
         module: Module
     ) -> None:
         del trainer
+        if self._finalized_training_state is not None:
+            self._copy_state_to_module(module, self._finalized_training_state)
+            self._finalized_training_state: _AveragedState | None = None
         if any(
             isinstance(tensor, DTensor)
             for tensor in self._current_state(module).values()
@@ -89,6 +91,7 @@ class EMAWeightAveraging(Callback):
             return
         self._average_state: _AveragedState | None = self._clone_current_state(module)
         self._original_state: _AveragedState | None = None
+        self._finalized_training_state: _AveragedState | None = None
         self._last_processed_step: int = 0
         self._num_averaged: int = 0
         self._state_restored: bool = False
@@ -122,6 +125,9 @@ class EMAWeightAveraging(Callback):
     ) -> None:
         del trainer
         if self._num_averaged > 0:
+            self._finalized_training_state: _AveragedState | None = (
+                self._clone_current_state(module)
+            )
             self._copy_average_to_module(module)
 
     @override
@@ -232,6 +238,7 @@ class EMAWeightAveraging(Callback):
             average_state[name] = value.detach().clone()
         self._average_state: _AveragedState | None = average_state
         self._original_state: _AveragedState | None = None
+        self._finalized_training_state: _AveragedState | None = None
         self._last_processed_step: int = last_step_value
         self._num_averaged: int = count_value
         self._state_restored: bool = True
@@ -244,7 +251,12 @@ class EMAWeightAveraging(Callback):
         checkpoint: CheckpointDict
     ) -> None:
         del trainer, module
-        if self._original_state is None:
+        live_training_state: _AveragedState | None = (
+            self._original_state
+            if self._original_state is not None
+            else self._finalized_training_state
+        )
+        if live_training_state is None:
             return
         checkpoint_state_value: CheckpointValue | None = checkpoint.get("state_dict")
         if not isinstance(checkpoint_state_value, dict):
@@ -256,7 +268,7 @@ class EMAWeightAveraging(Callback):
         live_state: dict[str, CheckpointValue] = dict(checkpoint_state)
         name: str
         tensor: torch.Tensor
-        for name, tensor in self._original_state.items():
+        for name, tensor in live_training_state.items():
             if name not in live_state:
                 raise RuntimeError(
                     f"EMA live state contains {name!r}, absent from checkpoint model state."
@@ -276,7 +288,9 @@ class EMAWeightAveraging(Callback):
             for name, current_tensor in current_state.items():
                 average_tensor: torch.Tensor = self._average_state[name]
                 if average_tensor.device != current_tensor.device:
-                    average_tensor = average_tensor.to(current_tensor.device)
+                    average_tensor: torch.Tensor = average_tensor.to(
+                        current_tensor.device
+                    )
                     self._average_state[name] = average_tensor
                 if self._num_averaged == 0:
                     average_tensor.copy_(current_tensor.detach())
@@ -365,8 +379,7 @@ class EMAWeightAveraging(Callback):
     def _clone_current_state(self, module: Module) -> _AveragedState:
         return self._clone_state(self._current_state(module))
 
-    @staticmethod
-    def _clone_state(state: _AveragedState) -> _AveragedState:
+    def _clone_state(self, state: _AveragedState) -> _AveragedState:
         return {
             name: tensor.detach().clone()
             for name, tensor in state.items()
