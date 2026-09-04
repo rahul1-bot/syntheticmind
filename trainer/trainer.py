@@ -517,8 +517,6 @@ class Trainer:
         self.optimizer: torch.optim.Optimizer | None = None
         self.scheduler: _SchedulerInstance | None = None
         self.scheduler_config: LRSchedulerConfig | None = None
-        self._dataloader_fetch_time_seconds: dict[RunningStage, float] = {}
-        self._dataloader_iterator_creation_time_seconds: dict[RunningStage, float] = {}
         self._active_exception: BaseException | None = None
         self._profiler_is_setup: bool = False
         self._layer_sync_model: Module | None = None
@@ -1319,9 +1317,6 @@ class Trainer:
         )
         self.val_check_batch: int | None = self._validation_schedule.batch_interval
 
-    def _record_dataloader_fetch_time(self, running_stage: RunningStage, duration_seconds: float) -> None:
-        self._dataloader_fetch_time_seconds[running_stage] = max(0.0, duration_seconds)
-
     def _reset_progress_bar_metrics(self, running_stage: RunningStage | None = None) -> None:
         self._logger_connector.reset(running_stage)
 
@@ -1348,17 +1343,6 @@ class Trainer:
 
     def _get_progress_bar_metrics(self, running_stage: RunningStage) -> dict[str, float]:
         return self._logger_connector.progress_bar_metrics(running_stage)
-
-    def _get_dataloader_fetch_time(self, running_stage: RunningStage) -> float | None:
-        return self._dataloader_fetch_time_seconds.get(running_stage)
-
-    def _record_dataloader_iterator_creation_time(
-        self, running_stage: RunningStage, duration_seconds: float
-    ) -> None:
-        self._dataloader_iterator_creation_time_seconds[running_stage] = max(0.0, duration_seconds)
-
-    def _consume_dataloader_iterator_creation_time(self, running_stage: RunningStage) -> float | None:
-        return self._dataloader_iterator_creation_time_seconds.pop(running_stage, None)
 
     def _connect_loops(self) -> None:
         self.fit_loop.trainer = self

@@ -89,15 +89,6 @@
     4. `on_gpu` now preserves the established CUDA-specific meaning; MPS and CPU placement correctly return false.
     5. Focused CPU, MPS, parameter-state, detached, attached, direct Gloo, subprocess, spawn, fork, compilation, signature, and diff verification passes without static-analysis tools.
 
-| Architecture Decision | Model-Parallel Baseline Recovery | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
-
-    1. Rahul explicitly resumed complete SyntheticMind hardening and established the current root workspace `code-guidelines.md` as the governing Python standard; the repository-local historical guideline copy is reference evidence only and has no current authority.
-    2. The interrupted model-parallel checkpoint functions were consolidated into one private persistence owner that controls full and sharded state extraction, metadata loading, restoration, path recognition, and removal without adding a public API or Protocol.
-    3. Distributed module materialization now belongs to the existing module-initialization capability, while parallel-size validation remains a private operation of `ModelParallelStrategy`; the one-function materialization module was removed.
-    4. The default `Module.predict_step` now invokes the inherited PyTorch module call path, preserving registered forward hooks and compiled-call machinery instead of calling `forward` directly.
-    5. Executable evidence covers two-rank CPU tensor-parallel training and resume for both sharded and full checkpoints, rejection of optimizer-incomplete resumable state before model mutation, meta-parameter materialization, ordinary checkpoint loading, callback composition, DDP multiple-loader execution, distributed logging, and local or MPS gathering.
-    6. Sharded checkpoint replacement still removes the prior directory before the next distributed generation commits and therefore remains outside the accepted durability contract; atomic generation publication is the next bounded checkpoint task.
-
 | Architecture Decision | Atomic Sharded Checkpoint Generations | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
 
     1. Sharded checkpoints now store immutable distributed generations beneath one checkpoint directory and publish visibility through a strict versioned `active_generation` record rather than deleting the readable checkpoint before writing its replacement.
@@ -298,3 +289,12 @@
     4. Example-input forwarding transactionally restores every nested module mode plus Python, NumPy, torch CPU, CUDA, or MPS random state after success or failure.
     5. The former public utility functions, duplicate report name, generic annotations, module constants, local imports, and utility import paths were removed. The final tracked utility files and generated cache were deleted, leaving no `utilities/` package.
     6. Plain and Rich rendering, lazy parameters, hook cleanup, failure rollback, MPS transfer and random state, default Trainer integration, callback configuration, metric regression, and exactly-once spawned rank-zero presentation pass.
+
+| Architecture Decision | Callback Baggage Removal | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
+
+    1. `DataLeakageGuard` was deleted because its sample-identifier batch schema is project-specific, its evidence disappears on resume, and it cannot establish general dataset split integrity from a Trainer callback.
+    2. `WatchdogCallback` was deleted because it could observe a long gap only after execution resumed and therefore did not detect, interrupt, or recover a live stall despite its name.
+    3. The callback `RuntimeProfiler` and its accumulator were deleted because the canonical profiler subsystem already measures dataloader and step actions, while the callback duplicated logger emission, artifact persistence, device telemetry, and timing state through private Trainer coupling.
+    4. The RuntimeProfiler-only dataloader timing dictionaries, accessors, and loop measurements were removed. Existing profiler action contexts remain the single timing authority.
+    5. Callback package width fell from fourteen to eleven direct modules, below the hard topology limit. No additional folder was created because the remaining direct modules are independently selectable training concepts rather than fragments of one capability.
+    6. SimpleProfiler action evidence, local stage execution, spawned DDP metrics and progress, and sharded model parallelism pass after deletion.

@@ -287,3 +287,11 @@
     3. Parameter storage size should derive from realized parameter `numel()` and `element_size()` rather than a precision-name table because mixed precision and custom dtypes decouple execution policy from stored parameter dtype.
     4. Example-input inspection is an observational transaction and must restore model modes and every random generator it may consume even when transfer, forward, hook, or FLOP measurement fails.
     5. Optional rendering dependencies belong in their adapter module and must not become mandatory imports for the base callback or Trainer construction.
+
+| Memory | Callback Admission Requires Executable Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
+
+    1. A callback name is not evidence of capability: a watchdog that reports only after recovery does not watch a live stall, and a split guard driven by one optional batch key does not validate dataset integrity.
+    2. Profiling has one execution owner. A callback that duplicates action timing, device telemetry, logger emission, and durable artifacts creates a second observability stack and forces unrelated loop state to exist solely for that duplicate.
+    3. Removing a callback requires tracing every Trainer field and loop measurement that only it consumes; leaving dead instrumentation behind preserves coupling without capability.
+    4. A flat callback directory is acceptable below its hard width when each module is an independently selectable training concept. Subpackages are reserved for real multi-module families such as model summary, not cosmetic balancing.
+    5. Canonical profiler action contexts retain dataloader and hook timing without the deleted runtime callback's private Trainer accessors.

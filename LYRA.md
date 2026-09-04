@@ -155,3 +155,10 @@
     2. Inspection measures actual parameter storage and executes example-input forwarding as a reversible observation transaction across model modes, hooks, and random generators.
     3. The generic utility package has been eliminated completely; every surviving behavior now belongs to an ML lifecycle, execution policy, core contract, callback, or infrastructure boundary.
     4. Callback topology is the next audit because its remaining flat package width crosses the generic review boundary and must be judged by selectable training concepts rather than file count alone.
+
+| Strategic Note | Callback Capability Subtraction | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
+
+    1. Three callback surfaces were removed because their names overstated their executable semantics or duplicated the canonical profiler subsystem.
+    2. Deleting the runtime callback also removed its private timing state from Trainer and loops, leaving profiler action contexts as the sole timing authority.
+    3. The remaining eleven direct callback modules are independently selectable training concepts and do not require cosmetic subpackages merely to reduce visual width.
+    4. Callback work now shifts from topology to correctness, with weight averaging, learning-rate monitoring, numerical checks, and persistence lifecycle defects taking priority.

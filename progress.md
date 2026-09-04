@@ -228,9 +228,15 @@
     5. ✅ Default Trainer execution, callback configuration, metric views, MPS transfer, and spawned DDP exactly-once rank-zero presentation pass.
     6. ✅ The final utility source, package initializer, README, and generated cache were removed; no `utilities/` path remains in production or verification imports.
 
-| Progress Active | Callback Capability Topology | Date: 04 September 2026 | Time: 12:23 PM | Name: Ghost |
+| Progress Complete | Callback Capability Topology | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. The callback package still exceeds the generic direct-module width limit and mixes persistence, optimization policy, monitoring, guarding, terminal presentation, and failure supervision as flat siblings.
-    2. The next bounded phase must census each callback against recognized training concepts, preserve selectable callback identities, and group only stable capability families whose members share lifecycle, dependencies, and reason to change.
-    3. The audit must also remove stale names, broad annotations, free behavior, duplicated rank or metric logic, and invalid state boundaries without copying Lightning's historical callback inventory.
-    4. Verification must cover callback ordering, duplicate state keys, checkpoint restoration, monitoring, progress, failure guards, spawned launchers, and interaction with model-provided callbacks.
+    1. ✅ DataLeakageGuard, WatchdogCallback, and callback-based RuntimeProfiler were deleted after their runtime semantics failed the general training-capability admission test.
+    2. ✅ RuntimeProfiler-only Trainer timing state and loop measurements were removed, while canonical profiler action contexts remain intact.
+    3. ✅ Callback package width fell to eleven direct modules; the existing model-summary package remains the only multi-module callback family because its lifecycle, report, and optional renderer are independently meaningful.
+    4. ✅ SimpleProfiler still records dataloader and training-step actions, and local execution, spawned DDP metric views, progress rendering, and sharded model parallelism pass.
+
+| Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
+
+    1. EarlyStopping, exponential moving average, learning-rate monitoring, throughput monitoring, device statistics, numerical checks, Timer, and ModelCheckpoint remain the accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
+    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, beginning with callbacks whose current behavior can corrupt training state or advertise ignored configuration.
+    3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, evaluation swapping, failure restoration, and launcher transfer.

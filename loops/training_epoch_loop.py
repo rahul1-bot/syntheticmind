@@ -1,5 +1,4 @@
 
-import time
 import warnings
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
@@ -164,7 +163,6 @@ class TrainingEpochLoop(Loop):
             self._completed_loader_states: list[DataLoaderState] = (
                 combined_loader._state_dicts()
             )
-        dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_train_dataloader"):
             data_fetcher: _DataFetcher[tuple[Batch, int, int]] = _DataFetcher(
                 combined_loader,
@@ -179,10 +177,6 @@ class TrainingEpochLoop(Loop):
             train_iterator: Iterator[tuple[Batch, int, int]] = iter(data_fetcher)
         if data_fetcher.done:
             epoch_completed: bool = True
-        trainer._record_dataloader_iterator_creation_time(
-            "training",
-            time.perf_counter() - dataloader_iterator_start_time
-        )
         batch_idx: int = resume_batch_offset - 1
         while not data_fetcher.done:
             trainer._raise_if_sigterm()
@@ -190,7 +184,6 @@ class TrainingEpochLoop(Loop):
                 break
             if trainer.should_stop and trainer.fit_loop._can_stop_early(state):
                 break
-            dataloader_fetch_start_time: float = time.perf_counter()
             try:
                 with trainer.profiler.profile(
                     f"[{type(self).__name__}].train_dataloader_next"
@@ -200,10 +193,6 @@ class TrainingEpochLoop(Loop):
             except StopIteration:
                 epoch_completed: bool = True
                 break
-            trainer._record_dataloader_fetch_time(
-                "training",
-                time.perf_counter() - dataloader_fetch_start_time
-            )
             batch_idx: int = batch_idx + 1
             self.is_last_batch = data_fetcher.done
 

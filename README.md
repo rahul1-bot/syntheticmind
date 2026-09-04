@@ -10,7 +10,7 @@
 | `accelerators/` | The device abstraction covering CPU, CUDA, and Apple MPS. |
 | `strategies/` | The stateful execution-policy hierarchy for single-device, distributed data-parallel, tensor-parallel, and composable fully sharded execution. |
 | `plugins/` | Checkpoint I/O, cluster-environment, layer-synchronization, and numerical-precision extension families. |
-| `callbacks/` | The lifecycle callbacks: checkpointing, early stopping, exponential moving averages, model inspection, monitoring, guarding, and profiling. |
+| `callbacks/` | The lifecycle callbacks: checkpointing, early stopping, exponential moving averages, model inspection, monitoring, and numerical guards. |
 | `loggers/` | The metric-logger interface with CSV and TensorBoard implementations. |
 | `profilers/` | Runtime action measurement and trace export. |
 | `storage/` | Local and remote filesystem boundaries shared by checkpoints, loggers, profilers, and run artifacts. |

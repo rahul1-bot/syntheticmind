@@ -8,16 +8,13 @@
 | `model_checkpoint.py` | `ModelCheckpoint`, which writes durable checkpoints on a configured cadence with monitored-metric selection; this is the mechanism behind the study's registered checkpoint gate. |
 | `early_stopping.py` | `EarlyStopping`, which stops a run on a monitored metric with patience. |
 | `timer.py` | `TimerCallback`, which enforces wall-time budgets. |
-| `watchdog.py` | `WatchdogCallback`, which detects stalled runs; both timing callbacks serve unattended cloud execution. |
 | `nan_inf_guard.py` | `NanInfGuard`, which halts on non-finite losses or gradients instead of training through numerical corruption. |
-| `data_leakage_guard.py` | `DataLeakageGuard`, which verifies split integrity between stages. |
 | `ema.py` | `EMACallback`, which maintains an exponential moving average of model weights. |
 | `lr_monitor.py` | `LearningRateMonitor`, which records per-group learning rates. |
 | `progress_bar.py` | `ProgressBarCallback`, which reports stage progress. |
 | `model_summary/` | The `ModelSummary` callback, layer and model inspection report, and optional Rich renderer. |
 | `throughput_monitor.py` | `ThroughputMonitor`, which records samples-per-second telemetry. |
 | `device_stats_monitor.py` | `DeviceStatsMonitor`, which records device utilization. |
-| `runtime_profiler.py` | `RuntimeProfiler` with `RuntimeMetricAccumulator`, which produces runtime profiling artifacts for post-run inspection. |
 
 ## Related Components
 

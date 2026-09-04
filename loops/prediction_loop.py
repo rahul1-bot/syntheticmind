@@ -20,7 +20,6 @@
 # Author: Rahul Sawhney
 
 import inspect
-import time
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, cast
 
@@ -128,7 +127,6 @@ class PredictionLoop(Loop):
             [] for _ in range(num_dataloaders)
         ]
 
-        dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile("setup_predict_dataloader"):
             data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
                 combined_loader,
@@ -136,13 +134,8 @@ class PredictionLoop(Loop):
                 sized=combined_loader._has_sized_iterables()
             )
             dataloader_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
-        trainer._record_dataloader_iterator_creation_time(
-            "predicting",
-            time.perf_counter() - dataloader_iterator_start_time
-        )
         while not data_fetcher.done:
             trainer._raise_if_sigterm(synchronize=False)
-            dataloader_fetch_start_time: float = time.perf_counter()
             try:
                 with trainer.profiler.profile(
                     f"[{type(self).__name__}].predict_next"
@@ -151,10 +144,6 @@ class PredictionLoop(Loop):
                     fetched_batch, batch_idx, dataloader_idx = next(dataloader_iterator)
             except StopIteration:
                 break
-            trainer._record_dataloader_fetch_time(
-                "predicting",
-                time.perf_counter() - dataloader_fetch_start_time
-            )
             batch: Batch = cast(Batch, fetched_batch)
             batch: Batch = trainer.precision_plugin.convert_input(batch)
             dm: DataModule | None = trainer.datamodule

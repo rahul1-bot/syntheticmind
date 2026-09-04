@@ -31,7 +31,6 @@
 # Author: Rahul Sawhney
 
 import inspect
-import time
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Literal, cast
@@ -221,7 +220,6 @@ class EvaluationLoop(Loop):
             {} for _ in range(result_count)
         ]
 
-        dataloader_iterator_start_time: float = time.perf_counter()
         with trainer.profiler.profile(f"setup_{self.stage}_dataloader"):
             data_fetcher: _DataFetcher[tuple[object, int, int]] = _DataFetcher(
                 combined_loader,
@@ -229,13 +227,8 @@ class EvaluationLoop(Loop):
                 sized=combined_loader._has_sized_iterables()
             )
             dataloader_iterator: Iterator[tuple[object, int, int]] = iter(data_fetcher)
-        trainer._record_dataloader_iterator_creation_time(
-            running_stage,
-            time.perf_counter() - dataloader_iterator_start_time
-        )
         while not data_fetcher.done:
             trainer._raise_if_sigterm()
-            dataloader_fetch_start_time: float = time.perf_counter()
             try:
                 dataloader_prefix: str = "val" if self.stage == "validate" else "test"
                 with trainer.profiler.profile(
@@ -245,10 +238,6 @@ class EvaluationLoop(Loop):
                     fetched_batch, batch_idx, dataloader_idx = next(dataloader_iterator)
             except StopIteration:
                 break
-            trainer._record_dataloader_fetch_time(
-                running_stage,
-                time.perf_counter() - dataloader_fetch_start_time
-            )
             batch: Batch = cast(Batch, fetched_batch)
             module._current_dataloader_idx = (
                 dataloader_idx if include_dataloader_idx else None
