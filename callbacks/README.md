@@ -9,7 +9,7 @@
 | `early_stopping.py` | `EarlyStopping`, which stops a run on a monitored metric with patience. |
 | `timer.py` | `TimerCallback`, which enforces wall-time budgets. |
 | `nan_inf_guard.py` | `NanInfGuard`, which halts on non-finite losses or gradients instead of training through numerical corruption. |
-| `ema.py` | `EMACallback`, which maintains an exponential moving average of model weights. |
+| `weight_averaging.py` | `EMAWeightAveraging`, which tracks resumable exponential moving averages and evaluates under averaged parameters. |
 | `lr_monitor.py` | `LearningRateMonitor`, which records per-group learning rates. |
 | `progress_bar.py` | `ProgressBarCallback`, which reports stage progress. |
 | `model_summary/` | The `ModelSummary` callback, layer and model inspection report, and optional Rich renderer. |

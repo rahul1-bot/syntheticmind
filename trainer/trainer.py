@@ -1898,8 +1898,7 @@ class Trainer:
         )
         if not weights_only:
             self.precision_plugin.on_save_checkpoint(checkpoint)
-        if not weights_only:
-            self._call_callback_hooks(module, "on_save_checkpoint", checkpoint)
+        self._call_callback_hooks(module, "on_save_checkpoint", checkpoint)
         self._call_module_hook(
             module,
             "on_save_checkpoint",

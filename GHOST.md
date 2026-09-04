@@ -43,32 +43,14 @@
     4. CPU, MPS, distributed, subprocess, spawn, fork, notebook, persistence, and optional-dependency paths are exercised in proportion to the capability's real execution surface.
     5. Historical references to static-analysis evidence describe work performed before the prohibition and do not authorize any future invocation.
 
-| Architecture State | Hardened Trainer Runtime Foundation | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
+| Architecture State | Verified Framework Runtime Baseline | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 
-    1. ✅ Standard fit, validation, test, and prediction lifecycles preserve hook order, nested execution context, model modes, stage state, failure causality, and transactional teardown.
-    2. ✅ Epoch, optimizer-step, validation-cadence, batch-limit, sanity, wall-clock, fast-development, overfit, stop, reload, and unsized-loader controls use established public meanings.
-    3. ✅ CPU, CUDA, MPS, device parsing, node topology, distributed sampler ownership, subprocess, spawn, fork, notebook-fork, signal coordination, and parent-state reconciliation form one execution layer.
-    4. ✅ Precision, inference mode, gradient enablement, deterministic execution, anomaly detection, clipping, accumulation, automatic optimization, manual optimization, scheduler cadence, and optimizer-state placement are executable.
-    5. ✅ Logger orchestration, checkpoint callbacks and paths, profiling, model summaries, barebones mode, plugin composition, artifact roots, remote filesystems, and asynchronous checkpoint I/O retain independent ownership.
-    6. ✅ The terminal renderer uses minimal rank-zero output, honest stage timing, one active status line, bounded selected metrics, stable redirected text, and no dense telemetry dump.
-
-| Architecture State | Hardened Data, Metrics, and Continuation | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
-
-    1. ✅ Model-owned, datamodule-owned, and direct Trainer dataloaders share explicit ownership without fabricated adapters or identity loss.
-    2. ✅ Multiple and nested loaders use standard combination modes, loader indices, metric suffixes, batch limits, prediction ordering, transfer hooks, and distributed sharding.
-    3. ✅ Stateful and stateless loader continuation preserves logical progress, cursor ownership, random streams, unsized prefetch boundaries, subclass reconstruction, and distributed parent reconciliation.
-    4. ✅ `Module.log` and `log_dict` preserve standard parameter vocabulary, scalar validation, step and epoch routing, weighted reductions, distributed process groups, TorchMetrics ownership, and multiple-dataloader identity.
-    5. ✅ Callback, logged, progress, logger, evaluation-result, scheduler, early-stopping, and checkpoint-monitor metric consumers retain distinct routing and tensor-versus-scalar boundaries.
-    6. ✅ Tensor metric state preserves dtype, device, detachment, explicit graph propagation, safe persistence, and safe multiprocessing transfer.
-
-| Architecture State | Hardened Model Extension Surface | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
-
-    1. ✅ `ModelHooks`, `DataHooks`, `CheckpointHooks`, and Callback method families preserve the pinned extension names, positional shapes, defaults, and dispatch points under SyntheticMind ownership.
-    2. ✅ `configure_callbacks` composes model callbacks transactionally before setup and checkpoint restoration with inheritance-based replacement, stable ordering, and launcher-safe invocation.
-    3. ✅ `Module.loggers` exposes ordered logger ownership, and `Module.print` retains Python print semantics with globally rank-safe, progress-compatible output.
-    4. ✅ `Module.all_gather(data, group=None, sync_grads=False)` preserves nested structures, device conversion, world-size-one identity, subgroup rank order, and optional differentiable gathering.
-    5. ✅ `Module.load_from_checkpoint` reconstructs subclasses from saved or external hyperparameters, applies explicit overrides, honors map location and strictness, runs configuration and load hooks before state application, and restores the mapped device.
-    6. ✅ Live Trainer checkpoint restoration shares the model classmethod's hook order and strictness meanings while retaining complete optimizer, scheduler, callback, datamodule, precision, loop, loader, and random state.
+    1. ✅ Fit, validation, test, prediction, sanity, failure, and teardown lifecycles preserve standard hook order, module modes, stage state, causal exceptions, and run controls.
+    2. ✅ CPU, CUDA, MPS, precision, automatic and manual optimization, scheduler cadence, distributed launchers, samplers, signals, and parent-state reconciliation form an executable training runtime.
+    3. ✅ Model, DataModule, direct, multiple, nested, sized, unsized, stateful, and distributed data paths preserve ownership, identity, limits, ordering, and exact continuation.
+    4. ✅ Metric production, graph state, reduction, TorchMetrics, callback views, progress views, logger output, scheduler monitoring, early stopping, and checkpoint ranking remain distinct and coherent.
+    5. ✅ Model, data, checkpoint, and callback hooks; model-provided callbacks; logger access; rank-safe printing; nested gathering; and model checkpoint reconstruction preserve established extension semantics.
+    6. ✅ Checkpoints, profiler actions, model summaries, storage, asynchronous I/O, barebones execution, and terminal presentation retain explicit owners and verified local or distributed paths.
 
 | Architecture Decision | Checkpoint Construction Security and Compatibility | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 
@@ -298,3 +280,13 @@
     4. The RuntimeProfiler-only dataloader timing dictionaries, accessors, and loop measurements were removed. Existing profiler action contexts remain the single timing authority.
     5. Callback package width fell from fourteen to eleven direct modules, below the hard topology limit. No additional folder was created because the remaining direct modules are independently selectable training concepts rather than fragments of one capability.
     6. SimpleProfiler action evidence, local stage execution, spawned DDP metrics and progress, and sharded model parallelism pass after deletion.
+
+| Architecture Decision | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+
+    1. The unvalidated `EMACallback` shadow-model copy was replaced by the standard `EMAWeightAveraging` concept with strict decay, update cadence, starting step, and buffer configuration.
+    2. Averaging initializes after model configuration, placement, and checkpoint restoration, advances only when global optimizer-step progress changes, copies the first eligible state exactly, averages floating tensors, and copies non-floating buffers.
+    3. Average tensors, processed step, and update count persist through the canonical callback state channel. Checkpoints created while average weights are active restore the live training tensors under the sole canonical `state_dict` key, including weights-only saves.
+    4. Validation, test, and prediction swap average weights transactionally; exception and teardown paths restore live tensors, while successful training ends with the average state only after at least one real update.
+    5. DTensor and sharded model state are rejected explicitly because correct distributed average persistence is not implemented; DDP and MPS are supported and verified.
+    6. The cohesive 402-line module and 376-line callback exceed the generic class threshold under the concept-integrity authority; splitting one averaging algorithm into a one-consumer manager or store is rejected.
+    7. CPU parameter and buffer behavior, accumulation cadence, invalid configuration, failure rollback, full and weights-only mid-swap checkpoints, exact interrupted resume, MPS placement, spawned DDP transfer, and model-parallel rejection pass.

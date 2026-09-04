@@ -162,3 +162,10 @@
     2. Deleting the runtime callback also removed its private timing state from Trainer and loops, leaving profiler action contexts as the sole timing authority.
     3. The remaining eleven direct callback modules are independently selectable training concepts and do not require cosmetic subpackages merely to reduce visual width.
     4. Callback work now shifts from topology to correctness, with weight averaging, learning-rate monitoring, numerical checks, and persistence lifecycle defects taking priority.
+
+| Strategic Note | EMA Weight Averaging Contract | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+
+    1. EMA now follows optimizer-step progress, supports accumulation, validates its configuration and tensor topology, and persists through the standard callback state channel.
+    2. Evaluation uses reversible average-weight swaps, failures restore live tensors, and final training state becomes averaged only after a real update.
+    3. Checkpoints created during an average swap preserve live training state under the canonical schema for both full and weights-only artifacts.
+    4. DDP and MPS paths are verified; sharded and DTensor paths are rejected until their average-state persistence can be represented correctly.

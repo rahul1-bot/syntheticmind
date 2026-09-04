@@ -117,14 +117,6 @@
     4. Ignored verification programs under `external/` are disposable evidence and never enter the tracked project history.
     5. A completed phase is not synchronized until the accepted commit exists on both local `dev` and `origin/dev` at the same revision.
 
-| Memory | Model Runtime State Authority | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
-
-    1. Epoch, optimizer-step, and rank properties are Trainer state while attached and neutral zero values while detached; cached mirrors are transport details rather than public authorities.
-    2. Reading `torch.distributed` directly from a detached model leaks ambient process state into an object that has no Strategy or Trainer ownership.
-    3. Fluent `freeze` and `unfreeze` returns matter because inherited user code may chain evaluation, placement, or export operations after changing parameter state.
-    4. `on_gpu` is a historical CUDA-specific convenience and intentionally remains false for MPS despite both being accelerators.
-    5. Direct process-group and every Trainer launcher path are required to distinguish detached neutrality from attached rank truth.
-
 | Memory | Model-Parallel Evidence and Persistence Ownership | Date: 04 September 2026 | Time: 05:26 AM | Name: Ghost |
 
     1. A standalone DTensor and distributed-checkpoint probe establishes only PyTorch runtime availability; it does not establish SyntheticMind Trainer wiring, hook order, optimizer restoration, callback participation, progress continuation, or failure cleanup.
@@ -295,3 +287,12 @@
     3. Removing a callback requires tracing every Trainer field and loop measurement that only it consumes; leaving dead instrumentation behind preserves coupling without capability.
     4. A flat callback directory is acceptable below its hard width when each module is an independently selectable training concept. Subpackages are reserved for real multi-module families such as model summary, not cosmetic balancing.
     5. Canonical profiler action contexts retain dataloader and hook timing without the deleted runtime callback's private Trainer accessors.
+
+| Memory | Weight Averaging Is Optimizer-Progress State | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+
+    1. EMA updates must follow actual optimizer-step progress rather than batch count because gradient accumulation and manual optimization decouple batches from parameter changes.
+    2. Averaging a deep-copied model before `configure_model`, device placement, or sharding creates stale structure and cross-device operations; named live tensors must be captured only after the real model exists.
+    3. Callback state belongs in the callback-state checkpoint channel. A temporary evaluation swap may rewrite only the canonical model `state_dict` back to live training tensors and must never add a duplicate model-state key.
+    4. Floating and complex tensors admit exponential averaging, while integer and boolean buffers must copy the latest value. Shape and key drift are hard failures rather than silent zip truncation.
+    5. Evaluation swaps require exception and teardown rollback, and weights-only checkpoint hooks must still execute because suppressing callback state does not suppress checkpoint-consistency behavior.
+    6. Unsupported sharded or DTensor averaging must fail explicitly until average-state representation and distributed checkpoint restoration have executable semantics.

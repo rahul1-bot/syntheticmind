@@ -237,6 +237,14 @@
 
 | Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. EarlyStopping, exponential moving average, learning-rate monitoring, throughput monitoring, device statistics, numerical checks, Timer, and ModelCheckpoint remain the accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
-    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, beginning with callbacks whose current behavior can corrupt training state or advertise ignored configuration.
-    3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, evaluation swapping, failure restoration, and launcher transfer.
+    1. EarlyStopping, learning-rate monitoring, throughput monitoring, device statistics, numerical checks, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
+    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose current parameters are ignored or whose hook timing permits corrupted optimizer state.
+    3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
+
+| Progress Complete | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
+
+    1. ✅ `EMACallback` and its pre-placement shadow-model copy were replaced by `EMAWeightAveraging` with strict configuration and optimizer-step-aware update cadence.
+    2. ✅ Named parameter and optional buffer state validates exact keys and shapes, averages floating tensors, copies non-floating buffers, and restores live weights after evaluation failure or teardown.
+    3. ✅ Average state uses canonical callback persistence, checkpoints built during a swap preserve live model tensors under the sole `state_dict` key, and callback hooks now run for weights-only checkpoint consistency.
+    4. ✅ CPU, MPS, accumulated optimization, evaluation, failure, full checkpoint, weights-only checkpoint, exact resume, and spawned DDP paths pass.
+    5. ✅ DTensor and sharded models fail with an explicit unsupported-capability error instead of running an unverified average-state path.
