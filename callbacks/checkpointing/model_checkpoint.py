@@ -337,14 +337,6 @@ class ModelCheckpoint(Checkpoint):
         path_exists: bool = exists(filepath) if trainer.is_global_zero else False
         return trainer.strategy.broadcast(path_exists)
 
-    @staticmethod
-    def _link_checkpoint(
-        trainer: syntheticmind.Trainer,
-        filepath: str | Path,
-        linkpath: str | Path
-    ) -> None:
-        _CheckpointPaths.link_checkpoint(trainer, filepath, linkpath)
-
     def to_yaml(self, filepath: str | Path | None = None) -> None:
         destination: str | Path
         if filepath is None:

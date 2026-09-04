@@ -235,13 +235,13 @@
     6. ✅ Invalid configuration, invalid schedule output, operation failure, hook cleanup, custom trace handling, remote persistence, and absent stack capture fail or recover at the correct boundary.
     7. ✅ CPU, local multi-stage, external two-rank DDP, internal DDP spawn, per-rank report, per-rank trace, and profiler serialization paths pass without static-analysis tools.
 
-| Progress Complete | Transactional Model Checkpoint Policy | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
+| Progress Complete | Transactional Model Checkpoint Policy | Date: 04 September 2026 | Time: 05:01 PM | Name: Ghost |
 
     1. ✅ Model checkpoint lifecycle, strict configuration, trigger scheduling, scalar ranking, path policy, and atomic save-state transition now form one semantic callback capability package.
     2. ✅ Invalid trigger combinations, invalid ranking, non-scalar monitors, path traversal, remote link mode, and unsupported collective exception saves fail explicitly at their owning boundaries.
     3. ✅ Top-k and last state serialize before persistence, transport failures restore callback state, deferred-validation triggers serialize as consumed, and train-end logic refreshes stale final-step artifacts.
-    4. ✅ Local link mode never points a current last path at a rejected candidate's older best artifact; remote fsspec paths persist regular checkpoint and ranking artifacts without pretending to support symbolic links.
-    5. ✅ The checkpoint responsibility census rejects arbitrary line-count splitting while retaining distinct schedule, ranking, path, and transaction concepts with one public ModelCheckpoint entrypoint.
+    4. ✅ Local link mode executes directly through CheckpointPaths, never points current last at a rejected candidate's older best artifact, and remote fsspec paths reject unsupported symbolic-link semantics.
+    5. ✅ The unused ModelCheckpoint link wrapper and final callback initializer prose were deleted; the complete callback tree now contains no future import, conditional type import, broad annotation, source comment, static pseudo-utility, lambda, or module function.
     6. ✅ CPU configuration, ranking, retention, final-step, failure, and resume probes plus remote persistence and asynchronous snapshot isolation pass.
     7. ✅ Callback composition, tensor metric state, two-rank DDP checkpoint selection, and two-rank sharded model-parallel uninterrupted-versus-resumed trajectories pass.
 

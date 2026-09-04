@@ -72,7 +72,7 @@ class _CheckpointTransaction:
             raise
         if self._save_last == "link" and saved_top_k_path is not None:
             assert planned_link_path is not None
-            _CheckpointPaths.link_checkpoint(
+            self._paths.link_checkpoint(
                 trainer,
                 saved_top_k_path,
                 planned_link_path,
@@ -318,7 +318,7 @@ class _CheckpointTransaction:
         try:
             if self._save_last == "link" and source_filepath is not None:
                 self.last_checkpoint_saved: str = source_filepath
-                _CheckpointPaths.link_checkpoint(
+                self._paths.link_checkpoint(
                     trainer,
                     source_filepath,
                     filepath,

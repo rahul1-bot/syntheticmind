@@ -206,9 +206,9 @@
     2. Rank-zero broadcast controls distributed stopping, depleted restored state stops before new optimizer work, and changed duration or interval policy fails checkpoint restoration.
     3. Validation pauses progress timing without hiding its wall-clock cost from the run budget; parsing and clock-map construction remain owner-bound Timer operations.
 
-| Strategic Note | Model Checkpoint Policy Boundary | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
+| Strategic Note | Model Checkpoint Policy Boundary | Date: 04 September 2026 | Time: 05:01 PM | Name: Ghost |
 
-    1. ModelCheckpoint translates lifecycle events into schedule, ranking, retention, and last-artifact decisions without duplicating Trainer checkpoint assembly or storage transport.
+    1. ModelCheckpoint translates lifecycle events into schedule, ranking, retention, and last-artifact decisions, while CheckpointPaths owns link publication directly without a forwarding duplicate on the callback.
     2. Persisted callback state now describes the save being written rather than the preceding save, restores after transport failure, and records consumed deferred-validation triggers correctly.
     3. Final training state refreshes a stale last artifact even when the configured cadence last fired at an earlier optimizer step.
     4. Local, remote, asynchronous, DDP, and sharded model-parallel execution establish the reconstructed boundary across every supported persistence topology.

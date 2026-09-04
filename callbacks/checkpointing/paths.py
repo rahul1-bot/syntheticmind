@@ -137,8 +137,8 @@ class _CheckpointPaths:
             return False
         return self.dirpath is not None and is_path_within(previous, self.dirpath)
 
-    @staticmethod
     def link_checkpoint(
+        self,
         trainer: syntheticmind.Trainer,
         filepath: str | Path,
         linkpath: str | Path,

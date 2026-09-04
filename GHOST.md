@@ -288,11 +288,11 @@
     6. Stage-clock isolation, validation pause, step stopping, compatible and incompatible restore, invalid duration and state, progress rendering, and spawned two-rank consensus pass without future annotations or static utilities.
     7. The cohesive 489-line module and 470-line class exceed generic structural limits under the concept-first authority; fake clock-store, duration-factory, or stop-manager classes are rejected.
 
-| Architecture Decision | Transactional Model Checkpoint Policy | Date: 04 September 2026 | Time: 01:45 PM | Name: Ghost |
+| Architecture Decision | Transactional Model Checkpoint Policy | Date: 04 September 2026 | Time: 05:01 PM | Name: Ghost |
 
     1. Model checkpoint lifecycle, immutable configuration, trigger schedule, scalar ranking, artifact paths, and save transaction now occupy one semantic callback capability package while Trainer retains trajectory assembly, Strategy retains distributed representation, and checkpoint I/O retains transport.
     2. The local responsibility census accepts each private collaborator because schedule resume, ranking state, path containment, and multi-artifact rollback are distinct state or failure boundaries; line pressure did not create forwarding wrappers, generic helpers, or additional public entrypoints.
     3. Configuration rejects invalid ranking and competing trigger modes before setup, monitored values must be scalar, generated paths cannot escape their checkpoint root, and remote storage rejects local-link semantics explicitly.
     4. Ranking, schedule, last-path, and last-artifact state mutate before serialization and roll back on failed persistence; consumed deferred-validation triggers remain consumed in the saved state, and train-end persistence advances a stale last artifact to the final global step.
-    5. Rejected top-k candidates still produce a fresh standalone last artifact instead of linking to an older best checkpoint, while successful local link mode retains synchronized rank ownership and safe copy fallback.
+    5. Rejected top-k candidates still produce a fresh standalone last artifact instead of linking to an older best checkpoint; the stateful CheckpointPaths owner now performs link publication directly, and the unused ModelCheckpoint forwarding alias was deleted.
     6. CPU ranking and failure probes, remote fsspec persistence, asynchronous snapshot isolation, callback composition, tensor metric state, DDP selection, and two-rank sharded model-parallel exact resume pass after reconstruction.

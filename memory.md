@@ -165,7 +165,7 @@
 
     1. A resumable checkpoint is a trajectory aggregate, not a model-weight file: optimizer, scheduler, callbacks, DataModule, precision, resolved configuration, loop progress, loader cursor, random streams, epoch, and global step must share one coordinator.
     2. Strategy owns the representation of model and optimizer state because sharding depends on execution topology; the Trainer connector owns when that representation joins the remaining trajectory and in which order it restores.
-    3. `CheckpointIO` owns transport and atomic persistence but must not interpret training lifecycle state. `ModelCheckpoint` owns cadence and retention but must not construct a competing payload.
+    3. `CheckpointIO` owns transport, ModelCheckpoint owns cadence and retention, and CheckpointPaths owns formatting, containment, versions, removal safety, and link publication directly; forwarding aliases create duplicate checkpoint verbs without a boundary.
     4. Loader state and training progress are independent: an ordinary stateless loader still requires completed-batch coordinates, epoch-start randomness for deterministic replay, and checkpoint-time randomness before the next model step.
     5. Random state must use one immutable validated schema across checkpoint and process boundaries and capture only active accelerators; probing MPS during a CPU fork can initialize unsafe native runtime state.
     6. Resolved run configuration is provenance and a compatibility boundary; a higher step or epoch ceiling may continue the same run, while trajectory-defining accumulation, data, validation, precision, and synchronization settings must not drift silently.
