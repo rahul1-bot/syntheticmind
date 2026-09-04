@@ -63,14 +63,6 @@
     7. Three focused checkpoint services separate payload I/O, hyperparameter reconstruction, and model restoration without copied Lightning internals or new source comments.
     8. Manual, Trainer-produced, CPU, MPS, unavailable-device, subprocess, spawn, fork, stateful-continuation, and direct two-rank Gloo evidence establishes the current contract without static-analysis tools.
 
-| Architecture Decision | Standard Model Runtime State | Date: 19 August 2026 | Time: 11:37 PM | Name: Ghost |
-
-    1. `freeze()` and `unfreeze()` now return the same model instance after changing parameter gradient state and recursive module mode, preserving the standard fluent contract.
-    2. `current_epoch`, `global_step`, `global_rank`, and `local_rank` now read the attached Trainer as the runtime authority and return zero while detached.
-    3. Detached modules no longer inherit an unrelated externally initialized process group's ranks, while attached models continue to reflect the configured Strategy across every launcher.
-    4. `on_gpu` now preserves the established CUDA-specific meaning; MPS and CPU placement correctly return false.
-    5. Focused CPU, MPS, parameter-state, detached, attached, direct Gloo, subprocess, spawn, fork, compilation, signature, and diff verification passes without static-analysis tools.
-
 | Architecture Decision | Atomic Sharded Checkpoint Generations | Date: 04 September 2026 | Time: 05:44 AM | Name: Ghost |
 
     1. Sharded checkpoints now store immutable distributed generations beneath one checkpoint directory and publish visibility through a strict versioned `active_generation` record rather than deleting the readable checkpoint before writing its replacement.
@@ -298,3 +290,11 @@
     3. Automatic, manual, accumulated, and distributed optimization therefore share one preventive boundary rather than inspecting detached step output after the optimizer has already run.
     4. Configuration rejects non-boolean gradient checks, and failures report epoch, global step, and the offending parameter without introducing state or checkpoint surface.
     5. Automatic loss, automatic gradient, manual loss, parameter immutability, and spawned DDP failure-cleanup probes pass.
+
+| Architecture Decision | Learning Rate Monitoring Semantics | Date: 04 September 2026 | Time: 12:47 PM | Name: Ghost |
+
+    1. `LearningRateMonitor` now implements the standard forced step, forced epoch, and scheduler-controlled automatic cadence instead of storing and ignoring `logging_interval`.
+    2. Step observations execute at `on_before_optimizer_step`, so gradient accumulation, manual multiple optimizers, and repeated closure evaluation follow actual optimizer use rather than batch count. Epoch observations execute at epoch start after prior scheduler updates.
+    3. Every optimizer and parameter group receives a deterministic scheduler, optimizer-type, occurrence, or explicit group name; ambiguous scheduler and group names fail instead of overwriting metrics.
+    4. Optional momentum, weight decay, and key prefixes are scalar-validated, dynamic parameter-group growth preserves existing history, and callback metrics remain visible on every rank while durable logger emission remains rank-zero-owned.
+    5. Last step and epoch emission coordinates persist without serializing unbounded history; forced and automatic cadence, two manual optimizers, repeated types, named and dynamic groups, momentum, weight decay, invalid configuration, missing logger, exact resume, and spawned DDP persistence pass.

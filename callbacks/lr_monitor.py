@@ -1,63 +1,310 @@
-# This module:
-# 1. Records the optimizer's learning rates into the experiment logger at the
-#    end of every training epoch
-#
-# Design decisions:
-# - Rates are read directly from the optimizer's parameter groups, which is
-#   the authoritative value after any scheduler stepping, rather than from
-#   scheduler state
-# - A single parameter group logs under the plain lr key, while several groups
-#   log under indexed keys so per-group schedules remain distinguishable
-# - Emission is restricted to rank zero and degrades to a no-op without an
-#   optimizer or logger, so the callback is safe to include unconditionally
-#
-# Author: Rahul Sawhney
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, override
+from typing import Literal, cast, override
+
+import syntheticmind
+import torch
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-
-if TYPE_CHECKING:
-    from syntheticmind.trainer.trainer import Trainer
+from syntheticmind.core.optimizer import LRSchedulerConfig
+from syntheticmind.exceptions import MisconfigurationError
+from syntheticmind.types import (
+    OptimizerParameterGroup,
+    OptimizerStateValue,
+    SchedulerInterval,
+    StateDict,
+    StateValue
+)
 
 __all__: list[str] = ["LearningRateMonitor"]
 
 
 class LearningRateMonitor(Callback):
-    # Epoch-cadence learning-rate telemetry. At each training epoch end the
-    # current rate of every optimizer parameter group is emitted to the
-    # experiment logger against the global step.
-    def __init__(self, logging_interval: str = "epoch") -> None:
-        # Binds the logging interval label and clears the last-logged marker.
-        # Epoch-end emission is the implemented cadence.
+    def __init__(
+        self,
+        logging_interval: Literal["step", "epoch"] | None = None,
+        log_momentum: bool = False,
+        log_weight_decay: bool = False,
+        log_key_prefix: str | None = None
+    ) -> None:
         super().__init__()
-        self.logging_interval: str = logging_interval
+        if logging_interval not in (None, "step", "epoch"):
+            raise ValueError("`logging_interval` must be 'step', 'epoch', or None.")
+        if type(log_momentum) is not bool:
+            raise TypeError("`log_momentum` must be a bool.")
+        if type(log_weight_decay) is not bool:
+            raise TypeError("`log_weight_decay` must be a bool.")
+        if log_key_prefix is not None and not isinstance(log_key_prefix, str):
+            raise TypeError("`log_key_prefix` must be a string or None.")
+        self.logging_interval: Literal["step", "epoch"] | None = logging_interval
+        self.log_momentum: bool = log_momentum
+        self.log_weight_decay: bool = log_weight_decay
+        self.log_key_prefix: str = log_key_prefix or ""
+        self.lrs: dict[str, list[float]] = {}
+        self._optimizer_names: dict[int, str] = {}
+        self._optimizer_intervals: dict[int, set[SchedulerInterval]] = {}
         self._last_logged_step: int = -1
+        self._last_logged_epoch: int = -1
+        self._state_restored: bool = False
+
+    @property
+    @override
+    def state_key(self) -> str:
+        return self._generate_state_key(
+            logging_interval=self.logging_interval,
+            log_momentum=self.log_momentum,
+            log_weight_decay=self.log_weight_decay,
+            log_key_prefix=self.log_key_prefix
+        )
 
     @override
-    def on_train_epoch_end(
-        self, trainer: Trainer, module: Module
+    def on_train_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
     ) -> None:
-        # Reads the learning rate of every parameter group from the primary
-        # optimizer and emits the values from rank zero, using the plain lr
-        # key for a single group and indexed keys for several.
-        if not trainer.is_global_zero:
-            return
-        if trainer.optimizer is None or not trainer.loggers:
-            return
+        del module
+        if not trainer.loggers:
+            raise MisconfigurationError(
+                "LearningRateMonitor requires at least one configured logger."
+            )
+        self._configure_optimizers(
+            trainer.optimizers,
+            trainer.lr_scheduler_configs
+        )
+        if not self._state_restored:
+            self._last_logged_step: int = -1
+            self._last_logged_epoch: int = -1
+        self._state_restored: bool = False
 
-        current_step: int = module.global_step
-        lr_metrics: dict[str, float] = {}
-        for idx, group in enumerate(trainer.optimizer.param_groups):
-            lr: float = group.get("lr", 0.0)
-            if len(trainer.optimizer.param_groups) == 1:
-                lr_metrics["lr"] = lr
+    @override
+    def on_before_optimizer_step(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        optimizer: torch.optim.Optimizer
+    ) -> None:
+        del module
+        if not self._should_log(optimizer, "step"):
+            return
+        if self._last_logged_step == trainer.global_step:
+            return
+        self._emit(trainer, [optimizer], trainer.global_step)
+        self._last_logged_step: int = trainer.global_step
+
+    @override
+    def on_train_epoch_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        del module
+        if self._last_logged_epoch == trainer.current_epoch:
+            return
+        optimizers: list[torch.optim.Optimizer] = [
+            optimizer
+            for optimizer in trainer.optimizers
+            if self._should_log(optimizer, "epoch")
+        ]
+        if optimizers:
+            self._emit(trainer, optimizers, trainer.global_step)
+        self._last_logged_epoch: int = trainer.current_epoch
+
+    @override
+    def state_dict(self) -> StateDict:
+        return {
+            "last_logged_step": self._last_logged_step,
+            "last_logged_epoch": self._last_logged_epoch
+        }
+
+    @override
+    def load_state_dict(self, state_dict: StateDict) -> None:
+        step_value: StateValue | None = state_dict.get("last_logged_step")
+        epoch_value: StateValue | None = state_dict.get("last_logged_epoch")
+        if type(step_value) is not int or step_value < -1:
+            raise TypeError("Learning-rate monitor step state must be an integer >= -1.")
+        if type(epoch_value) is not int or epoch_value < -1:
+            raise TypeError("Learning-rate monitor epoch state must be an integer >= -1.")
+        self._last_logged_step: int = step_value
+        self._last_logged_epoch: int = epoch_value
+        self._state_restored: bool = True
+
+    def _configure_optimizers(
+        self,
+        optimizers: list[torch.optim.Optimizer],
+        scheduler_configs: list[LRSchedulerConfig]
+    ) -> None:
+        self._optimizer_names.clear()
+        self._optimizer_intervals.clear()
+        self.lrs.clear()
+        type_counts: dict[str, int] = {}
+        used_names: set[str] = set()
+        optimizer: torch.optim.Optimizer
+        for optimizer in optimizers:
+            matching_configs: list[LRSchedulerConfig] = [
+                configuration
+                for configuration in scheduler_configs
+                if configuration.scheduler.optimizer is optimizer
+            ]
+            configured_names: set[str] = {
+                configuration.name
+                for configuration in matching_configs
+                if configuration.name is not None
+            }
+            if len(configured_names) > 1:
+                raise MisconfigurationError(
+                    f"Optimizer {type(optimizer).__name__} has conflicting scheduler "
+                    f"logging names {sorted(configured_names)}."
+                )
+            optimizer_type: str = type(optimizer).__name__
+            type_index: int = type_counts.get(optimizer_type, 0)
+            type_counts[optimizer_type] = type_index + 1
+            configured_name: str | None = next(iter(configured_names), None)
+            base_name: str = configured_name or f"lr-{optimizer_type}"
+            if configured_name is None and type_index > 0:
+                base_name = f"{base_name}-{type_index}"
+            base_name = f"{self.log_key_prefix}{base_name}"
+            if base_name in used_names:
+                raise MisconfigurationError(
+                    f"Learning-rate logging name {base_name!r} is duplicated."
+                )
+            used_names.add(base_name)
+            optimizer_identity: int = id(optimizer)
+            self._optimizer_names[optimizer_identity] = base_name
+            self._optimizer_intervals[optimizer_identity] = {
+                configuration.interval
+                for configuration in matching_configs
+            }
+            for metric_name in self._group_names(optimizer, base_name):
+                if metric_name in self.lrs:
+                    raise MisconfigurationError(
+                        f"Learning-rate parameter-group name {metric_name!r} is duplicated."
+                    )
+                self.lrs[metric_name] = []
+
+    def _group_names(
+        self,
+        optimizer: torch.optim.Optimizer,
+        base_name: str
+    ) -> list[str]:
+        parameter_groups: list[OptimizerParameterGroup] = cast(
+            list[OptimizerParameterGroup],
+            optimizer.param_groups
+        )
+        names: list[str] = []
+        group_index: int
+        group: OptimizerParameterGroup
+        for group_index, group in enumerate(parameter_groups):
+            group_name_value: OptimizerStateValue | None = group.get("name")
+            if group_name_value is not None and not isinstance(group_name_value, str):
+                raise MisconfigurationError(
+                    "Optimizer parameter-group `name` must be a string when provided."
+                )
+            group_name: str | None = cast(str | None, group_name_value)
+            if len(parameter_groups) > 1:
+                suffix: str = group_name or f"pg{group_index + 1}"
+                names.append(f"{base_name}/{suffix}")
+            elif group_name is not None:
+                names.append(f"{base_name}/{group_name}")
             else:
-                lr_metrics[f"lr_group_{idx}"] = lr
+                names.append(base_name)
+        return names
 
-        if lr_metrics:
-            trainer._log_metrics(lr_metrics, step=current_step)
-            self._last_logged_step: int = current_step
+    def _should_log(
+        self,
+        optimizer: torch.optim.Optimizer,
+        interval: SchedulerInterval
+    ) -> bool:
+        if self.logging_interval is not None:
+            return self.logging_interval == interval
+        configured_intervals: set[SchedulerInterval] = self._optimizer_intervals[
+            id(optimizer)
+        ]
+        if not configured_intervals:
+            return interval == "step"
+        return interval in configured_intervals
+
+    def _emit(
+        self,
+        trainer: syntheticmind.Trainer,
+        optimizers: list[torch.optim.Optimizer],
+        step: int
+    ) -> None:
+        metrics: dict[str, float] = {}
+        optimizer: torch.optim.Optimizer
+        for optimizer in optimizers:
+            metrics.update(self._optimizer_metrics(optimizer))
+        if not metrics:
+            return
+        trainer._logger_connector.callback_metrics.update(
+            {
+                name: torch.tensor(value, device=trainer.strategy.root_device)
+                for name, value in metrics.items()
+            }
+        )
+        if trainer.is_global_zero:
+            trainer._log_metrics(metrics, step=step)
+
+    def _optimizer_metrics(
+        self,
+        optimizer: torch.optim.Optimizer
+    ) -> dict[str, float]:
+        base_name: str = self._optimizer_names[id(optimizer)]
+        group_names: list[str] = self._group_names(optimizer, base_name)
+        parameter_groups: list[OptimizerParameterGroup] = cast(
+            list[OptimizerParameterGroup],
+            optimizer.param_groups
+        )
+        metrics: dict[str, float] = {}
+        group: OptimizerParameterGroup
+        metric_name: str
+        for group, metric_name in zip(parameter_groups, group_names, strict=True):
+            learning_rate: float = self._scalar(group.get("lr"), "learning rate")
+            metrics[metric_name] = learning_rate
+            if metric_name not in self.lrs:
+                previous_name: str = base_name
+                self.lrs[metric_name] = (
+                    self.lrs.pop(previous_name)
+                    if metric_name == f"{base_name}/pg1" and previous_name in self.lrs
+                    else []
+                )
+            self.lrs[metric_name].append(learning_rate)
+            if self.log_momentum:
+                momentum: float | None = self._momentum(group)
+                if momentum is not None:
+                    metrics[f"{metric_name}-momentum"] = momentum
+            if self.log_weight_decay:
+                weight_decay: OptimizerStateValue | None = group.get("weight_decay")
+                if weight_decay is not None:
+                    metrics[f"{metric_name}-weight_decay"] = self._scalar(
+                        weight_decay,
+                        "weight decay"
+                    )
+        return metrics
+
+    def _momentum(self, group: OptimizerParameterGroup) -> float | None:
+        betas: OptimizerStateValue | None = group.get("betas")
+        if isinstance(betas, list | tuple) and betas:
+            return self._scalar(betas[0], "momentum beta")
+        momentum: OptimizerStateValue | None = group.get("momentum")
+        if momentum is None:
+            return None
+        return self._scalar(momentum, "momentum")
+
+    @staticmethod
+    def _scalar(value: OptimizerStateValue | None, name: str) -> float:
+        if type(value) is int or type(value) is float:
+            return float(value)
+        if isinstance(value, torch.Tensor) and value.numel() == 1:
+            return float(value.detach().cpu().item())
+        raise TypeError(f"Optimizer {name} must be a scalar, got {value!r}.")
+
+    @override
+    def __repr__(self) -> str:
+        return (
+            f"LearningRateMonitor(logging_interval={self.logging_interval!r}, "
+            f"log_momentum={self.log_momentum}, "
+            f"log_weight_decay={self.log_weight_decay}, "
+            f"log_key_prefix={self.log_key_prefix!r})"
+        )

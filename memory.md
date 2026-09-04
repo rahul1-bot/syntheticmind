@@ -6,14 +6,6 @@
     4. Surface comparison cannot establish capability. A parameter that is accepted but ignored, a hook that is defined but never dispatched, or a property backed by stale state is a defect rather than partial parity.
     5. Divergence from an established concept requires genuinely different semantics and explicit runtime enforcement; renaming a familiar concept only creates translation debt.
 
-| Memory | Sequential Runtime Hardening | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
-
-    1. Runtime work must proceed from ownership and lifecycle foundations toward higher-level features. Isolated changes inside an unmapped loop create contradictory counters, duplicated cleanup, and unmatched distributed collectives.
-    2. Every phase begins with the complete local execution path and pinned reference behavior, then defines observable acceptance criteria before implementation.
-    3. Cross-cutting changes require regression execution against earlier persistence, launch, callback, metric, and device paths rather than validation of the new method alone.
-    4. Git preserves chronology and exact diffs. Ledgers preserve only reusable facts, current architecture, and actionable direction.
-    5. Uncertainty must trigger additional evidence from installed behavior, repository history, official primary sources, or a focused ignored reference checkout rather than a placeholder contract.
-
 | Memory | Lifecycle and Failure Ownership | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 
     1. Stage state, module modes, hook context, progress state, and active exceptions require exception-safe restoration on success, early exit, and every failure path.
@@ -296,3 +288,11 @@
     3. Gradient inspection must examine coalesced sparse values rather than applying dense-only tensor operations to sparse storage.
     4. A numerical guard should name what it checks and expose a strict gradient switch; checking gradients is not checking parameters.
     5. Distributed failure evidence must establish that every worker exits and no optimizer mutation occurred, not merely that one rank printed an exception.
+
+| Memory | Learning Rate Is Optimizer-Use Telemetry | Date: 04 September 2026 | Time: 12:47 PM | Name: Ghost |
+
+    1. Step learning rate belongs immediately before a real optimizer step, not at an arbitrary batch boundary, because accumulation, manual optimization, multiple optimizers, and repeated closures decouple batches from optimizer use.
+    2. Epoch learning rate belongs at epoch start after the prior epoch scheduler has advanced; scheduler configuration controls automatic cadence only when the callback does not force one interval.
+    3. Metric identity includes scheduler name or optimizer type, repeated optimizer occurrence, and parameter-group name. Ambiguous explicit names must fail rather than overwrite another optimizer's telemetry.
+    4. Optimizer parameter groups may grow during fine-tuning; the first historical series must migrate from the unsuffixed key to the first-group key when a second unnamed group appears.
+    5. Resume state requires only the last emitted step and epoch coordinates. Persisting the complete learning-rate history would bloat checkpoints while the experiment logger already owns durable history.

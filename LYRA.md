@@ -175,3 +175,9 @@
     1. Finite-value enforcement moved ahead of optimizer mutation: loss is checked before backward and gradients immediately after backward.
     2. Automatic, manual, accumulated, precision-mediated, and distributed paths share the same callback boundary instead of inspecting batch output after stepping.
     3. The renamed callback exposes only the real optional cost, gradient scanning, and reports positioned failures before state corruption.
+
+| Strategic Note | Learning Rate Telemetry Contract | Date: 04 September 2026 | Time: 12:47 PM | Name: Ghost |
+
+    1. Learning-rate telemetry now follows optimizer and scheduler lifecycle rather than batch or decorative configuration state.
+    2. Multiple optimizers, repeated types, parameter groups, explicit names, momentum, weight decay, and dynamic fine-tuning groups retain distinct metric identities.
+    3. Logger emission remains rank-zero-owned while callback metric views and resume coordinates remain coherent across workers.

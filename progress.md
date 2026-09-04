@@ -237,8 +237,8 @@
 
 | Progress Active | Standard Callback Semantics | Date: 04 September 2026 | Time: 12:28 PM | Name: Ghost |
 
-    1. EarlyStopping, learning-rate monitoring, throughput monitoring, device statistics, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
-    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose current parameters are ignored or whose persisted state accepts semantically invalid values.
+    1. EarlyStopping, throughput monitoring, device statistics, Timer, and ModelCheckpoint remain accepted callback concepts but retain validation, lifecycle, state, or accelerator defects.
+    2. The next bounded phases must harden each runtime path rather than merely reorganize filenames, prioritizing callbacks whose distributed quantities or persisted state remain semantically wrong.
     3. Verification must include invalid configuration, multiple optimizers and parameter groups, accelerator placement, distributed agreement, callback checkpoint resume, failure restoration, and launcher transfer.
 
 | Progress Complete | Resumable EMA Weight Averaging | Date: 04 September 2026 | Time: 12:38 PM | Name: Ghost |
@@ -255,3 +255,11 @@
     2. ✅ Non-finite loss fails before backward, and optional dense or sparse non-finite gradients fail after backward but before optimizer stepping.
     3. ✅ Automatic and manual optimization failures preserve the original parameter state, while finite accumulated optimization remains on the shared backward path.
     4. ✅ Spawned two-rank DDP propagates the causal finite-value error and exits without applying an optimizer update.
+
+| Progress Complete | Learning Rate Monitoring Semantics | Date: 04 September 2026 | Time: 12:47 PM | Name: Ghost |
+
+    1. ✅ Forced step, forced epoch, and scheduler-controlled automatic logging intervals now execute with real semantics.
+    2. ✅ Optimizer-step hooks cover accumulation, repeated closures, and manual multiple optimizers; epoch hooks observe the scheduler-updated value for the new epoch.
+    3. ✅ Every optimizer and parameter group has stable collision-checked naming with custom scheduler names, group names, repeated optimizer types, prefixes, momentum, and weight decay.
+    4. ✅ Dynamic parameter groups preserve their existing history, callback metric views update on every rank, and logger writes remain rank-zero-owned.
+    5. ✅ Callback emission coordinates persist across checkpoint resume, and local multi-optimizer, epoch scheduler, dynamic group, invalid-boundary, missing-logger, resume, and spawned DDP probes pass.
