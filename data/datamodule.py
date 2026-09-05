@@ -29,7 +29,7 @@
 import inspect
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import IO, ClassVar, Self, cast, override
+from typing import BinaryIO, ClassVar, Self, cast, override
 
 import syntheticmind
 import torch
@@ -173,7 +173,7 @@ class DataModule(DataHooks, HyperparametersMixin):
     @classmethod
     def load_from_checkpoint(
         cls,
-        checkpoint_path: str | Path | IO[bytes],
+        checkpoint_path: str | Path | BinaryIO,
         map_location: MapLocation = None,
         hparams_file: str | Path | None = None,
         weights_only: bool | None = None,

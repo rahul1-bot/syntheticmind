@@ -47,7 +47,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
-from typing import IO, ClassVar, Literal, Self, cast, overload, override
+from typing import BinaryIO, ClassVar, Literal, Self, TextIO, cast, overload, override
 
 import numpy as np
 import syntheticmind
@@ -211,7 +211,7 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
     @classmethod
     def load_from_checkpoint(
         cls,
-        checkpoint_path: str | Path | IO[bytes],
+        checkpoint_path: str | Path | BinaryIO,
         map_location: MapLocation = None,
         hparams_file: str | Path | None = None,
         strict: bool | None = None,
@@ -1392,7 +1392,7 @@ class Module(HyperparametersMixin, ModelHooks, DataHooks, CheckpointHooks, nn.Mo
         *args: _Printable,
         sep: str | None = " ",
         end: str | None = "\n",
-        file: IO[str] | None = None,
+        file: TextIO | None = None,
         flush: bool = False
     ) -> None:
         # Provides Python print semantics owned by global rank zero. When an

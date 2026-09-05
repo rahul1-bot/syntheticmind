@@ -26,7 +26,7 @@
 import builtins
 import time
 from pathlib import Path
-from typing import IO, override
+from typing import TextIO, override
 
 import syntheticmind
 import torch
@@ -117,7 +117,7 @@ class ProgressBarCallback(Callback):
         *args: _PrintValue,
         sep: str | None = " ",
         end: str | None = "\n",
-        file: IO[str] | None = None,
+        file: TextIO | None = None,
         flush: bool = False
     ) -> None:
         # Prints client output without interleaving it with an active progress

@@ -34,7 +34,7 @@ import inspect
 import warnings
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import IO, cast
+from typing import BinaryIO, cast
 
 import torch
 import yaml
@@ -65,7 +65,7 @@ class _CheckpointLoader:
     def load[ModelT: nn.Module](
         cls,
         model_class: type[ModelT],
-        checkpoint_path: str | Path | IO[bytes],
+        checkpoint_path: str | Path | BinaryIO,
         map_location: MapLocation = None,
         hparams_file: str | Path | None = None,
         strict: bool | None = None,
@@ -129,7 +129,7 @@ class _CheckpointLoader:
     @classmethod
     def _load_payload(
         cls,
-        checkpoint_path: str | Path | IO[bytes],
+        checkpoint_path: str | Path | BinaryIO,
         map_location: MapLocation,
         weights_only: bool | None
     ) -> CheckpointDict:
@@ -356,7 +356,7 @@ class _CheckpointLoader:
     @classmethod
     def _validate_options(
         cls,
-        checkpoint_path: str | Path | IO[bytes],
+        checkpoint_path: str | Path | BinaryIO,
         hparams_file: str | Path | None,
         strict: bool | None,
         weights_only: bool | None
@@ -442,7 +442,7 @@ class _DataModuleCheckpointLoader:
     def load[DataModuleT: HyperparametersMixin](
         cls,
         datamodule_class: type[DataModuleT],
-        checkpoint_path: str | Path | IO[bytes],
+        checkpoint_path: str | Path | BinaryIO,
         map_location: MapLocation = None,
         hparams_file: str | Path | None = None,
         weights_only: bool | None = None,

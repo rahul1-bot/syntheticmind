@@ -1,10 +1,10 @@
-| Memory | Public Machine-Learning Compatibility | Date: 04 September 2026 | Time: 11:32 PM | Name: Ghost |
+| Memory | Public Machine-Learning Compatibility | Date: 05 September 2026 | Time: 07:25 PM | Name: Ghost |
 
     1. Public compatibility is semantic rather than cosmetic. Method names, parameter names and order, defaults, accepted values, return meanings, hook timing, state counters, and failure behavior jointly define the contract users inherit.
     2. PyTorch Lightning is a mature source of capability evidence, but its branded types and internal decomposition are not industry standards. SyntheticMind adopts universal concepts and owns its implementation language.
     3. An inherited extension point is incomplete until cooperative initialization, method-resolution order, override discovery, launcher transport, exception behavior, and every runtime dispatch site agree with the public signature.
     4. Surface comparison cannot establish capability. A parameter that is accepted but ignored, a hook that is defined but never dispatched, or a property backed by stale state is a defect rather than partial parity.
-    5. Completion means the declared private capability boundary has executable success, failure, persistence, topology, and source evidence; the completed source and Markdown documentation describes only verified semantics through the project-authorized VOCODE system, maps cross-package ownership from client entry to teardown, and never converts excluded deployment, Fabric, public release, unsupported hardware, or future integrations into implied claims.
+    5. Completion means the declared private capability boundary has executable success, failure, persistence, topology, and source evidence; identifier style applies to project-owned bindings, while PEP 695 type parameters and external constants such as profiler actions, signals, socket families, inspect kinds, and distributed reduction operators retain their canonical APIs. The completed source and Markdown documentation describes only verified semantics and never converts excluded deployment, Fabric, public release, unsupported hardware, or future integrations into implied claims.
 
 | Memory | Lifecycle, Presentation, and Failure Ownership | Date: 04 September 2026 | Time: 05:23 PM | Name: Ghost |
 

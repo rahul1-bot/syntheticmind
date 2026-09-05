@@ -44,7 +44,7 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import IO, Literal, Never, cast, override
+from typing import Literal, Never, TextIO, cast, override
 
 import torch
 from loguru import logger as log
@@ -2998,7 +2998,7 @@ class Trainer:
         *values: _PrintValue,
         sep: str | None = " ",
         end: str | None = "\n",
-        file: IO[str] | None = None,
+        file: TextIO | None = None,
         flush: bool = False
     ) -> None:
         # Python-compatible output from local rank zero on every node. Use
