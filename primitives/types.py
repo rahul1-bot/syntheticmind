@@ -113,6 +113,7 @@ type PrecisionType = Literal[
     "bf16-mixed",
     "32-true",
     "64-true",
+    "torchao-float8",
     "transformer-engine",
     "transformer-engine-float16"
 ]
