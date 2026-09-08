@@ -138,7 +138,7 @@ Checkpoint schema version 2 is native and resumable. A durable training checkpoi
 
 ## Related Components
 
-Downstream research projects consume the package-root contracts and specialize models, data, callbacks, and parallelization plans without changing framework ownership. Focused runtime probes and source references remain outside the tracked production package.
+Downstream research projects consume the package-root contracts and specialize models, data, callbacks, and parallelization plans without changing framework ownership. The committed regression suite under [`tests/`](tests/README.md) is the executable evidence for the framework and runs on CPU through `python -m pytest`; `pyproject.toml` makes the checkout installable with `python -m pip install -e ".[test]"`, and the `tests` workflow runs the suite on every push. Comparative source references remain outside the tracked package.
 
 The documentation map begins at [`docs/README.md`](docs/README.md). The principal
 cross-package references are:

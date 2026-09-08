@@ -1,3 +1,12 @@
+| Memory | Evidence Before Diagnosis | Date: 08 September 2026 | Time: 09:53 PM | Name: Ghost |
+
+    1. A survey finding with a file and line reference is a hypothesis, not a defect. Two of three high-severity findings in the harness assessment dissolved when the exact control flow was read: the stop check ordering ruled out a ceiling overshoot, and the transport's join-before-remove ordering ruled out artifact loss.
+    2. The correct response to a disproved finding is a regression test that pins the contract that disproved it, because the contract is now known to matter and nothing else guards it.
+    3. A regression test for a fix is written first and shown failing on the previous code; a test that only ever passed proves nothing about the defect.
+    4. A test that constructs models before the Trainer seeds compares different initial weights; exact-continuation evidence requires seeding the construction of every compared model explicitly.
+    5. Spawned workers inherit the process file descriptors, not the parent's replaced `sys.stderr` object, so distributed presentation assertions must capture at the descriptor level.
+    6. Mapping a repository root onto a package name with an explicit setuptools package list keeps the root-is-the-package layout installable and keeps tests and documentation out of the wheel.
+
 | Memory | Terminal Coordination and Presentation Density | Date: 08 September 2026 | Time: 09:21 PM | Name: Ghost |
 
     1. A live carriage-return line is a shared-stream invariant, not a private detail of the renderer. Every writer on the same stream, including third-party logging handlers and the Python warning hook, must clear that line first, so the renderer must own their capture for the rendered interval rather than trusting each call site.

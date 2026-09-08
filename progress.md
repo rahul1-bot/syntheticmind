@@ -1,3 +1,12 @@
+| Progress Complete | Lane One Verification Infrastructure | Date: 08 September 2026 | Time: 09:53 PM | Name: Ghost |
+
+    1. ✅ `tests/` is committed with a README, import and environment conftest, shared support model, and seven test modules covering optimization, checkpointing, lifecycle, console, progress presentation, and spawned data parallelism; the suite passes on CPU under Python 3.14.2.
+    2. ✅ The skipped-window phantom optimizer step is fixed in `loops/optimization/automatic.py` and `loops/training_epoch_loop.py`, with tests proving `global_step` and step schedulers hold when every microbatch of a window returns None and advance when a window retains gradients.
+    3. ✅ Step-ceiling and asynchronous-checkpoint contracts are pinned as regression tests after verification showed the assessment overstated both; no behavior changed for either.
+    4. ✅ `pyproject.toml` defines the installable package, dependencies, optional extras, and pytest configuration; editable installation and wheel construction pass from a clean environment.
+    5. ✅ `.github/workflows/tests.yml` compiles every module and runs the suite on every push and pull request without any linter or static type checker.
+    6. ✅ README, `docs/README.md`, `loops/README.md`, and the ledgers describe the suite, packaging, workflow, and the corrected skip semantics; the work remains on `feature/ui-console-presentation` pending Rahul's promotion decision.
+
 | Progress Complete | Console Presentation Layer | Date: 08 September 2026 | Time: 09:21 PM | Name: Ghost |
 
     1. ✅ Loguru records and Python warnings are captured by ConsoleRenderer for the duration of a rendered stage and restored at teardown and failure, so diagnostics no longer splice into the live line; the pre-change splice was reproduced and the post-change ordering verified on a pseudo-terminal.

@@ -12,6 +12,9 @@
 #   and logging, preventing batch outputs from retaining the autograd graph
 # - Zeroing occurs only when the epoch loop supplies an operation for the current
 #   accumulation boundary
+# - A window-gradient flag records whether any backward ran since the last
+#   zeroing boundary, so the epoch loop can withhold global-step and scheduler
+#   progress from a native step that has no gradients to apply
 #
 # Author: Rahul Sawhney
 
@@ -39,6 +42,7 @@ class _AutomaticOptimization:
             raise ValueError("accumulation_factor must be positive.")
         self._accumulation_factor: int = accumulation_factor
         self._outputs: StepOutput = {}
+        self._window_has_gradients: bool = False
 
     @torch.enable_grad()
     def run(
@@ -50,6 +54,9 @@ class _AutomaticOptimization:
     ) -> OptimizerStepOutput:
         # Executes training_step, validates and scales its loss, optionally zeros
         # gradients, invokes precision-aware backward, and returns detached loss.
+        # A zeroing boundary opens a new accumulation window with no gradients.
+        if zero_grad_operation is not None:
+            self._window_has_gradients: bool = False
         raw_outputs: TrainingStepOutput = step_operation()
         if raw_outputs is None:
             warnings.warn(
@@ -83,9 +90,16 @@ class _AutomaticOptimization:
         if zero_grad_operation is not None:
             zero_grad_operation()
         backward_operation(loss)
+        self._window_has_gradients: bool = True
         return loss.detach().clone()
 
     @property
     def outputs(self) -> StepOutput:
         # Defensive copy of normalized step output for batch-end hooks.
         return dict(self._outputs)
+
+    @property
+    def window_has_gradients(self) -> bool:
+        # Whether at least one backward contributed to the accumulation window
+        # that the next managed optimizer step would apply.
+        return self._window_has_gradients
