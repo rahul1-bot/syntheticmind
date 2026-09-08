@@ -1,0 +1,75 @@
+name: Runtime control plane
+
+on:
+  push:
+    branches: [feature/runtime-control-plane]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-control-plane-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: syntheticmind
+      - name: Preserve reviewed source snapshots
+        working-directory: syntheticmind
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime-evidence"
+          git archive --format=tar --prefix=syntheticmind/ HEAD > "$RUNNER_TEMP/runtime-evidence/feature.tar"
+          git archive --format=tar --prefix=syntheticmind/ origin/dev > "$RUNNER_TEMP/runtime-evidence/dev.tar"
+          git rev-parse HEAD origin/dev > "$RUNNER_TEMP/runtime-evidence/revisions.txt"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14'
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install uv
+          uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system 'pydantic==2.13.5' numpy torchmetrics loguru fsspec rich tensorboard packaging pyyaml
+          uv pip freeze > "$RUNNER_TEMP/runtime-evidence/dependencies.txt"
+      - name: Compile and import the production package
+        run: |
+          python -m compileall -q syntheticmind
+          python - <<'PY'
+          import importlib
+          from pathlib import Path
+          from types import ModuleType
+          from loguru import logger
+
+          class ImportProbe:
+              def run(self) -> None:
+                  root: Path = Path('syntheticmind')
+                  paths: list[Path] = sorted(root.rglob('*.py'))
+                  path: Path
+                  for path in paths:
+                      if path == root / 'plugins/precision/torchao.py':
+                          continue
+                      parts: tuple[str, ...] = path.with_suffix('').parts
+                      name: str = '.'.join(parts[:-1] if parts[-1] == '__init__' else parts)
+                      imported: ModuleType = importlib.import_module(name)
+                      del imported
+                  logger.info(f'Imported {len(paths) - 1} modules; optional TorchAO adapter checked separately.')
+
+          if __name__ == '__main__':
+              probe: ImportProbe = ImportProbe()
+              probe.run()
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: runtime-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-evidence
+          retention-days: 3
+          if-no-files-found: error
