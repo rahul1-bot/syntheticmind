@@ -44,6 +44,9 @@ from syntheticmind.strategies.checkpoint import StrategyCheckpoint
 from syntheticmind.strategies.model_parallel_checkpointing.checkpoint import (
     _ModelParallelCheckpoint
 )
+from syntheticmind.strategies.model_parallel_checkpointing.checkpoint_io import (
+    ModelParallelCheckpointWrite
+)
 from syntheticmind.strategies.parallel import ParallelStrategy
 from syntheticmind.primitives.exceptions import MisconfigurationError
 from syntheticmind.strategies.model_initialization import _ModuleInitializer
@@ -85,7 +88,10 @@ class ModelParallelStrategy(ParallelStrategy):
         self,
         data_parallel_size: Literal["auto"] | int = "auto",
         tensor_parallel_size: Literal["auto"] | int = "auto",
+        context_parallel_size: int = 1,
+        pipeline_parallel_size: int = 1,
         save_distributed_checkpoint: bool = True,
+        checkpoint_write: ModelParallelCheckpointWrite = "synchronous",
         process_group_backend: str | None = None,
         timeout: timedelta | None = default_pg_timeout
     ) -> None:
@@ -98,13 +104,26 @@ class ModelParallelStrategy(ParallelStrategy):
         )
         self._validate_size("data_parallel_size", data_parallel_size)
         self._validate_size("tensor_parallel_size", tensor_parallel_size)
+        self._validate_size("context_parallel_size", context_parallel_size)
+        self._validate_size("pipeline_parallel_size", pipeline_parallel_size)
         if type(save_distributed_checkpoint) is not bool:
             raise TypeError("`save_distributed_checkpoint` must be a bool.")
+        if checkpoint_write not in {"synchronous", "asynchronous"}:
+            raise ValueError(
+                f"Unsupported model-parallel checkpoint write mode: {checkpoint_write!r}."
+            )
+        if not save_distributed_checkpoint and checkpoint_write == "asynchronous":
+            raise ValueError(
+                "Asynchronous model-parallel checkpointing requires sharded checkpoints."
+            )
         self._data_parallel_size: Literal["auto"] | int = data_parallel_size
         self._tensor_parallel_size: Literal["auto"] | int = tensor_parallel_size
+        self._context_parallel_size: int = context_parallel_size
+        self._pipeline_parallel_size: int = pipeline_parallel_size
         self._device_mesh: DeviceMesh | None = None
         self.checkpoint: StrategyCheckpoint = _ModelParallelCheckpoint(
             "sharded" if save_distributed_checkpoint else "full",
+            checkpoint_write,
             self.barrier,
             self.broadcast
         )
@@ -154,8 +173,10 @@ class ModelParallelStrategy(ParallelStrategy):
             )
         placed_model: nn.Module = model.to(device)
         self.connect(placed_model)
+        execution_model: nn.Module = self._compile_model(placed_model)
+        self.model: nn.Module | None = execution_model
         self.barrier()
-        return placed_model
+        return execution_model
 
     @override
     def teardown(self) -> None:
@@ -202,7 +223,8 @@ class ModelParallelStrategy(ParallelStrategy):
             "32-true",
             "bf16-mixed",
             "bf16-true",
-            "16-true"
+            "16-true",
+            "torchao-float8"
         )
         if precision_plugin.precision not in supported_precisions:
             raise MisconfigurationError(
@@ -235,6 +257,16 @@ class ModelParallelStrategy(ParallelStrategy):
         )
 
     @property
+    def context_parallel_size(self) -> int:
+        if self._device_mesh is not None:
+            return self._device_mesh["context_parallel"].size()
+        return self._context_parallel_size
+    @property
+    def pipeline_parallel_size(self) -> int:
+        if self._device_mesh is not None:
+            return self._device_mesh["pipeline_parallel"].size()
+        return self._pipeline_parallel_size
+    @property
     @override
     def checkpoint_requires_all_ranks(self) -> bool:
         # Full and sharded distributed state APIs require every model rank to
@@ -251,6 +283,7 @@ class ModelParallelStrategy(ParallelStrategy):
     def _setup_device_mesh(self) -> None:
         # Resolves automatic axis sizes, validates rectangular world coverage,
         # initializes the mesh, and attaches it to the connected Module.
+        self._validate_extended_mesh_configuration()
         if self._data_parallel_size == "auto":
             data_parallel_size: int = self.num_nodes
         else:
@@ -259,16 +292,36 @@ class ModelParallelStrategy(ParallelStrategy):
             tensor_parallel_size: int = self.num_processes
         else:
             tensor_parallel_size: int = self._tensor_parallel_size
-        if data_parallel_size * tensor_parallel_size != self.world_size:
+        context_parallel_size: int = self._context_parallel_size
+        pipeline_parallel_size: int = self._pipeline_parallel_size
+        mesh_world_size: int = (
+            data_parallel_size
+            * tensor_parallel_size
+            * context_parallel_size
+            * pipeline_parallel_size
+        )
+        if mesh_world_size != self.world_size:
             raise RuntimeError(
-                f"data_parallel_size={data_parallel_size} and "
-                f"tensor_parallel_size={tensor_parallel_size} must multiply to "
+                f"data_parallel_size={data_parallel_size}, "
+                f"tensor_parallel_size={tensor_parallel_size}, "
+                f"context_parallel_size={context_parallel_size}, and "
+                f"pipeline_parallel_size={pipeline_parallel_size} must multiply to "
                 f"world_size={self.world_size}."
             )
         self._device_mesh: DeviceMesh | None = init_device_mesh(
             self.root_device.type,
-            (data_parallel_size, tensor_parallel_size),
-            mesh_dim_names=("data_parallel", "tensor_parallel")
+            (
+                data_parallel_size,
+                tensor_parallel_size,
+                context_parallel_size,
+                pipeline_parallel_size
+            ),
+            mesh_dim_names=(
+                "data_parallel",
+                "tensor_parallel",
+                "context_parallel",
+                "pipeline_parallel"
+            )
         )
         self._require_module()._device_mesh: DeviceMesh | None = self._device_mesh
 
@@ -278,6 +331,15 @@ class ModelParallelStrategy(ParallelStrategy):
         if self._module is not None:
             self._module._device_mesh: DeviceMesh | None = None
         self._device_mesh: DeviceMesh | None = None
+
+    def _validate_extended_mesh_configuration(self) -> None:
+        if self._context_parallel_size == 1 and self._pipeline_parallel_size == 1:
+            return
+        if self._data_parallel_size == "auto" or self._tensor_parallel_size == "auto":
+            raise ValueError(
+                "Context or pipeline parallel axes require explicit data_parallel_size "
+                "and tensor_parallel_size so SyntheticMind does not guess topology."
+            )
 
     def _validate_size(
         self,
