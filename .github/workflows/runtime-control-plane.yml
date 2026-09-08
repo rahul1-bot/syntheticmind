@@ -14,7 +14,7 @@ defaults:
     shell: bash
 
 concurrency:
-  group: runtime-control-plane-${{ github.ref }}
+  group: runtime-control-plane-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -85,6 +85,11 @@ jobs:
                   block: str
                   for index, block in enumerate(blocks, start=1):
                       Path(f'runtime_probe_{index}.py').write_text(block.split('```', 1)[0])
+                  parallel_source: str = Path('syntheticmind/docs/guides/parallel_algorithms_verification.md').read_text()
+                  parallel_blocks: list[str] = parallel_source.split('```python\n')[1:]
+                  if len(parallel_blocks) != 1:
+                      raise ValueError('Expected one parallel algorithm probe.')
+                  Path('parallel_probe.py').write_text(parallel_blocks[0].split('```', 1)[0])
 
           if __name__ == '__main__':
               extractor: ProbeExtractor = ProbeExtractor()
@@ -95,6 +100,9 @@ jobs:
       - name: Verify two-rank training, continuation, and failure transactions
         run: |
           python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 runtime_probe_2.py --artifact-root "$RUNNER_TEMP/distributed-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/distributed.log"
+      - name: Verify context and pipeline algorithms
+        run: |
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 parallel_probe.py --artifact-root "$RUNNER_TEMP/parallel-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/parallel.log"
       - name: Verify optional TorchAO and scheduler boundaries
         run: |
           uv pip install --system 'torchao==0.18.0' --no-deps
