@@ -115,6 +115,7 @@ class _AsyncShardedCheckpointStore(_ShardedCheckpointStore):
         self._finish_pending()
         super().remove(path)
 
+    @override
     def teardown(self) -> None:
         self._finish_pending()
 
