@@ -11,7 +11,7 @@
 | `finite_value_guard.py` | `FiniteValueGuard`, which rejects non-finite loss before backward and optional non-finite gradients before optimizer stepping. |
 | `weight_averaging.py` | `EMAWeightAveraging`, which tracks resumable exponential moving averages and evaluates under averaged parameters. |
 | `lr_monitor.py` | `LearningRateMonitor`, which records per-group learning rates. |
-| `progress_bar.py` | `ProgressBarCallback`, which reports stage progress. |
+| `progress_bar.py` | `ProgressBarCallback`, which renders the run header, live stage progress, epoch and stage records, and failure coordinates. |
 | `model_summary/` | The `ModelSummary` callback, layer and model inspection report, and optional Rich renderer. |
 | `throughput_monitor.py` | `ThroughputMonitor`, which records synchronized window and epoch throughput over the Strategy's data-parallel sample axis. |
 | `device_stats_monitor.py` | `DeviceStatsMonitor`, which records device utilization. |
@@ -103,6 +103,26 @@ through the trainer logger connector and require at least one configured logger.
 `EMAWeightAveraging` temporarily changes the model state for evaluation but
 preserves live training weights for resumable checkpoints. `ProgressBarCallback`
 owns terminal presentation only and never becomes a metrics persistence layer.
+
+## Progress presentation
+
+`ProgressBarCallback` renders on global rank zero. Its constructor accepts
+`refresh_interval` for interactive rewrites, `redirected_interval` for the
+permanent heartbeat written when stderr is not a terminal (None disables it),
+`max_metrics` for the number of progress-routed metrics on live, epoch, and
+stage lines, and `capture_diagnostics`, which routes loguru records and Python
+warnings through the renderer while a stage renders so they never splice into
+the live line.
+
+A stage begins with a header naming the accelerator, devices, nodes, world
+size, Strategy, precision, seed, epoch and step ceilings, accumulation, resume
+checkpoint, and logger directory. The interactive line shows a spinner, epoch,
+glyph bar, percentage, epoch ETA, throughput, on-step metrics, and the first
+optimizer's learning rate. Each completed epoch writes epoch-reduced training
+metrics, validation metrics, duration, and a remaining-fit estimate derived from
+completed epochs. A failure record carries the epoch, global step, and active
+batch. Unknown loader horizons render counts and throughput only. Styling is
+disabled when `NO_COLOR` is set or stderr is redirected.
 
 ## Related Components
 

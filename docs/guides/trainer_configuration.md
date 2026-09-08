@@ -221,6 +221,11 @@ Only one ProgressBarCallback is allowed. Checkpoint callbacks are ordered after
 ordinary callbacks. A Timer is inserted when progress or `max_time` requires it;
 an explicit Timer takes precedence over Trainer `max_time` with a warning.
 
+Pass an explicit `ProgressBarCallback(...)` in `callbacks` to change the
+interactive refresh cadence, the redirected heartbeat interval, the number of
+displayed metrics, or to stop loguru and warning capture; the callback contract
+is documented in `../../callbacks/README.md`.
+
 ## Profiler
 
 `profiler` accepts None, `"simple"`, `"advanced"`, `"pytorch"`, or a configured

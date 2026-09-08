@@ -8,7 +8,7 @@
 | `configuration.py` | Private validated run policy, scalar invariants, default resolution, and fast-development, overfit, and barebones interactions. |
 | `hook_dispatcher.py` | Private callback, module, data-module, and Strategy hook invocation, profiling, context, and override discovery. |
 | `states.py` | Trainer function, stage, status, progress, interruption, and stop state. |
-| `console.py` | Rank-safe lifecycle and metric rendering for the Trainer and progress callbacks. |
+| `console.py` | Rank-safe live-line, record, metric, styling, and diagnostics-capture rendering for the Trainer and progress callbacks. |
 | `connectors/accelerator_connector.py` | Accelerator, devices, nodes, Strategy, precision, cluster environment, checkpoint I/O, and layer-synchronization compatibility. |
 | `connectors/callback_connector.py` | Callback validation, defaults, model callback attachment, ordering, and checkpoint identities. |
 | `connectors/checkpoint_connector.py` | Checkpoint selection, full-trajectory assembly, restoration, and resume lifecycle. |
@@ -132,7 +132,7 @@ Trainer exposes resolved accelerator, Strategy, precision, scaler, devices, rank
 
 `callback_metrics` is the tensor view for monitoring and client inspection. `logged_metrics` contains logger-routed tensors. `progress_bar_metrics` contains Python floats for the active or latest visible stage. Every mapping is defensive.
 
-`Trainer.print` writes from local rank zero on every node. `Module.print` writes only from global rank zero and cooperates with the active progress display.
+`Trainer.print` writes from local rank zero on every node. `Module.print` writes only from global rank zero. Both route through the active progress callback so an interactive live line is cleared before client output appears. Verbose validation and test results, and the barebones stage marker, use the same renderer for the same reason.
 
 ## Development and barebones modes
 

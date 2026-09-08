@@ -1,3 +1,13 @@
+| Progress Complete | Console Presentation Layer | Date: 08 September 2026 | Time: 09:21 PM | Name: Ghost |
+
+    1. ✅ Loguru records and Python warnings are captured by ConsoleRenderer for the duration of a rendered stage and restored at teardown and failure, so diagnostics no longer splice into the live line; the pre-change splice was reproduced and the post-change ordering verified on a pseudo-terminal.
+    2. ✅ Redirected output receives a throttled permanent progress heartbeat, disabled with `redirected_interval=None`, in addition to epoch and stage records.
+    3. ✅ The live line shows a styled glyph bar, percentage, epoch ETA, throughput, up to `max_metrics` on-step metrics, and the representative learning rate; unknown horizons show counts and throughput only.
+    4. ✅ Each stage begins with a header of accelerator, devices, nodes, world size, Strategy, precision, seed, epoch and step ceilings, accumulation, resume checkpoint, and logger directory drawn from rank-local Trainer views.
+    5. ✅ Epoch records use epoch-reduced training names, validation metrics, duration, and a measured remaining-fit estimate; failure and interruption records carry epoch, global step, and active batch.
+    6. ✅ Trainer evaluation results, the barebones marker, and `Trainer.print` share the progress callback's renderer; verbose results render as an aligned block; the plain model summary rule and aggregate layout are corrected.
+    7. ✅ Fit, validate, test, failure, interruption, iterable, `NO_COLOR`, narrow-terminal, disabled-progress, heartbeat, invalid-configuration, pickling, and two-process spawn probes pass; the package compiles under Python 3.14.2; source comments, package READMEs, the configuration guide, and ledgers describe the current behavior. The work lives only on `feature/ui-console-presentation` pending Rahul's promotion decision.
+
 | Progress Complete | Repository and Governing Contracts | Date: 05 September 2026 | Time: 07:25 PM | Name: Ghost |
 
     1. ✅ The defined private core Trainer reconstruction is complete on active `dev`, every accepted phase is committed and synchronized to `origin/dev`, and stable `main` remains unchanged pending a separate promotion decision.

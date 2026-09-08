@@ -1169,7 +1169,7 @@ class Trainer:
         )
         if verbose and self.is_global_zero:
             display_stage: str = "validation" if stage == "validate" else "test"
-            ConsoleRenderer().write_metrics(display_stage, metrics)
+            self._console().write_metrics(display_stage, metrics)
         return metrics
 
     def _evaluation_impl(
@@ -1745,9 +1745,18 @@ class Trainer:
         # logger presentation are disabled in barebones mode.
         if not self.barebones or not self.is_global_zero:
             return
-        ConsoleRenderer().write_permanent(
+        self._console().write_permanent(
             f"syntheticmind · {stage} · barebones"
         )
+
+    def _console(self) -> ConsoleRenderer:
+        # Selects the renderer that owns this process's live line when a progress
+        # callback is configured, so Trainer records clear that line instead of
+        # writing over it; otherwise a detached renderer serves the one record.
+        progress_bar: ProgressBarCallback | None = self.progress_bar_callback
+        if progress_bar is not None:
+            return progress_bar.renderer
+        return ConsoleRenderer()
 
     def _resolve_profiler(self, profiler: Profiler | str | None) -> Profiler:
         # Resolves pass-through, simple, advanced, PyTorch, or a supplied concrete
@@ -3003,8 +3012,15 @@ class Trainer:
     ) -> None:
         # Python-compatible output from local rank zero on every node. Use
         # Module.print for one global-rank-zero record across the complete job.
-        if self.local_rank == 0:
-            print(*values, sep=sep, end=end, file=file, flush=flush)
+        # Output routes through the progress callback so an active live line is
+        # cleared first; on ranks that do not render, that clear is a no-op.
+        if self.local_rank != 0:
+            return
+        progress_bar: ProgressBarCallback | None = self.progress_bar_callback
+        if progress_bar is not None and progress_bar.is_enabled:
+            progress_bar.print(*values, sep=sep, end=end, file=file, flush=flush)
+            return
+        print(*values, sep=sep, end=end, file=file, flush=flush)
 
     @property
     def max_epochs(self) -> int:
