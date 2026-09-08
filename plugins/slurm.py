@@ -1,3 +1,13 @@
+# This module:
+# 1. Adapts Slurm task ranks and rendezvous to ClusterEnvironment
+#
+# Design decisions:
+# - srun owns process creation; no local worker group is created by this adapter
+# - Explicit MASTER_ADDR and MASTER_PORT override bounded scheduler discovery
+# - Topology is validated before collectives or model mutation
+#
+# Author: Rahul Sawhney
+
 import os
 import subprocess
 from typing import override
@@ -8,6 +18,8 @@ __all__: list[str] = ["SLURMEnvironment"]
 
 
 class SLURMEnvironment(ClusterEnvironment):
+    # Selected for srun jobs or supplied explicitly through Trainer plugins.
+    # Use one Slurm task per training process; torchrun-in-Slurm takes precedence.
     def __init__(self) -> None:
         self._world_size: int = 1
         self._global_rank: int = 0
@@ -59,6 +71,16 @@ class SLURMEnvironment(ClusterEnvironment):
                 f"SLURM topology requires positive devices and nodes, got "
                 f"num_devices={num_devices}, num_nodes={num_nodes}."
             )
+        required: tuple[str, ...] = ("SLURM_PROCID", "SLURM_NTASKS", "SLURM_LOCALID", "SLURM_NODEID")
+        name: str
+        if not all(name in os.environ for name in required):
+            raise RuntimeError("Incomplete Slurm task topology; launch with srun.")
+        if not 0 <= self.local_rank() < num_devices:
+            raise ValueError("SLURM_LOCALID is outside configured devices.")
+        if not 0 <= self.node_rank() < num_nodes:
+            raise ValueError("SLURM_NODEID is outside configured nodes.")
+        if not 0 <= self.global_rank() < self.world_size():
+            raise ValueError("SLURM_PROCID is outside SLURM_NTASKS.")
         launched_tasks: int = self.world_size()
         expected_tasks: int = num_devices * num_nodes
         if launched_tasks != expected_tasks:
@@ -96,7 +118,7 @@ class SLURMEnvironment(ClusterEnvironment):
         configured_address: str | None = os.environ.get("MASTER_ADDR")
         if configured_address:
             return configured_address
-        node_list: str | None = os.environ.get("SLURM_NODELIST")
+        node_list: str | None = os.environ.get("SLURM_NODELIST") or os.environ.get("SLURM_JOB_NODELIST")
         if not node_list:
             raise RuntimeError(
                 "SLURM rendezvous requires MASTER_ADDR or SLURM_NODELIST."
@@ -106,12 +128,14 @@ class SLURMEnvironment(ClusterEnvironment):
                 ["scontrol", "show", "hostnames", node_list],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=10
             )
-        except (FileNotFoundError, subprocess.CalledProcessError) as exception:
+        except (OSError, subprocess.SubprocessError) as exception:
             raise RuntimeError(
                 "Could not resolve the first SLURM host. Set MASTER_ADDR explicitly."
             ) from exception
+        hostname: str
         hostnames: list[str] = [
             hostname.strip()
             for hostname in result.stdout.splitlines()
@@ -136,4 +160,6 @@ class SLURMEnvironment(ClusterEnvironment):
                 "SLURM rendezvous requires MASTER_PORT or SLURM_JOB_ID."
             )
         job_id: int = int(job_id_text)
+        if job_id < 0:
+            raise ValueError("SLURM_JOB_ID must be non-negative.")
         return 10000 + job_id % 50000

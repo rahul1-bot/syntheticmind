@@ -184,7 +184,7 @@ class _ModelParallelCheckpointIO:
 
     def remove(self, path: str | Path) -> None:
         # Removes the complete full file or sharded root selected by retention.
-        StoragePath(path).remove(recursive=True)
+        self._sharded_store.remove(path)
 
     def teardown(self) -> None:
         self._sharded_store.teardown()

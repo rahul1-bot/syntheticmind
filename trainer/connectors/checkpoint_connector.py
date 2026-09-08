@@ -54,6 +54,9 @@ from syntheticmind.plugins.checkpoint_io import (
     CheckpointStorageOptions
 )
 from syntheticmind.strategies.strategy import Strategy
+from syntheticmind.strategies.compiler import CompilationConfiguration
+from syntheticmind.strategies.parallel import ParallelStrategy
+from syntheticmind.plugins.torch_elastic import TorchElasticEnvironment
 from syntheticmind.trainer.connectors.callback_connector import _CallbackConnector
 from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
     MetricAccumulator,
@@ -93,6 +96,7 @@ class _CheckpointConnector:
         self._randomness: _Randomness = randomness
         self._path: str | Path | None = None
         self._user_managed: bool = False
+        self._stage: TrainerStage | None = None
         self.train_dataloader_states: list[DataLoaderState] = []
         self.train_dataloader_state_active: bool = False
         self.train_dataloader_batches_completed: int = 0
@@ -112,6 +116,8 @@ class _CheckpointConnector:
         # Resolves stage argument, mutable Trainer policy, implicit best selection,
         # symbolic best or last values, unsupported integrations, and concrete
         # artifact validation into one normalized path.
+        self._stage: TrainerStage | None = stage
+        restart_required: bool = stage == "fit" and self._elastic_restart_required()
         selected_path: str | Path | None = checkpoint_path
         if self._user_managed:
             if not path_provided:
@@ -125,6 +131,8 @@ class _CheckpointConnector:
                         stacklevel=3
                     )
                 self._user_managed: bool = False
+        if selected_path is None and restart_required:
+            selected_path: str | Path | None = "last"
         if selected_path is None and not model_provided and stage != "fit":
             selected_path: str | Path | None = "best"
             if self._strategy.is_global_zero:
@@ -140,7 +148,13 @@ class _CheckpointConnector:
         if isinstance(selected_path, str) and selected_path == "best":
             return self._select_best_path(stage)
         if isinstance(selected_path, str) and selected_path == "last":
-            return self._select_last_path(stage)
+            last_path: str | None = self._select_last_path(stage)
+            if restart_required and last_path is None:
+                raise FileNotFoundError(
+                    "TorchElastic restart has no durable last checkpoint. Configure "
+                    "ModelCheckpoint(dirpath=..., save_last=True) or an explicit ckpt_path."
+                )
+            return last_path
         if isinstance(selected_path, str) and selected_path in {"hpc", "registry"}:
             raise MisconfigurationError(
                 f"ckpt_path={selected_path!r} is unavailable without its integration."
@@ -189,7 +203,12 @@ class _CheckpointConnector:
             "epoch": epoch,
             "global_step": global_step,
             "state_dict": model_state_dict,
-            "trainer_configuration": trainer_configuration
+            "trainer_configuration": trainer_configuration,
+            "compiler_configuration": cast(
+                CheckpointValue,
+                self._strategy.compiler.configuration.model_dump(mode="python")
+                if self._strategy.compiler is not None else None
+            )
         }
         if isinstance(model, HyperparametersMixin):
             self._store_hyperparameters(checkpoint, model)
@@ -267,6 +286,8 @@ class _CheckpointConnector:
             weights_only
         )
         self._validate_schema(checkpoint)
+        if self._stage == "fit":
+            self._validate_compiler_configuration(checkpoint)
         return checkpoint
 
     def load_metadata(
@@ -281,6 +302,8 @@ class _CheckpointConnector:
             weights_only
         )
         self._validate_schema(checkpoint)
+        if self._stage == "fit":
+            self._validate_compiler_configuration(checkpoint)
         return checkpoint
 
     def restore_strategy_state(
@@ -304,6 +327,7 @@ class _CheckpointConnector:
     ) -> None:
         # Rejects weights-only continuation and reports trajectory-critical
         # effective configuration fields that differ from the current Trainer.
+        self._validate_compiler_configuration(checkpoint)
         checkpoint_type: str = self._checkpoint_type(checkpoint)
         if checkpoint_type == "weights":
             raise MisconfigurationError(
@@ -815,7 +839,7 @@ class _CheckpointConnector:
         for callback in self._callback_connector.callbacks:
             if not isinstance(callback, ModelCheckpoint):
                 continue
-            if callback.last_model_path:
+            if callback.last_model_path and self._strategy.checkpoint.is_checkpoint_path(callback.last_model_path):
                 candidates.append(callback.last_model_path)
             if callback.dirpath:
                 candidate: str
@@ -837,7 +861,7 @@ class _CheckpointConnector:
                     stacklevel=3
                 )
             return None
-        candidate_iterator: Iterator[str] = iter(unique_candidates)
+        candidate_iterator: Iterator[str] = iter(sorted(unique_candidates))
         selected_path: str = next(candidate_iterator)
         selected_modified_time: float = StoragePath(selected_path).modified_time
         for candidate in candidate_iterator:
@@ -891,6 +915,9 @@ class _CheckpointConnector:
             if required_field not in checkpoint:
                 raise KeyError(f"Checkpoint is missing required field {required_field!r}.")
         self.configuration_snapshot(checkpoint)
+        compiler_value: CheckpointValue | None = checkpoint.get("compiler_configuration")
+        if compiler_value is not None:
+            CompilationConfiguration.model_validate(compiler_value)
         self._checkpoint_type(checkpoint)
         self._training_progress(checkpoint)
         self.combined_loader_states(checkpoint)
@@ -922,12 +949,42 @@ class _CheckpointConnector:
                 "Checkpoint epoch metric rank state does not match metadata world size."
             )
         if (
-            epoch_metric_rank_count > 0
-            and epoch_metric_rank_count != self._strategy.world_size
+            (epoch_metric_rank_count > 0 or self.integer_value(checkpoint.get("completed_batches"), "completed_batches", 0) > 0)
+            and world_size != self._strategy.world_size
         ):
             raise MisconfigurationError(
-                "Partial-epoch metric state cannot resume under a different world size."
+                "Partial-epoch training state cannot resume under a different world size."
             )
+
+    def _validate_compiler_configuration(self, checkpoint: CheckpointDict) -> None:
+        # Legacy schema-v2 checkpoints without this extension represent eager
+        # execution. No compiled callable or cache is deserialized from a file.
+        value: CheckpointValue | None = checkpoint.get("compiler_configuration")
+        saved: CompilationConfiguration | None = (
+            CompilationConfiguration.model_validate(value) if value is not None else None
+        )
+        current: CompilationConfiguration | None = (
+            self._strategy.compiler.configuration if self._strategy.compiler is not None else None
+        )
+        if saved != current:
+            raise MisconfigurationError("Checkpoint compiler configuration differs from the current run.")
+        metadata: CheckpointValue | None = checkpoint.get("metadata")
+        if self._elastic_restart_required() and isinstance(metadata, dict):
+            if metadata.get("world_size") != self._strategy.world_size:
+                raise MisconfigurationError(
+                    "Exact TorchElastic continuation requires the checkpoint world size. "
+                    "Topology-changing fine-tuning is a new trajectory, not exact resume."
+                )
+
+    def _elastic_restart_required(self) -> bool:
+        if not isinstance(self._strategy, ParallelStrategy):
+            return False
+        environment: TorchElasticEnvironment | None = (
+            self._strategy.cluster_environment
+            if isinstance(self._strategy.cluster_environment, TorchElasticEnvironment)
+            else None
+        )
+        return environment is not None and environment.restart_count > 0
 
     def _checkpoint_type(self, checkpoint: CheckpointDict) -> str:
         # Resolves the closed training-versus-weights artifact identity.

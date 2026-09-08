@@ -237,8 +237,9 @@ class Strategy:
         )
 
     def teardown(self) -> None:
-        # Releases Strategy-owned runtime resources; the base policy owns none.
-        pass
+        # Restores stage-scoped compiled forwards without resetting shared caches.
+        if self._compiler is not None:
+            self._compiler.teardown()
 
     def on_exception(self, exception: BaseException) -> None:
         # Performs exception-time Strategy cleanup; parallel policies destroy
@@ -333,6 +334,10 @@ class Strategy:
         self.precision_plugin: Precision = precision_plugin
 
     def attach_compiler(self, compiler: TorchCompiler | None) -> None:
+        # Selects compiler policy between stages; active forward bindings cannot
+        # be orphaned by swapping the compiler while a stage is executing.
+        if self._compiler is not None and self._compiler.is_active:
+            raise RuntimeError("Cannot replace an active compiler before stage teardown.")
         if compiler is not None and not isinstance(compiler, TorchCompiler):
             raise TypeError("compiler must be a TorchCompiler instance or None.")
         self._compiler: TorchCompiler | None = compiler
@@ -395,6 +400,7 @@ class Strategy:
 
     @property
     def compiler(self) -> TorchCompiler | None:
+        # Compiler configuration survives stages; live bindings do not.
         return self._compiler
 
     def _execute_step(
@@ -421,6 +427,7 @@ class Strategy:
         return self._module
 
     def _compile_model(self, model: nn.Module) -> nn.Module:
+        # Called after placement and before wrapping, preserving model identity.
         if self._compiler is None:
             return model
         return self._compiler.compile(model)

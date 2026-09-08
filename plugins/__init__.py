@@ -22,6 +22,8 @@ from syntheticmind.plugins.checkpoint_io import (
 )
 from syntheticmind.plugins.layer_sync import LayerSync, TorchSyncBatchNorm
 from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.plugins.slurm import SLURMEnvironment
+from syntheticmind.plugins.torch_elastic import TorchElasticEnvironment
 
 __all__: list[str] = [
     "AsyncCheckpointIO",
@@ -33,6 +35,8 @@ __all__: list[str] = [
     "LocalEnvironment",
     "Plugin",
     "Precision",
+    "SLURMEnvironment",
+    "TorchElasticEnvironment",
     "TorchCheckpointIO",
     "TorchSyncBatchNorm"
 ]
