@@ -78,8 +78,9 @@ class DDPStrategy(ParallelStrategy):
     def setup(self, model: nn.Module, device: torch.device) -> nn.Module:
         # Places and wraps the model in DistributedDataParallel for this process.
         placed_model: nn.Module = model.to(device)
+        execution_model: nn.Module = self._compile_model(placed_model)
         wrapped_model: DistributedDataParallel = DistributedDataParallel(
-            placed_model,
+            execution_model,
             device_ids=[device.index] if device.type == "cuda" else None
         )
         self.model: nn.Module | None = wrapped_model
@@ -90,7 +91,7 @@ class DDPStrategy(ParallelStrategy):
         # Returns ownership to the underlying client model before shared Strategy
         # teardown; process-group lifetime remains with ParallelStrategy.
         if isinstance(self.model, DistributedDataParallel):
-            self.model: nn.Module | None = self.model.module
+            self.model: nn.Module | None = self._require_module()
         super().teardown()
 
     def attach_layer_sync(self, layer_sync: LayerSync | None) -> None:
