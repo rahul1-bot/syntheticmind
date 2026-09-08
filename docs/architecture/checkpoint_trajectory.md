@@ -66,8 +66,10 @@ These hooks may add namespaced client state but must not delete or reinterpret
 framework trajectory fields.
 
 Strategy then persists the representation through its checkpoint owner and
-CheckpointIO. When the caller requests synchronization, every participating rank
-barriers only after publication succeeds.
+CheckpointIO. With synchronous persistence, a requested barrier follows
+publication. With asynchronous persistence, a returned save and ordinary Trainer
+barrier confirm submission rather than durable commit; publication fences are
+described below.
 
 ## Callback retention transaction
 
@@ -81,9 +83,11 @@ ModelCheckpoint divides policy into four private state machines:
    pruning.
 
 Logical schedule and ranking state advance before serialization so the artifact
-contains the state created by its own save. If persistence fails, all logical
-state rolls back. A superseded artifact is removed only after its replacement
-commits. The active resume checkpoint is protected from callback pruning.
+contains the state created by its own save. A synchronous persistence failure
+rolls back that logical transaction. A delayed asynchronous failure instead
+propagates at the next fence and aborts continuation; it is not a completed
+rollback of already-executed training. A superseded artifact is removed only
+after its replacement commits. The active resume checkpoint is protected from callback pruning.
 
 Monitored values must be scalar and are broadcast from global zero. A trigger
 that fires before its monitor exists defers until validation supplies it.
@@ -93,7 +97,7 @@ training state.
 
 ## Path selection
 
-Every stage accepts a concrete checkpoint path, `"best"`, `"last"`, or None.
+Every stage accepts a concrete checkpoint path, "best", "last", or None.
 An explicit stage argument overrides mutable `trainer.ckpt_path` with a warning.
 When validation, test, or prediction omits a model after an earlier fit, None
 defaults to the previous fit's best artifact.
@@ -144,6 +148,24 @@ state requires the same world size because each rank owns a distinct accumulator
 window. Stateful loader topology must match stable flattened order before any
 cursor is mutated.
 
+## Compiler and restart extensions
+
+Schema 2 now records `compiler_configuration` as a version-1 immutable policy or
+null. Absence in an older checkpoint means eager execution. Fit validates backend,
+mode, graph-break, shape, and region policy before restoration; compiled callables
+and process caches are never serialized. TorchAO contributes its separately
+versioned recipe state through the existing precision-state contract.
+
+An elastic fit restart with no explicit checkpoint selects `last` and fails if no
+durable artifact exists. Configure a stable callback directory before entry.
+Exact elastic continuation requires the original world size. Any partial epoch
+with consumed batches also rejects a changed world, even without metric windows;
+DCP tensor resharding alone cannot establish trajectory equivalence.
+
+`RunManifestCallback` may add `run_manifest_id` at active-fit assembly and record
+a parent ID on resume. Its JSON and resolved-policy projection are provenance,
+not a notification that a checkpoint committed.
+
 ## Exact partial-epoch continuation
 
 Stopping at `max_steps` inside a loader does not run epoch-end hooks or epoch
@@ -187,6 +209,20 @@ Local pointer publication uses same-directory temporary replacement and file and
 directory synchronization. Supported remote publication uses the filesystem
 transaction boundary. Cross-format path collisions fail without deleting the
 existing artifact.
+
+## Asynchronous distributed publication
+
+Sharded async mode writes metadata and captures an independent CPU snapshot before
+returning. One owned worker performs DCP shard writing, failure agreement, and
+pointer publication on a dedicated Gloo group. Training collectives never share
+that background ordering. At most one save is outstanding.
+
+Read, removal, next-save, last-link, and teardown boundaries fence the publication
+future. A failed generation never replaces the previous active pointer, and
+retention cannot remove its predecessor before the replacement is published.
+The actual pointer layout and synchronous default remain unchanged. See
+[model-parallel checkpointing](../../strategies/model_parallel_checkpointing/README.md)
+for resource cleanup and overlap limits.
 
 ## Failure policy
 

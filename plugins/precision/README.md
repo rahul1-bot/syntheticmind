@@ -12,6 +12,7 @@
 | `transformer_engine_contracts.py` | Strict delayed-scaling configuration and the live recipe contract. |
 | `transformer_engine_adapter.py` | The optional NVIDIA package boundary. |
 | `transformer_engine.py` | Transformer Engine module replacement and FP8 execution policy. |
+| `torchao.py` | Explicit optional TorchAO float8 conversion and recipe-state compatibility. |
 
 Transformer Engine support targets the current `transformer_engine>=2.18.0` API and calls `autocast(enabled=True, recipe=...)`. Recipe dictionaries are not accepted as unvalidated bags; use `DelayedScalingConfiguration` or a live object satisfying `DelayedScalingRecipe`. See the [NVIDIA Transformer Engine common API](https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/api/common.html) and [FP8 usage guide](https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/examples/fp8_primer.html).
 
@@ -60,6 +61,24 @@ Float16 mixed precision rejects LBFGS and persists GradScaler state for exact co
 Transformer Engine requires CUDA, `transformer_engine>=2.18.0`, float16 or bfloat16 weights, and eligible layer dimensions. Native Linear replacement requires input and output widths divisible by 16. LayerNorm replacement requires one normalized dimension. Unsupported layers remain native with a warning.
 
 `replace_layers=True` redirects construction during `configure_model`. `replace_layers=None` recursively converts an already constructed model only when no Transformer Engine layer exists. `replace_layers=False` preserves client layer types.
+
+## TorchAO float8 constraints
+
+Import `TorchAOFloat8Precision` explicitly from
+`syntheticmind.plugins.precision.torchao` and supply the instance through
+`Trainer(plugins=[...])`. The resolved `torchao-float8` identity is not a Trainer
+string shortcut. Ordinary precision imports do not load the optional package.
+
+Recipes are `tensorwise`, `rowwise`, or `rowwise_with_gw_hp`. Parameter storage and
+floating inputs are BF16; eligible Linear computation uses FP8. NVIDIA CUDA,
+compute capability at least 8.9, and native Linear dimensions divisible by 16 are
+required. Custom Linear subclasses are not replaced. Convert native regions
+before applying a TP/FSDP2 plan; already-sharded native weights are rejected.
+Version-1 precision state preserves the recipe and rejects changed continuation.
+
+The TorchAO 0.18 CPU probe verifies import, recipe state, and rejection before
+mutation. It does not validate CUDA numerics, compiled float8, or FSDP2 hardware
+behavior. See [runtime control](../../docs/guides/runtime_control.md).
 
 ## Related components
 

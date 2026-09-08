@@ -73,6 +73,26 @@ choose top-k retention. A custom callback does not perform a second distributed
 metric reduction. A custom Accelerator does not launch processes. A custom
 Strategy does not invent experiment logging.
 
+## Runtime control ownership
+
+Strategy owns reversible compiler binding through `TorchCompiler`; its immutable
+`CompilationConfiguration` is shared with checkpoint validation and manifests.
+There is no second Trainer or compiler plugin registry. Precision owns TorchAO
+conversion, while the explicit optional adapter owns that package dependency.
+The client model owns activation-checkpoint region selection and reconstruction.
+
+ParallelStrategy selects scheduler facts, and the checkpoint connector owns
+restart-path and trajectory compatibility decisions. The model-parallel
+checkpoint owner owns async CPU snapshots, its worker, its independent process
+group, and generation publication. Callback retention waits for publication but
+does not acquire distributed representation ownership. CUDA diagnostics and run
+manifests observe existing callback boundaries, without replacing metric loggers.
+
+Extended CP/PP axes supply topology only. Client-owned manual algorithms must
+provide attention, gradients, losses, and pipeline schedules. A mesh dimension
+is not evidence of an implemented execution algorithm. See
+[the control guide](../guides/runtime_control.md) for the exact public surface.
+
 ## Composition boundaries
 
 Trainer uses connectors only for configuration families that cross several

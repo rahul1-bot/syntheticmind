@@ -7,6 +7,7 @@
 | `checkpoint.py` | Strategy checkpoint lifecycle, all-rank path agreement, preload, and deferred restore. |
 | `checkpoint_io.py` | Full and sharded distributed state extraction, persistence, and application. |
 | `sharded_store.py` | Collective shard storage, metadata coordination, failure broadcast, and pruning. |
+| `asynchronous.py` | Bounded CPU staging, an isolated background communication group, publication futures, and deterministic drain. |
 | `generation.py` | UUIDv7 generation identities and atomic active-generation pointer publication. |
 
 ## Full checkpoints
@@ -37,7 +38,7 @@ PyTorch writes rank-partitioned state and `.metadata`. SyntheticMind stores Trai
 
 ## Publication transaction
 
-One save follows this order:
+One synchronous save follows this order:
 
 1. Global rank zero creates a new immutable generation directory and broadcasts any failure.
 2. Every rank writes its distributed state through the selected PyTorch StorageWriter.
@@ -49,6 +50,28 @@ One save follows this order:
 The previous generation remains readable until the new pointer commits. Complete but unpublished generations cannot become active by modification time. A pruning failure warns after successful publication and does not invalidate the newly committed checkpoint.
 
 Local pointer publication writes and flushes a same-directory temporary file, fsyncs it, atomically replaces the pointer, and fsyncs the parent directory. Remote publication uses the resolved fsspec transaction.
+
+## Asynchronous publication
+
+`ModelParallelStrategy(checkpoint_write="asynchronous")` retains the same sharded
+format and generation pointer. Preparation and Trainer metadata writing occur
+on the caller, followed by an independent CPU snapshot through PyTorch's blocking
+async stager. One owned worker executes DCP `save` and pointer publication on a
+separate Gloo process group, never on the training collective stream.
+
+Only one save can be outstanding. Returning from save confirms staging and
+submission, not durable publication. Read, remove, subsequent-save, last-link,
+and teardown boundaries fence the publication future. Rank-zero retention can
+wait locally because every rank already owns its participating background worker.
+Failures remain visible and preserve the previous active generation.
+
+Teardown drains the worker before releasing its communication group; exception
+cleanup drains checkpoint work before destroying training groups. Metadata and
+staging still block, and retention or last-link publication can reduce overlap.
+The two-rank CPU probe covers snapshot isolation, independent training
+collectives, retention, and injected publication failure. CUDA/NCCL and remote
+asynchronous backends require separate validation. See
+[the control guide](../../docs/guides/runtime_control.md).
 
 ## Compatibility and collisions
 

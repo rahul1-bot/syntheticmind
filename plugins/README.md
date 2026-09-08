@@ -6,6 +6,8 @@
 |---|---|
 | `checkpoint_io.py` | Structural checkpoint storage, local PyTorch persistence, wrapping, and asynchronous snapshots. |
 | `environments.py` | Structural cluster topology plus the local environment implementation. |
+| `slurm.py` | Slurm task topology and bounded scheduler rendezvous discovery. |
+| `torch_elastic.py` | Torchrun topology, run identity, and restart-budget validation. |
 | `layer_sync.py` | Structural layer synchronization plus reversible synchronized batch normalization. |
 | `precision/` | Full, true-half, mixed, and Transformer Engine numerical execution policies. |
 
@@ -42,6 +44,19 @@ Local default persistence publishes through a same-directory atomic replacement.
 
 A `ClusterEnvironment` provides rank, world size, node rank, local rank, rendezvous address and port, validation, and whether workers were created externally. Strategy owns process-group creation, collective order, and cleanup. Returning `creates_processes_externally=True` prevents SyntheticMind from launching another local worker set.
 
+## Scheduler selection and continuation
+
+`SLURMEnvironment` and `TorchElasticEnvironment` are available from
+`syntheticmind.plugins`. An explicit environment wins; automatic selection
+prefers TorchElastic, then standard externally launched rank state, then Slurm,
+then the local fallback. These adapters read scheduler contracts, not research
+parameters. They do not provision workers, submit jobs, or implement requeue.
+
+The checkpoint connector requires a durable checkpoint on an elastic fit restart.
+Configure a stable explicit ModelCheckpoint directory with `save_last=True`, or
+pass `ckpt_path` directly. A missing last artifact raises instead of resetting
+training. Exact elastic continuation requires the original world size.
+
 ## Layer synchronization
 
 `LayerSync` is a reversible structural transformation around distributed fitting. `TorchSyncBatchNorm` converts before DDP wrapping and restores ordinary batch-normalization modules afterward while preserving parameters, buffers, modes, children, and quantization configuration.
@@ -49,6 +64,12 @@ A `ClusterEnvironment` provides rank, world size, node rank, local rank, rendezv
 ## Precision
 
 Precision plugins own numerical conversion, forward contexts, backward preparation, gradient scaling, optimizer stepping, clipping, and checkpoint state. See [`precision/README.md`](precision/README.md) for the complete policy matrix.
+
+TorchAO float8 is selected by explicitly importing
+`syntheticmind.plugins.precision.torchao.TorchAOFloat8Precision`. It is not eagerly
+re-exported because ordinary framework imports must not require TorchAO. The
+[control guide](../docs/guides/runtime_control.md) distinguishes CPU-tested adapter
+boundaries from unverified CUDA execution and multi-node recovery.
 
 ## Related components
 

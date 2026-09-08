@@ -20,6 +20,8 @@ describe how those concepts compose into one training system.
 | [`guides/model_and_data_integration.md`](guides/model_and_data_integration.md) | Building a Module and DataModule that enter the complete Trainer lifecycle. |
 | [`guides/trainer_configuration.md`](guides/trainer_configuration.md) | Configuration domains, resolved policies, execution recipes, and conflicting settings. |
 | [`guides/extension_points.md`](guides/extension_points.md) | Choosing and implementing the correct callback, logger, profiler, accelerator, Strategy, or plugin boundary. |
+| [`guides/runtime_control.md`](guides/runtime_control.md) | Compiler, precision, scheduler, async checkpoint, memory, provenance, and extended-mesh controls with explicit limits. |
+| [`guides/runtime_verification.md`](guides/runtime_verification.md) | Executable single-process, two-rank, failure-injection, and optional-adapter probes used by CI. |
 
 ## Project documentation policy
 

@@ -116,6 +116,23 @@ teardown paths exist. SyntheticMind does not claim Fabric parity, XLA execution,
 distributed MPS, local multi-node provisioning, universal upstream Trainer
 options, public release readiness, or compatibility with vendor internals.
 
+## Opt-in runtime controls
+
+The feature branch adds Strategy-owned regional `TorchCompiler` bindings,
+TorchAO float8 precision, Slurm and TorchElastic environment adapters,
+asynchronous sharded checkpoint publication, client-selected activation
+recomputation, CUDA failure snapshots, and versioned run manifests. Compiler
+policy participates in fit-resume compatibility; elastic restarts require an
+existing durable checkpoint and the same world size.
+
+The default DP/TP mesh and existing positional constructor meanings remain
+unchanged. Extended CP/PP axes are an explicit topology surface for client-owned
+manual execution, not built-in distributed attention or pipeline scheduling.
+CPU verification does not establish CUDA FP8, FSDP2, OOM-recorder, or multi-node
+restart correctness. See the [runtime control guide](docs/guides/runtime_control.md)
+for actual imports, lifecycle guarantees, and remaining scope, and the
+[executable probes](docs/guides/runtime_verification.md) for reproducible evidence.
+
 ## Lifecycle at a glance
 
 Trainer validates configuration before touching client resources. A stage then
