@@ -69,6 +69,11 @@ class ContextParallelStrategy(ModelParallelStrategy):
         tensors: list[torch.Tensor] = [*model.parameters(), *model.buffers()]
         if any(isinstance(tensor, DTensor) for tensor in tensors):
             raise MisconfigurationError("ContextParallelStrategy requires ordinary replicated tensors.")
+        policy: str = self.configuration.model_dump_json()
+        policies: list[str | None] = [None] * self.world_size
+        dist.all_gather_object(policies, policy)
+        if any(entry != policy for entry in policies):
+            raise MisconfigurationError("Context-parallel configuration must agree on every rank.")
         signature: list[tuple[str, tuple[int, ...], str]] = []
         name: str
         for name, tensor in [*model.named_parameters(), *model.named_buffers()]:
@@ -82,6 +87,29 @@ class ContextParallelStrategy(ModelParallelStrategy):
         self._pending_backward: bool = False
         self._failed: bool = False
         return execution_model
+
+    def normalize_loss(self, local_loss_sum: torch.Tensor, local_weight: int) -> torch.Tensor:
+        # Converts local summed loss into a globally weighted mean after the
+        # configured parameter-gradient reduction. A rank may own zero valid terms.
+        error: str | None = None
+        maximum_weight: int = (2 ** 53 - 1) // self.context_parallel_size
+        if not isinstance(local_loss_sum, torch.Tensor) or local_loss_sum.numel() != 1:
+            error: str | None = "local_loss_sum must be a scalar Tensor."
+        elif not local_loss_sum.is_floating_point() or local_loss_sum.device != self.root_device:
+            error: str | None = "local_loss_sum must be floating and on the Strategy device."
+        if type(local_weight) is not int or not 0 <= local_weight <= maximum_weight:
+            error: str | None = f"local_weight must be a non-negative integer no greater than {maximum_weight}."
+        errors: list[str | None] = [None] * self.world_size
+        dist.all_gather_object(errors, error)
+        if any(message is not None for message in errors):
+            raise MisconfigurationError(f"Context loss normalization rejected: {errors}.")
+        total: torch.Tensor = torch.tensor(local_weight, dtype=torch.int64, device=self.root_device)
+        dist.all_reduce(total, group=self.device_mesh["context_parallel"].get_group())
+        total_weight: int = int(total.item())
+        if total_weight <= 0:
+            raise MisconfigurationError("Context loss requires a positive global normalization weight.")
+        multiplier: int = self.context_parallel_size if self.configuration.gradient_reduction == "mean" else 1
+        return local_loss_sum * (multiplier / total_weight)
 
     @override
     def backward(
@@ -106,13 +134,14 @@ class ContextParallelStrategy(ModelParallelStrategy):
         model: nn.Module | None = None,
         **kwargs: OptimizerStepValue
     ) -> OptimizerStepOutput:
-        if len(self.optimizers) != 1 or optimizer is not self.optimizers[0]:
-            raise MisconfigurationError("ContextParallelStrategy requires one managed optimizer.")
-        if isinstance(optimizer, torch.optim.LBFGS):
-            raise MisconfigurationError("Repeated-closure LBFGS is not supported by this context policy.")
-        result: OptimizerStepOutput = super().optimizer_step(
-            optimizer, partial(self._synchronized_closure, closure, optimizer), model, **kwargs
-        )
+        self._validate_optimizer(optimizer)
+        try:
+            result: OptimizerStepOutput = super().optimizer_step(
+                optimizer, partial(self._synchronized_closure, closure, optimizer), model, **kwargs
+            )
+        except BaseException:
+            self._failed: bool = True
+            raise
         self._pending_backward: bool = False
         return result
 
@@ -147,11 +176,35 @@ class ContextParallelStrategy(ModelParallelStrategy):
     def configuration(self) -> ContextParallelConfiguration:
         return self._context_configuration
 
+    def _validate_optimizer(self, optimizer: torch.optim.Optimizer) -> None:
+        # Parameter traversal order is a collective contract, not merely matching
+        # model names. Validate it before any rank begins gradient all-reduces.
+        error: str | None = None
+        if self._failed or len(self.optimizers) != 1 or optimizer is not self.optimizers[0]:
+            error: str | None = "Context training requires one managed optimizer and a healthy stage."
+        elif isinstance(optimizer, torch.optim.LBFGS):
+            error: str | None = "Repeated-closure LBFGS is unsupported."
+        name: str
+        parameter: nn.Parameter
+        names: dict[int, str] = {
+            id(parameter): name for name, parameter in self._require_module().named_parameters()
+        }
+        ordered: tuple[str, ...] = tuple(
+            names.get(id(parameter), "<unowned>")
+            for parameter in self.precision_plugin.main_params(optimizer)
+        )
+        if len(set(ordered)) != len(ordered) or "<unowned>" in ordered:
+            error: str | None = "Optimizer parameters must be unique and owned by the connected model."
+        records: list[tuple[str | None, tuple[str, ...]] | None] = [None] * self.world_size
+        dist.all_gather_object(records, (error, ordered))
+        if any(record != (None, ordered) for record in records):
+            raise MisconfigurationError(f"Context optimizer collective contract differs: {records}.")
+
     def _synchronized_closure(
         self, closure: OptimizerClosure, optimizer: torch.optim.Optimizer
     ) -> OptimizerClosureResult:
         result: OptimizerClosureResult = closure()
-        if not self._pending_backward:
+        if not self.reduce_boolean_decision(self._pending_backward):
             raise MisconfigurationError("Call Module.manual_backward before a context-parallel optimizer step.")
         self.sync_gradients(optimizer)
         return result

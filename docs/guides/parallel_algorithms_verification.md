@@ -11,11 +11,11 @@ against sequential training, and checks interrupted/resumed stochastic pipeline
 training with per-rank RNG. All fixtures are created in a fresh explicit artifact
 root. These are CPU/Gloo checks, not GPU throughput benchmarks.
 
-Reference and harness paths deliberately use the same sequential sample order.
-The probe disables automatic DistributedSampler injection: CP/PP ranks cooperate
-on each complete sample, and the client partitions its sequence or computation.
-Comparing a sequential reference against a shuffled training order is not an
-algorithm-equivalence test. Numerical and bit-exact resume tolerances are unchanged.
+The reference and harness explicitly share sequential sample order through
+`use_distributed_sampler=False`. Context cross-topology equivalence uses momentum
+SGD: attention key bias is a softmax-invariant direction whose near-zero floating
+gradient can otherwise be amplified differently by Adam. Pipeline tests retain
+AdamW, and same-topology resume comparisons remain bit-exact.
 
 ```python
 import argparse
@@ -136,7 +136,7 @@ class ContextModule(Module):
 
     @override
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.AdamW(self.parameters(), lr=0.003)
+        return torch.optim.SGD(self.parameters(), lr=0.003, momentum=0.9)
 
 
 class ParallelAlgorithmProbe:
@@ -204,7 +204,7 @@ class ParallelAlgorithmProbe:
 
     def _context_training(self) -> None:
         reference: ContextModule = ContextModule()
-        optimizer: torch.optim.Optimizer = torch.optim.AdamW(reference.parameters(), lr=0.003)
+        optimizer: torch.optim.Optimizer = torch.optim.SGD(reference.parameters(), lr=0.003, momentum=0.9)
         batch: tuple[torch.Tensor, torch.Tensor]
         for batch in self._loader(True):
             optimizer.zero_grad()

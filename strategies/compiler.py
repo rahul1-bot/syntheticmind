@@ -12,16 +12,28 @@
 #
 # Author: Rahul Sawhney
 
+import hashlib
+import os
+import tempfile
+from collections import deque
 from collections.abc import Callable
+from functools import partial
+from pathlib import Path
+from time import perf_counter
 from typing import Annotated, ClassVar, Literal, cast
 
 import torch
-from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
+import torch._inductor
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from torch import nn
+from torch._dynamo import config as dynamo_configuration
+from torch._dynamo.backends.registry import lookup_backend
+from torch._dynamo.output_graph import GraphCompileReason
+from torch._guards import CompileContext, CompileId
 
 from syntheticmind.primitives.types import ModelOutput
 
-__all__: list[str] = ["CompilationConfiguration", "TorchCompiler"]
+__all__: list[str] = ["CompilationConfiguration", "CompilationEvent", "CompilationReport", "TorchCompiler"]
 
 type CompilationMode = Literal[
     "default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"
@@ -29,6 +41,9 @@ type CompilationMode = Literal[
 type GraphBreakPolicy = Literal["allow", "forbid"]
 type ShapePolicy = Literal["auto", "dynamic", "static"]
 type _Forward = Callable[..., ModelOutput]
+type _GraphInput = torch.Tensor | torch.SymInt | torch.SymFloat | torch.SymBool | int | float | bool
+type _GraphBackend = Callable[[torch.fx.GraphModule, list[_GraphInput]], _Forward]
+type _CompilerOption = bool | int | float | str | None
 type _ForwardBinding = tuple[nn.Module, _Forward, _Forward, bool]
 
 
@@ -61,6 +76,34 @@ class CompilationConfiguration(BaseModel):
         return self
 
 
+class CompilationEvent(BaseModel):
+    # A completed backend attempt, not total Dynamo capture or lazy backward time.
+    # Null native frame IDs indicate unavailable metadata, not a first compile.
+    region_path: str
+    frame_id: Annotated[int, Field(ge=0)] | None
+    frame_compile_id: Annotated[int, Field(ge=0)] | None
+    graph_sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    graph_break_reason: str | None
+    backend_duration_seconds: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+    failure: str | None
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True, extra="forbid", strict=True, validate_default=True
+    )
+
+
+class CompilationReport(BaseModel):
+    # Bounded stage-local observations. A cache hit may produce no backend events;
+    # absence of an event is not proof that execution never entered eager Python.
+    schema_version: Literal[1] = 1
+    torch_version: str
+    configuration: CompilationConfiguration
+    events: tuple[CompilationEvent, ...]
+    dropped_event_count: Annotated[int, Field(ge=0)]
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True, extra="forbid", strict=True, validate_default=True
+    )
+
+
 class TorchCompiler:
     # Strategy owns this stage-scoped binding lifecycle. Standalone clients may
     # call compile(module), execute module(...), then teardown in a finally block.
@@ -71,8 +114,12 @@ class TorchCompiler:
         mode: CompilationMode = "default",
         graph_break_policy: GraphBreakPolicy = "allow",
         shape_policy: ShapePolicy = "auto",
-        module_paths: tuple[str, ...] | None = None
+        module_paths: tuple[str, ...] | None = None,
+        *,
+        diagnostics_limit: int = 256
     ) -> None:
+        if type(diagnostics_limit) is not int or diagnostics_limit < 1:
+            raise ValueError("diagnostics_limit must be a positive integer.")
         self._configuration: CompilationConfiguration = CompilationConfiguration(
             backend=backend,
             mode=mode,
@@ -82,6 +129,12 @@ class TorchCompiler:
         )
         self._bindings: list[_ForwardBinding] = []
         self._root: nn.Module | None = None
+        self._events: deque[CompilationEvent] = deque(maxlen=diagnostics_limit)
+        self._dropped_event_count: int = 0
+        path: str
+        self._backends: dict[str, _GraphBackend] = {
+            path: partial(self._compile_graph, path) for path in self._configuration.module_paths
+        }
 
     def compile(self, module: nn.Module) -> nn.Module:
         # Rebinds forwards only after resolving every requested region. Returning
@@ -92,6 +145,8 @@ class TorchCompiler:
             return module
         if self._root is not None:
             raise RuntimeError("Compiler is active on another model; tear it down first.")
+        if dynamo_configuration.suppress_errors:
+            raise RuntimeError("Disable torch._dynamo.config.suppress_errors before selecting TorchCompiler.")
         path: str
         region: nn.Module
         regions: list[nn.Module] = [
@@ -102,10 +157,12 @@ class TorchCompiler:
         for region in regions:
             if getattr(region, "_compiled_call_impl", None) is not None:
                 raise ValueError("A selected region already owns an nn.Module.compile binding.")
+        self._events.clear()
+        self._dropped_event_count: int = 0
         self._root: nn.Module | None = module
         try:
-            for region in regions:
-                self._bind_forward(region)
+            for path, region in zip(self._configuration.module_paths, regions, strict=True):
+                self._bind_forward(path, region)
         except BaseException as exception:
             try:
                 self.teardown()
@@ -135,6 +192,30 @@ class TorchCompiler:
         if failures:
             raise RuntimeError(f"Client replaced active compiled forwards: {failures}.")
 
+    def save_report(self, path: Path) -> None:
+        # Explicit local publication; no graph code, tensor payloads, or automatic
+        # uploads. Call after the stage to include all observed backend attempts.
+        destination: Path = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent, delete=False) as stream:
+                temporary: Path | None = Path(stream.name)
+                stream.write(self.report.model_dump_json(indent=2))
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(destination)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+
+    @property
+    def report(self) -> CompilationReport:
+        return CompilationReport(
+            torch_version=str(torch.__version__), configuration=self._configuration,
+            events=tuple(self._events), dropped_event_count=self._dropped_event_count
+        )
+
     @property
     def configuration(self) -> CompilationConfiguration:
         return self._configuration
@@ -159,7 +240,7 @@ class TorchCompiler:
     def shape_policy(self) -> ShapePolicy:
         return self._configuration.shape_policy
 
-    def _bind_forward(self, region: nn.Module) -> None:
+    def _bind_forward(self, path: str, region: nn.Module) -> None:
         original: _Forward = cast(_Forward, region.forward)
         compiled: _Forward = cast(
             _Forward,
@@ -167,12 +248,50 @@ class TorchCompiler:
                 original,
                 fullgraph=self.graph_break_policy == "forbid",
                 dynamic=self._dynamic_shapes(),
-                backend=self.backend,
-                mode=self.mode
+                backend=self._backends[path]
             )
         )
         self._bindings.append((region, original, compiled, "forward" in vars(region)))
         region.forward: _Forward = compiled
+
+    def _compile_graph(
+        self, path: str, graph: torch.fx.GraphModule, example_inputs: list[_GraphInput]
+    ) -> _Forward:
+        # Observe only this compiler's backend boundary, not global Dynamo counters.
+        identity: CompileId | None = CompileContext.current_compile_id()
+        reason: GraphCompileReason | None = getattr(graph, "compile_subgraph_reason", None)
+        fingerprint: str = hashlib.sha256(str(graph.graph).encode("utf-8")).hexdigest()
+        started: float = perf_counter()
+        failure: str | None = None
+        try:
+            if self.backend == "inductor":
+                options: dict[str, _CompilerOption] = cast(
+                    dict[str, _CompilerOption],
+                    torch._inductor.list_mode_options(self.mode, self._dynamic_shapes())
+                )
+                result: _Forward = cast(_Forward, torch._inductor.compile(graph, example_inputs, options=options))
+            elif self.mode == "default":
+                result: _Forward = cast(_Forward, lookup_backend(self.backend)(graph, example_inputs))
+            else:
+                result: _Forward = cast(_Forward, lookup_backend(self.backend)(graph, example_inputs, mode=self.mode))
+            if not callable(result):
+                raise TypeError(f"Compiler backend {self.backend!r} did not return executable code.")
+            return result
+        except BaseException as exception:
+            failure: str | None = f"{type(exception).__name__}: {exception}"
+            raise
+        finally:
+            event: CompilationEvent = CompilationEvent(
+                region_path=path,
+                frame_id=identity.frame_id if identity is not None else None,
+                frame_compile_id=identity.frame_compile_id if identity is not None else None,
+                graph_sha256=fingerprint,
+                graph_break_reason=reason.reason if isinstance(reason, GraphCompileReason) and reason.graph_break else None,
+                backend_duration_seconds=perf_counter() - started, failure=failure
+            )
+            if len(self._events) == self._events.maxlen:
+                self._dropped_event_count: int = self._dropped_event_count + 1
+            self._events.append(event)
 
     def _dynamic_shapes(self) -> bool | None:
         return None if self.shape_policy == "auto" else self.shape_policy == "dynamic"
