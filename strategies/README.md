@@ -14,11 +14,17 @@ Strategy
 └── ParallelStrategy
     ├── DDPStrategy
     └── ModelParallelStrategy
+        ├── ContextParallelStrategy
+        └── PipelineParallelStrategy
 ```
 
 | Module | ML ownership |
 |---|---|
 | `strategy.py` | Universal training execution semantics and private wrapped-step forwarding. |
+| `compiler.py` | Immutable compilation policy, reversible region bindings, and bounded backend reports. |
+| `context_parallel.py` | Context-only replicated-parameter gradient reduction and weighted loss normalization. |
+| `pipeline_parallel.py` | Native GPipe/1F1B execution and managed optimizer boundaries. |
+| `parallel_configuration.py` | Strict context/pipeline execution and shape contracts shared with checkpoints. |
 | `parallel.py` | Shared distributed process, rank, device, collective, and launcher semantics. |
 | `single_device.py` | The named one-process, one-device execution policy. |
 | `ddp.py` | PyTorch `DistributedDataParallel` wrapping and DDP-specific gradient behavior. |
@@ -91,6 +97,31 @@ class ParallelEncoder(Module):
 ```
 
 Tensor-parallel ranks cooperate on the same samples, so distributed sampling and throughput use only the data-parallel axis. Full and sharded checkpoint paths require all-rank participation.
+
+## Compiler and extended topology
+
+`TorchCompiler` and its immutable `CompilationConfiguration` are exported from
+`syntheticmind.strategies`. Attach a compiler through `strategy.attach_compiler`
+before passing that Strategy to Trainer. Selected tensor forwards compile after
+placement and before DDP wrapping; model, parameter, and state-dict identities
+remain unchanged. Stage teardown restores bindings, and checkpoint continuation
+validates compiler policy. There is no alternate Trainer compilation entrypoint.
+
+The default model-parallel mesh remains two-dimensional DP/TP. Keyword-only
+`context_parallel_size` and `pipeline_parallel_size` extend topology when either
+exceeds one, require explicit DP/TP dimensions, and reject automatic optimization.
+The client owns context-parallel attention, gradients, and pipeline schedules;
+mesh creation alone does not implement those algorithms. The separate
+`ContextParallelStrategy` and `PipelineParallelStrategy` supply concrete CP-only
+and PP-only implementations under the existing manual loop. Their configuration
+classes are exported here. See [parallel algorithms](../docs/guides/parallel_algorithms.md)
+for exact loss, dtype, shape, hook, and rank-local checkpoint limits.
+
+`checkpoint_write="asynchronous"` selects the Strategy-owned sharded transaction;
+full-format async output is rejected. Slurm and TorchElastic environments are
+auto-selected at the external-launch boundary without changing process ownership.
+See [runtime control](../docs/guides/runtime_control.md) for construction, resume,
+compatibility, and verification limits.
 
 ## Related components
 

@@ -147,6 +147,9 @@ class _ShardedCheckpointStore:
         # Removes the complete checkpoint root selected by higher-level retention.
         StoragePath(path).remove(recursive=True)
 
+    def teardown(self) -> None:
+        pass
+
     def _prepare_generation(
         self,
         checkpoint_path: str | Path,

@@ -32,6 +32,7 @@ from syntheticmind.plugins.checkpoint_io import (
 from syntheticmind.strategies.checkpoint import StrategyCheckpoint
 from syntheticmind.strategies.model_parallel_checkpointing.checkpoint_io import (
     ModelParallelCheckpointFormat,
+    ModelParallelCheckpointWrite,
     _ModelParallelCheckpointIO
 )
 from syntheticmind.strategies.model_parallel_checkpointing.generation import CheckpointBroadcast
@@ -53,13 +54,15 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
     def __init__(
         self,
         checkpoint_format: ModelParallelCheckpointFormat,
+        checkpoint_write: ModelParallelCheckpointWrite,
         barrier: Callable[[], None],
         broadcast: CheckpointBroadcast
     ) -> None:
         # Binds format, collective operations, participant slots, and empty
         # preload and pending-restore state.
         self._checkpoint_io: _ModelParallelCheckpointIO = _ModelParallelCheckpointIO(
-            checkpoint_format
+            checkpoint_format,
+            checkpoint_write
         )
         self._barrier: Callable[[], None] = barrier
         self._broadcast: CheckpointBroadcast = broadcast
@@ -214,11 +217,14 @@ class _ModelParallelCheckpoint(StrategyCheckpoint):
     def teardown(self) -> None:
         # Releases every preloaded and deferred restore reference while leaving
         # immutable published artifacts untouched.
-        self._preloaded_path: str | None = None
-        self._preloaded_checkpoint: CheckpointDict | None = None
-        self._pending_path: str | None = None
-        self._pending_checkpoint: CheckpointDict | None = None
-        self._pending_weights_only: bool | None = None
+        try:
+            self._checkpoint_io.teardown()
+        finally:
+            self._preloaded_path: str | None = None
+            self._preloaded_checkpoint: CheckpointDict | None = None
+            self._pending_path: str | None = None
+            self._pending_checkpoint: CheckpointDict | None = None
+            self._pending_weights_only: bool | None = None
 
     @override
     def attach_checkpoint_io(self, checkpoint_io: CheckpointIO) -> None:

@@ -10,6 +10,8 @@
 | `metric.py` | `LoggedMetric`, the routed scalar or TorchMetrics observation produced by `Module.log`. |
 | `hyperparameters.py` | `HyperparametersMixin`, constructor capture for reconstruction and experiment metadata. |
 | `saving.py` | Model and DataModule checkpoint reconstruction from schema-v2 artifacts. |
+| `activation_checkpointing.py` | Client-selected non-reentrant and selective activation recomputation. |
+| `context_parallel_attention.py` | Local-query attention, differentiable packed global K/V, and rank-offset causal masking. |
 
 ## Module integration
 
@@ -113,6 +115,31 @@ Call `save_hyperparameters` from the constructor to capture all arguments, selec
 An attached Module exposes current epoch, global step, global and local rank, device mesh, loggers, optimizers, schedulers, and rank-safe printing. Nested SyntheticMind modules receive the same Trainer recursively. Pickle state removes the live Trainer reference so spawned workers reconstruct their own runtime graph.
 
 `all_gather` accepts tensors, NumPy arrays, numeric scalars, and nested collections. The selected Strategy owns communication. `sync_grads=True` uses differentiable gathering; ordinary gathering does not retain a graph.
+
+## Activation recomputation
+
+`ActivationCheckpointing` is imported from
+`syntheticmind.core.activation_checkpointing`. Wrap only a client-selected region
+when constructing the model. Non-reentrant recomputation preserves the inherited
+PyTorch call/hook path, and optional `saved_operations` selects operator overloads
+to retain. No-grad calls bypass recomputation. RNG preservation is the default;
+explicit eager RNG advancement is rejected under compilation.
+
+The wrapper becomes part of the architecture and changes child state-dict paths;
+reconstruct the same graph for loading. It does not pick layers, resize batches,
+or retry OOMs. The [control guide](../docs/guides/runtime_control.md) records the
+memory contract and CPU gradient verification.
+
+## Context-parallel attention
+
+Import `ContextParallelAttention` from its semantic module and construct it with
+the context mesh in `configure_model`. It consumes equal contiguous local
+`[batch, heads, sequence, features]` Q/K/V shards, differentiates packed K/V
+communication, and applies global causal or bidirectional attention. It is not a
+streaming ring algorithm and materializes global K/V. Replicated parameter
+gradient reduction and weighted loss normalization belong to
+`ContextParallelStrategy`, not this layer. See
+[parallel algorithms](../docs/guides/parallel_algorithms.md).
 
 ## Related components
 

@@ -179,6 +179,8 @@ class _CheckpointPaths:
         # barriers so all ranks observe completion before leaving the callback.
         if not StoragePath(filepath).is_local or not StoragePath(linkpath).is_local:
             raise ValueError("Checkpoint links require local paths.")
+        if not trainer._checkpoint_connector.is_checkpoint_path(filepath):
+            raise FileNotFoundError(f"Cannot link an unpublished checkpoint: {filepath}")
         source_path: Path = Path(StoragePath(filepath).normalized)
         target_path: Path = Path(StoragePath(linkpath).normalized)
         if not trainer.is_global_zero:

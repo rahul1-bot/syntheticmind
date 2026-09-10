@@ -431,6 +431,8 @@ class _AcceleratorConnector:
                     f"Received precision={precision!r} together with a precision plugin. "
                     "Configure either precision or the plugin, not both."
                 )
+            if selected_plugin.precision == "torchao-float8" and device != "cuda":
+                raise MisconfigurationError("TorchAOFloat8Precision requires accelerator='cuda'.")
             return selected_plugin
         normalized_precision: PrecisionType = self._normalize_precision(precision)
         if normalized_precision == "16-mixed" and device == "cpu":

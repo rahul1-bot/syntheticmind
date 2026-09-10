@@ -1,0 +1,135 @@
+name: Runtime control plane
+
+on:
+  push:
+    branches: [feature/runtime-control-plane]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: runtime-control-plane-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  cpu-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: syntheticmind
+      - name: Preserve reviewed source snapshots
+        working-directory: syntheticmind
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime-evidence"
+          git archive --format=tar --prefix=syntheticmind/ HEAD > "$RUNNER_TEMP/runtime-evidence/feature.tar"
+          git archive --format=tar --prefix=syntheticmind/ origin/dev > "$RUNNER_TEMP/runtime-evidence/dev.tar"
+          git rev-parse HEAD origin/dev > "$RUNNER_TEMP/runtime-evidence/revisions.txt"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14'
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install uv
+          uv pip install --system 'torch==2.14.0' --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system 'pydantic==2.13.5' numpy torchmetrics loguru fsspec rich tensorboard packaging pyyaml
+          uv pip freeze > "$RUNNER_TEMP/runtime-evidence/dependencies.txt"
+      - name: Compile and import the production package
+        run: |
+          python -m compileall -q syntheticmind
+          python - <<'PY'
+          import importlib
+          from pathlib import Path
+          from types import ModuleType
+          from loguru import logger
+
+          class ImportProbe:
+              def run(self) -> None:
+                  root: Path = Path('syntheticmind')
+                  paths: list[Path] = sorted(root.rglob('*.py'))
+                  path: Path
+                  for path in paths:
+                      if path == root / 'plugins/precision/torchao.py':
+                          continue
+                      parts: tuple[str, ...] = path.with_suffix('').parts
+                      name: str = '.'.join(parts[:-1] if parts[-1] == '__init__' else parts)
+                      imported: ModuleType = importlib.import_module(name)
+                      del imported
+                  logger.info(f'Imported {len(paths) - 1} modules; optional TorchAO adapter checked separately.')
+
+          if __name__ == '__main__':
+              probe: ImportProbe = ImportProbe()
+              probe.run()
+          PY
+      - name: Extract documented runtime probes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          class ProbeExtractor:
+              def run(self) -> None:
+                  source: str = Path('syntheticmind/docs/guides/runtime_verification.md').read_text()
+                  blocks: list[str] = source.split('```python\n')[1:]
+                  if len(blocks) != 3:
+                      raise ValueError('Expected exactly three documented runtime probes.')
+                  index: int
+                  block: str
+                  for index, block in enumerate(blocks, start=1):
+                      Path(f'runtime_probe_{index}.py').write_text(block.split('```', 1)[0])
+                  parallel_source: str = Path('syntheticmind/docs/guides/parallel_algorithms_verification.md').read_text()
+                  parallel_blocks: list[str] = parallel_source.split('```python\n')[1:]
+                  if len(parallel_blocks) != 1:
+                      raise ValueError('Expected one parallel algorithm probe.')
+                  Path('parallel_probe.py').write_text(parallel_blocks[0].split('```', 1)[0])
+                  failure_source: str = Path('syntheticmind/docs/guides/runtime_failure_verification.md').read_text()
+                  failure_blocks: list[str] = failure_source.split('```python\n')[1:]
+                  if len(failure_blocks) != 1:
+                      raise ValueError('Expected one runtime failure probe.')
+                  Path('runtime_failure_probe.py').write_text(failure_blocks[0].split('```', 1)[0])
+
+          if __name__ == '__main__':
+              extractor: ProbeExtractor = ProbeExtractor()
+              extractor.run()
+          PY
+      - name: Verify single-process training and compiler execution
+        run: python runtime_probe_1.py 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/single.log"
+      - name: Verify two-rank training, continuation, and failure transactions
+        run: |
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 runtime_probe_2.py --artifact-root "$RUNNER_TEMP/distributed-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/distributed.log"
+      - name: Verify context and pipeline algorithms
+        run: |
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 parallel_probe.py --artifact-root "$RUNNER_TEMP/parallel-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/parallel.log"
+      - name: Verify compiler diagnostics
+        if: ${{ !cancelled() }}
+        run: python runtime_failure_probe.py --mode local --artifact-root "$RUNNER_TEMP/runtime-probes" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/compiler.log"
+      - name: Verify unequal context loss weights
+        if: ${{ !cancelled() }}
+        run: |
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 runtime_failure_probe.py --mode parallel --artifact-root "$RUNNER_TEMP/runtime-probes" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/weighted-context.log"
+      - name: Verify actual worker restart and trajectory equality
+        if: ${{ !cancelled() }}
+        run: |
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 runtime_failure_probe.py --mode baseline --artifact-root "$RUNNER_TEMP/restart-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/restart-baseline.log"
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 --max-restarts=1 --monitor-interval=0.1 runtime_failure_probe.py --mode restart --artifact-root "$RUNNER_TEMP/restart-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/restart.log"
+      - name: Verify optional TorchAO and scheduler boundaries
+        if: ${{ !cancelled() }}
+        run: |
+          uv pip install --system 'torchao==0.18.0' --no-deps
+          python runtime_probe_3.py 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/boundaries.log"
+          uv pip freeze > "$RUNNER_TEMP/runtime-evidence/dependencies.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: runtime-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-evidence
+          retention-days: 3
+          if-no-files-found: error

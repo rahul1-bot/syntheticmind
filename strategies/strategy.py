@@ -42,6 +42,7 @@ from syntheticmind.strategies.checkpoint import (
     StrategyCheckpoint,
     _SingleFileCheckpoint
 )
+from syntheticmind.strategies.compiler import TorchCompiler
 from syntheticmind.strategies.launchers.launcher import _ProcessLauncher
 from syntheticmind.strategies.model_initialization import _ModuleInitializer
 from syntheticmind.primitives.types import (
@@ -92,6 +93,7 @@ class Strategy:
         self.checkpoint: StrategyCheckpoint = _SingleFileCheckpoint(checkpoint_io)
         self.precision_plugin: Precision = precision_plugin or Precision()
         self.configured_precision_plugin: Precision | None = precision_plugin
+        self._compiler: TorchCompiler | None = None
         self._module: Module | None = None
         self._root_device: torch.device = (
             self.parallel_devices[0]
@@ -133,8 +135,9 @@ class Strategy:
         # execute. The base policy introduces no wrapper.
         self._root_device: torch.device = device
         placed_model: nn.Module = model.to(device)
-        self.model: nn.Module | None = placed_model
-        return placed_model
+        execution_model: nn.Module = self._compile_model(placed_model)
+        self.model: nn.Module | None = execution_model
+        return execution_model
 
     def training_step(
         self,
@@ -234,8 +237,9 @@ class Strategy:
         )
 
     def teardown(self) -> None:
-        # Releases Strategy-owned runtime resources; the base policy owns none.
-        pass
+        # Restores stage-scoped compiled forwards without resetting shared caches.
+        if self._compiler is not None:
+            self._compiler.teardown()
 
     def on_exception(self, exception: BaseException) -> None:
         # Performs exception-time Strategy cleanup; parallel policies destroy
@@ -329,6 +333,15 @@ class Strategy:
             raise TypeError("precision_plugin must be a Precision instance.")
         self.precision_plugin: Precision = precision_plugin
 
+    def attach_compiler(self, compiler: TorchCompiler | None) -> None:
+        # Selects compiler policy between stages; active forward bindings cannot
+        # be orphaned by swapping the compiler while a stage is executing.
+        if self._compiler is not None and self._compiler.is_active:
+            raise RuntimeError("Cannot replace an active compiler before stage teardown.")
+        if compiler is not None and not isinstance(compiler, TorchCompiler):
+            raise TypeError("compiler must be a TorchCompiler instance or None.")
+        self._compiler: TorchCompiler | None = compiler
+
     @property
     def distributed_sampler_kwargs(self) -> dict[str, int] | None:
         # Replica count and rank for DataConnector sampler replacement; local
@@ -385,6 +398,11 @@ class Strategy:
         # Process-local model and batch placement selected during topology setup.
         return self._root_device
 
+    @property
+    def compiler(self) -> TorchCompiler | None:
+        # Compiler configuration survives stages; live bindings do not.
+        return self._compiler
+
     def _execute_step(
         self,
         model: nn.Module,
@@ -407,6 +425,12 @@ class Strategy:
         if self._module is None:
             raise RuntimeError("Strategy has no connected Module.")
         return self._module
+
+    def _compile_model(self, model: nn.Module) -> nn.Module:
+        # Called after placement and before wrapping, preserving model identity.
+        if self._compiler is None:
+            return model
+        return self._compiler.compile(model)
 
 
 class _ForwardRedirection:

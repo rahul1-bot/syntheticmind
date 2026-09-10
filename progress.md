@@ -1,3 +1,21 @@
+| Progress Verified | Runtime Controls and Parallel Recovery | Date: 10 September 2026 | Name: Ghost |
+
+    1. ✅ Implementation `b4037f433e3fdd3275800aa43cc55218237014fd` remains on `feature/runtime-control-plane` in PR #3 against unchanged `dev` (`118cb3c9f769641648155a1609085c5254fe1703`); no merge or direct base-branch update was performed.
+    2. ✅ Workflow https://github.com/rahul1-bot/syntheticmind/actions/runs/34428718274 passes all CPU stages on Python 3.14.7, PyTorch 2.14.0+cpu, Pydantic 2.13.5 and TorchAO 0.18.0. The tested PR merge checkout is `227717f393175fe3de08b6cf036d6d8c5887777b`.
+    3. ✅ Actual context attention, replicated-gradient reduction, unequal objective weighting, native GPipe/1F1B schedules, rank-local checkpoint representation, stochastic exact continuation, and bounded compiler reports now execute. This supersedes the 08 September implementation gaps below; generic mesh dimensions alone remain insufficient.
+    4. ✅ The deliberate rank-1 worker exit at step 2 triggers a real TorchElastic restart. Both ranks automatically restore durable step 1 and finish with bit-exact model, optimizer, global-step and torch RNG equality against uninterrupted training. Async submission is not confused with durable publication.
+    5. ✅ Existing CPU Inductor, all-stage lifecycle, identity/hooks, compiler checkpoint compatibility, selective activation gradients, manifests, DDP/TP, asynchronous snapshot isolation, independent collectives, retention, publication failure preservation and optional-adapter rejection probes remain green. Documentation and acceptance records name the actual owners, imports, limits and evidence. No linter or static type checker was run.
+    6. ⚠️ CPU evidence does not certify CUDA FP8/FSDP2, CUDA allocator capture, MPS execution of these new controls, remote async storage or physical multi-node failure. CP is equal-shard global-K/V attention, not ring/padding/GQA/hybrid execution; PP is static single-tensor fit without validation. AOT/cache export and automatic activation-memory budgets remain outside this implementation.
+
+| Progress In Review | Runtime Control Feature Branch | Date: 08 September 2026 | Name: Ghost |
+
+    1. ✅ Work remains isolated on `feature/runtime-control-plane`; the base `dev` revision is `118cb3c9f769641648155a1609085c5254fe1703`, and neither `dev` nor `main` was updated by this continuation.
+    2. ✅ Implementation revision `960eeef4b485865519b948f15290ef32a37e58c4` preserves model/Parameter/checkpoint identities during compiled forwards, validates compiler policy on fit resume, preserves original ModelParallelStrategy positional arguments and default DP/TP topology, and rejects unsupported automatic CP/PP execution.
+    3. ✅ Async sharded persistence stages an independent CPU snapshot, writes and publishes on a separate Gloo group, fences retention and last links, and preserves the prior generation after injected publication failure. Slurm/TorchElastic adapters and missing-checkpoint restart guards use the existing environment and checkpoint owners.
+    4. ✅ Run manifests, selective activation recomputation, explicit optional TorchAO precision, and CUDA failure diagnostics are implemented at their semantic boundaries. Runtime-control documentation distinguishes observed records, submitted saves, and durable publication.
+    5. ✅ The Python 3.14.7 / PyTorch 2.14.0+cpu / Pydantic 2.13.5 / TorchAO 0.18.0 behavioral run passed: https://github.com/rahul1-bot/syntheticmind/actions/runs/34275739096 . Full logs contain single-process, both-rank distributed, and adapter-boundary PASS records, including real CPU Inductor, interrupted/resumed TP equality, snapshot isolation, independent training collectives, and failure preservation. No linter or type checker was run.
+    6. ⚠️ This is an in-review feature, not complete validation of every accelerator path. CUDA FP8/FSDP2 execution, CUDA allocator capture, remote async storage, and actual multi-node worker-loss/restart remain unverified. Native CP attention, pipeline schedules, compiler telemetry/AOT, and automatic activation-memory budgets are not implemented. The historical host-specific Python 3.14 compiler limitation below does not apply to the successfully tested CPU CI runtime.
+
 | Progress Complete | Repository and Governing Contracts | Date: 05 September 2026 | Time: 07:25 PM | Name: Ghost |
 
     1. ✅ The defined private core Trainer reconstruction is complete on active `dev`, every accepted phase is committed and synchronized to `origin/dev`, and stable `main` remains unchanged pending a separate promotion decision.
@@ -78,7 +96,7 @@
 
     1. ✅ Accelerator and cluster-environment type-level discovery operations are classmethod Protocol obligations with explicit concrete inheritance and `@override`; static pseudo-methods and placeholder lifecycle remain absent.
     2. ✅ GPU parsing owns count and identifier semantics, uniqueness, range, and availability validation; the accelerator connector directly owns resolved accelerator, device, node, Strategy, precision, environment, checkpoint, and layer-sync composition without a temporary topology model.
-    3. ✅ Plugin resolution rejects duplicate families, invalid synchronization combinations, unavailable accelerators, unsupported distributed MPS, and incompatible precision at the Trainer connector boundary without a generic configuration container.
+    3. ✅ Plugin resolution rejects duplicate families, invalid synchronization combinations, unavailable accelerators, unsupported distributed MPS execution, and incompatible precision at the Trainer connector boundary without a generic configuration container.
     4. ✅ Full, half, double, mixed, and Transformer Engine precision share one concrete lifecycle; recursive conversion belongs to that owner, while dtype and autocast contexts are structural behavior without AbstractContextManager, ContextDecorator, or false override machinery.
     5. ✅ Transformer Engine targets `transformer_engine>=2.18.0`, uses the current `autocast` recipe API, exposes strict delayed-scaling configuration, isolates dynamic imports, and passes a source-shaped optional-adapter probe while real CUDA execution remains unavailable on this host.
     6. ✅ Class and instance calls, runtime Protocol conformance, CPU topology, explicit and all-device parsing, MPS training, unavailable CUDA rejection, precision, layer sync, plugin conflicts, DDP, spawn, and model parallelism pass.
@@ -265,7 +283,7 @@
     1. ✅ Forced step, forced epoch, and scheduler-controlled automatic logging intervals now execute with real semantics.
     2. ✅ Optimizer-step hooks cover accumulation, repeated closures, and manual multiple optimizers; epoch hooks observe the scheduler-updated value for the new epoch.
     3. ✅ Every optimizer and parameter group has stable collision-checked naming with custom scheduler names, group names, repeated optimizer types, prefixes, momentum, and weight decay.
-    4. ✅ Dynamic parameter groups preserve their existing history, callback metric views update on every rank, and logger writes remain rank-zero-owned.
+    4. ✅ Dynamic parameter groups preserve their existing history, callback metric views update on every rank, and logger persistence remains rank-zero-owned.
     5. ✅ Callback emission coordinates persist across checkpoint resume, and local multi-optimizer, epoch scheduler, dynamic group, invalid-boundary, missing-logger, resume, and spawned DDP probes pass.
 
 | Progress Complete | Data-Parallel Throughput Accounting | Date: 04 September 2026 | Time: 12:52 PM | Name: Ghost |

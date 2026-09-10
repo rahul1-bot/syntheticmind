@@ -37,6 +37,9 @@ from torch.distributed.checkpoint.state_dict import (
 from torch.distributed.fsdp import FullyShardedDataParallel, OptimStateKeyType
 
 from syntheticmind.plugins.checkpoint_io import TorchCheckpointIO
+from syntheticmind.strategies.model_parallel_checkpointing.asynchronous import (
+    _AsyncShardedCheckpointStore
+)
 from syntheticmind.strategies.model_parallel_checkpointing.generation import CheckpointBroadcast
 from syntheticmind.strategies.model_parallel_checkpointing.sharded_store import (
     _ShardedCheckpointStore
@@ -55,17 +58,34 @@ from syntheticmind.primitives.types import (
 __all__: list[str] = []
 
 type ModelParallelCheckpointFormat = Literal["full", "sharded"]
+type ModelParallelCheckpointWrite = Literal["synchronous", "asynchronous"]
 
 
 class _ModelParallelCheckpointIO:
     # Internal format owner over PyTorch distributed state-dict APIs, ordinary
     # TorchCheckpointIO, and atomic sharded generations.
-    def __init__(self, checkpoint_format: ModelParallelCheckpointFormat) -> None:
+    def __init__(
+        self,
+        checkpoint_format: ModelParallelCheckpointFormat,
+        checkpoint_write: ModelParallelCheckpointWrite = "synchronous"
+    ) -> None:
         # Binds one output format while retaining format detection for loading
         # existing full or sharded artifacts.
+        if checkpoint_write not in {"synchronous", "asynchronous"}:
+            raise ValueError(
+                f"Unsupported model-parallel checkpoint write mode: {checkpoint_write!r}."
+            )
+        if checkpoint_format == "full" and checkpoint_write == "asynchronous":
+            raise ValueError(
+                "Asynchronous model-parallel checkpointing requires sharded format."
+            )
         self._checkpoint_format: ModelParallelCheckpointFormat = checkpoint_format
         self._checkpoint_io: TorchCheckpointIO = TorchCheckpointIO()
-        self._sharded_store: _ShardedCheckpointStore = _ShardedCheckpointStore()
+        self._sharded_store: _ShardedCheckpointStore = (
+            _AsyncShardedCheckpointStore()
+            if checkpoint_write == "asynchronous"
+            else _ShardedCheckpointStore()
+        )
 
     def is_checkpoint(self, path: str | Path) -> bool:
         # Recognizes ordinary full files or complete pointer-backed and legacy
@@ -164,7 +184,10 @@ class _ModelParallelCheckpointIO:
 
     def remove(self, path: str | Path) -> None:
         # Removes the complete full file or sharded root selected by retention.
-        StoragePath(path).remove(recursive=True)
+        self._sharded_store.remove(path)
+
+    def teardown(self) -> None:
+        self._sharded_store.teardown()
 
     def _save_sharded(
         self,

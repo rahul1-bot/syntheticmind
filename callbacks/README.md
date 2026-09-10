@@ -15,6 +15,8 @@
 | `model_summary/` | The `ModelSummary` callback, layer and model inspection report, and optional Rich renderer. |
 | `throughput_monitor.py` | `ThroughputMonitor`, which records synchronized window and epoch throughput over the Strategy's data-parallel sample axis. |
 | `device_stats_monitor.py` | `DeviceStatsMonitor`, which records device utilization. |
+| `cuda_memory_snapshot.py` | Opt-in bounded CUDA allocator history and failure snapshots. |
+| `run_manifest.py` | Versioned run provenance and atomic per-attempt local JSON. |
 
 ## Client callbacks
 
@@ -103,6 +105,25 @@ through the trainer logger connector and require at least one configured logger.
 `EMAWeightAveraging` temporarily changes the model state for evaluation but
 preserves live training weights for resumable checkpoints. `ProgressBarCallback`
 owns terminal presentation only and never becomes a metrics persistence layer.
+
+## Failure diagnostics and run provenance
+
+Import `CUDAMemorySnapshot` and `RunManifestCallback` from their semantic modules.
+The CUDA callback is fit-only, requires a CUDA Strategy, and records bounded
+allocator history until teardown. OOM is the default capture policy; snapshots
+are local, unique, and rank/step-qualified. Use one recorder per process because
+the underlying diagnostic state is process-global.
+
+The manifest callback creates one UUIDv7 directory per rank-zero fit attempt.
+Version-2 records capture available code, dependency, execution, compiler, and
+elastic identities plus an explicitly supplied data identity. Complete resolved
+Trainer policy is added at an active-fit checkpoint assembly hook. The record
+links checkpoint attempts, but its existence does not prove checkpoint commit.
+It complements, rather than replaces, hyperparameter logging and full trajectory
+checkpoints. Neither callback automatically uploads private records.
+
+See [runtime control](../docs/guides/runtime_control.md) for constructors,
+conflicts, schema semantics, and unverified GPU boundaries.
 
 ## Related Components
 

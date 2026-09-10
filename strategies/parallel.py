@@ -38,6 +38,8 @@ from syntheticmind.accelerators.accelerator import Accelerator
 from syntheticmind.plugins.environments import ClusterEnvironment, LocalEnvironment
 from syntheticmind.plugins.checkpoint_io import CheckpointIO
 from syntheticmind.plugins.precision.precision import Precision
+from syntheticmind.plugins.slurm import SLURMEnvironment
+from syntheticmind.plugins.torch_elastic import TorchElasticEnvironment
 from syntheticmind.strategies.launchers.launcher import ProcessStartMethod, _ProcessLauncher
 from syntheticmind.strategies.launchers.protocols import LaunchStrategy
 from syntheticmind.strategies.strategy import Strategy
@@ -82,7 +84,7 @@ class ParallelStrategy(Strategy, LaunchStrategy):
             raise ValueError("`timeout` must be non-negative.")
         self.is_distributed: bool = True
         self._cluster_environment: ClusterEnvironment = (
-            cluster_environment or LocalEnvironment()
+            cluster_environment or self._resolve_environment()
         )
         self._configured_cluster_environment: ClusterEnvironment | None = (
             cluster_environment
@@ -410,6 +412,17 @@ class ParallelStrategy(Strategy, LaunchStrategy):
     def configured_cluster_environment(self) -> ClusterEnvironment | None:
         # Returns only the client-supplied identity for connector conflict checks.
         return self._configured_cluster_environment
+
+    def _resolve_environment(self) -> ClusterEnvironment:
+        # An explicit provider wins at construction. Otherwise torchrun takes
+        # precedence over inherited Slurm allocation variables.
+        if "TORCHELASTIC_RUN_ID" in os.environ:
+            return TorchElasticEnvironment()
+        if "LOCAL_RANK" in os.environ:
+            return LocalEnvironment()
+        if SLURMEnvironment.detect():
+            return SLURMEnvironment()
+        return LocalEnvironment()
 
     def _configure_environment(self) -> None:
         # Populates world size and global rank only for locally created processes;

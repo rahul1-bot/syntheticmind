@@ -247,6 +247,27 @@ value.
 Do not add a generic framework wrapper around every project batch type. Structural
 transfer exists precisely so domain objects retain their own semantics.
 
+## Runtime-control examples of existing ownership
+
+Select compiler policy on Strategy rather than adding a parallel Trainer.
+`TorchCompiler` owns reversible region bindings and a shared immutable policy;
+the checkpoint connector validates that policy on continuation. Select TorchAO
+through Precision's explicit optional adapter, and activation recomputation
+through client model construction.
+
+Slurm and TorchElastic implement the existing environment contract. They supply
+external facts, not a second launcher. Async sharded persistence stays beneath
+ModelParallelStrategy with its own snapshot, worker, communication group, and
+publication future. ModelCheckpoint retains cadence and retention ownership.
+Run manifests and CUDA diagnostics use existing callback hooks; their records do
+not imply checkpoint durability or own training execution.
+
+Extended CP/PP mesh axes are not alternate training loops. Client computation,
+losses, gradient synchronization, and pipeline schedules remain explicit until
+an actual execution algorithm and its state/failure contract are implemented.
+See [runtime control](runtime_control.md) and
+[executable verification](runtime_verification.md).
+
 ## Extension acceptance checklist
 
 Before landing an extension, verify:

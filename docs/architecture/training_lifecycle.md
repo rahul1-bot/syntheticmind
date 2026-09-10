@@ -51,6 +51,25 @@ Model construction precedes optimizer construction because distributed plans,
 lazy layers, precision conversion, or model replacement may change the parameter
 graph consumed by `configure_optimizers`.
 
+## Opt-in runtime participants
+
+A selected compiler binds tensor forwards after placement and before DDP wrapping;
+its bindings are restored by Strategy teardown. Compilation is lazy and does not
+move hooks, optimizer policy, or step orchestration into the captured region.
+Compiler configuration is validated during fit resume before restoration.
+
+A run manifest is written at `on_fit_start`; its complete Trainer-policy projection
+is updated at checkpoint assembly, not at durable publication. CUDA allocator
+history is acquired by its fit callback and released during callback teardown.
+
+Asynchronous sharded saves capture an independent CPU snapshot on the caller,
+then write and publish through an owned worker and separate communication group.
+A returned save or ordinary Trainer barrier does not prove async commit. Reads,
+retention, last-link creation, subsequent saves, and teardown fence publication.
+On model-parallel failure, checkpoint work drains before training groups are
+released. These ordering details are part of the
+[runtime control contract](../guides/runtime_control.md).
+
 ## Training epoch transaction
 
 `FitLoop` owns epoch eligibility and completion. `TrainingEpochLoop` owns the
