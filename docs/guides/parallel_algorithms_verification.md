@@ -11,6 +11,12 @@ against sequential training, and checks interrupted/resumed stochastic pipeline
 training with per-rank RNG. All fixtures are created in a fresh explicit artifact
 root. These are CPU/Gloo checks, not GPU throughput benchmarks.
 
+Reference and harness paths deliberately use the same sequential sample order.
+The probe disables automatic DistributedSampler injection: CP/PP ranks cooperate
+on each complete sample, and the client partitions its sequence or computation.
+Comparing a sequential reference against a shuffled training order is not an
+algorithm-equivalence test. Numerical and bit-exact resume tolerances are unchanged.
+
 ```python
 import argparse
 from datetime import timedelta
@@ -192,7 +198,8 @@ class ParallelAlgorithmProbe:
             accelerator="cpu", devices=2, strategy=strategy, max_epochs=2, max_steps=steps,
             callbacks=[ModelCheckpoint(dirpath=directory, save_last=True, save_top_k=-1, every_n_train_steps=1)],
             logger=False, enable_progress_bar=False, enable_model_summary=False,
-            num_sanity_val_steps=0, limit_val_batches=0, seed=700 + dist.get_rank()
+            num_sanity_val_steps=0, limit_val_batches=0, seed=700 + dist.get_rank(),
+            use_distributed_sampler=False
         )
 
     def _context_training(self) -> None:
