@@ -14,12 +14,17 @@ Strategy
 └── ParallelStrategy
     ├── DDPStrategy
     └── ModelParallelStrategy
+        ├── ContextParallelStrategy
+        └── PipelineParallelStrategy
 ```
 
 | Module | ML ownership |
 |---|---|
 | `strategy.py` | Universal training execution semantics and private wrapped-step forwarding. |
-| `compiler.py` | Immutable compilation policy and reversible region-forward binding lifecycle. |
+| `compiler.py` | Immutable compilation policy, reversible region bindings, and bounded backend reports. |
+| `context_parallel.py` | Context-only replicated-parameter gradient reduction and weighted loss normalization. |
+| `pipeline_parallel.py` | Native GPipe/1F1B execution and managed optimizer boundaries. |
+| `parallel_configuration.py` | Strict context/pipeline execution and shape contracts shared with checkpoints. |
 | `parallel.py` | Shared distributed process, rank, device, collective, and launcher semantics. |
 | `single_device.py` | The named one-process, one-device execution policy. |
 | `ddp.py` | PyTorch `DistributedDataParallel` wrapping and DDP-specific gradient behavior. |
@@ -106,7 +111,11 @@ The default model-parallel mesh remains two-dimensional DP/TP. Keyword-only
 `context_parallel_size` and `pipeline_parallel_size` extend topology when either
 exceeds one, require explicit DP/TP dimensions, and reject automatic optimization.
 The client owns context-parallel attention, gradients, and pipeline schedules;
-mesh creation alone does not implement those algorithms.
+mesh creation alone does not implement those algorithms. The separate
+`ContextParallelStrategy` and `PipelineParallelStrategy` supply concrete CP-only
+and PP-only implementations under the existing manual loop. Their configuration
+classes are exported here. See [parallel algorithms](../docs/guides/parallel_algorithms.md)
+for exact loss, dtype, shape, hook, and rank-local checkpoint limits.
 
 `checkpoint_write="asynchronous"` selects the Strategy-owned sharded transaction;
 full-format async output is rejected. Slurm and TorchElastic environments are

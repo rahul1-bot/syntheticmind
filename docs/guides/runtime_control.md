@@ -2,7 +2,8 @@
 
 These opt-in controls extend existing ML owners. They do not add another Trainer,
 change the five package-root contracts, or make every backend interchangeable.
-The [runtime probes](runtime_verification.md) state what has actually been tested.
+The [runtime probes](runtime_verification.md), [parallel algorithm probes](parallel_algorithms_verification.md),
+and [failure/restart probes](runtime_failure_verification.md) state what has actually been tested.
 
 ## Ownership and imports
 
@@ -16,7 +17,9 @@ The [runtime probes](runtime_verification.md) state what has actually been teste
 | Activation recomputation | `ActivationCheckpointing` from `syntheticmind.core.activation_checkpointing` | Client-selected model region |
 | CUDA failure diagnostics | `CUDAMemorySnapshot` from `syntheticmind.callbacks.cuda_memory_snapshot` | Fit callback |
 | Run provenance | `RunManifestCallback` and `RunManifest` from `syntheticmind.callbacks.run_manifest` | Fit observation callback |
-| Extended mesh axes | `ModelParallelStrategy(context_parallel_size=..., pipeline_parallel_size=...)` | Topology only; computation remains client-owned |
+| Extended mesh axes | `ModelParallelStrategy(context_parallel_size=..., pipeline_parallel_size=...)` | Generic topology; computation remains client-owned |
+| Context attention/training | `ContextParallelAttention` and `ContextParallelStrategy` | Local-query attention and replicated-parameter gradient reduction |
+| Pipeline training | `PipelineParallelStrategy` | Native GPipe/1F1B schedule under the existing manual loop |
 
 TorchAO is deliberately absent from ordinary package re-exports. Importing
 SyntheticMind without TorchAO installed still works. Its adapter is imported
@@ -58,8 +61,20 @@ containing version-1 `CompilationConfiguration` or null. A legacy checkpoint
 without the field represents eager execution. Fit rejects changed compiler
 policy before restoration; evaluation may deliberately select a different
 execution policy. No compiled callable or cache is loaded from a checkpoint.
-There are no built-in graph-break counters, recompile reports, AOT export, cache
-provenance, or compilation-latency measurements in this implementation.
+`compiler.report` returns a version-1 immutable `CompilationReport` from
+`syntheticmind.strategies.compiler`. A bounded event deque records selected region,
+native frame/compilation IDs, graph fingerprint, available graph-break reason,
+backend-call duration in seconds, and backend failures. `diagnostics_limit` bounds
+retention and dropped events are counted. `save_report(Path(...))` explicitly
+publishes local JSON after execution; teardown preserves the report until the
+next binding stage. Backend error suppression must be disabled at admission.
+
+This measures backend calls, not all Dynamo frontend or lazy backward compile
+time. Cached execution can produce no event; graph breaks before backend entry
+and individual guard-failure reasons are not a complete audit stream. A graph
+fingerprint is not a cache key. Reports contain no tensor payload or graph source,
+but diagnostic messages may expose paths; they are never uploaded automatically.
+AOT export and portable compiler-cache provenance remain outside this feature.
 
 ## TorchAO numerical policy
 
@@ -114,8 +129,11 @@ continuation also rejects changed world size even without partial metric windows
 DCP's ability to reshard tensors does not make changed sample order, effective
 batch size, optimizer trajectory, and rank-local state exactly reproducible.
 Topology-changing fine-tuning is a new trajectory, not this resume contract.
-The probes test launcher facts and the missing-checkpoint guard; they do not
-claim a real multi-node worker-loss/restart campaign.
+The failure probe now terminates an owned worker with exit code 86 during
+stochastic pipeline training. TorchElastic restarts both workers and the harness
+automatically selects durable state. It compares final model, optimizer, global
+step, and rank-local torch RNG exactly against an uninterrupted run. This is a
+real two-process CPU recovery test, not a physical-node or network-failure campaign.
 
 ## Asynchronous sharded checkpointing
 
@@ -203,26 +221,50 @@ original two-dimensional `data_parallel`/`tensor_parallel` mesh is preserved.
 An extended request requires explicit DP and TP sizes; all four dimensions must
 multiply to world size. Sampling and throughput still count the DP axis only.
 
-An extended mesh is topology, not an implementation of distributed attention or
-a pipeline schedule. Automatic optimization is rejected. The client must supply
-manual step semantics, correct losses, communication, gradient synchronization,
-microbatch scheduling, and checkpoint-compatible model construction. Native
-context-parallel attention, GPipe/1F1B scheduling, and their end-to-end trajectory
-guarantees have not been implemented by this change.
+The generic ModelParallelStrategy extension remains topology. For actual
+algorithms, select `ContextParallelStrategy` or `PipelineParallelStrategy` with
+their strict configuration from `syntheticmind.strategies`; do not infer their
+guarantees merely from the existence of mesh dimensions.
+
+Context execution supplies differentiable packed K/V all-gather and global causal
+masking through `ContextParallelAttention`, plus replicated-gradient reduction
+through the managed optimizer. `normalize_loss(local_loss_sum, local_weight)`
+accounts for unequal valid objective weights under mean or sum gradient reduction.
+Pipeline execution supplies native GPipe/1F1B schedules, differentiable static
+activation metadata, and exactly one managed optimizer step after each schedule.
+Both policies preserve partition-local tensors and per-rank trajectory metadata
+through a versioned sharded envelope. They require manual optimization, fixed
+world size, and ordinary float32 or true BF16 tensors.
+
+These are separate supported paths, not arbitrary DP/TP/CP/PP composition. Context
+attention materializes global K/V, uses equal contiguous sequence shards, and
+does not provide ring attention, padding masks, or GQA. Pipeline execution is
+fit-only without validation, one tensor stage per rank, static equal microbatches,
+and no first-stage input differentiation. See [parallel algorithms](parallel_algorithms.md)
+for the construction, loss, hook, and checkpoint contracts.
 
 ## Verification and remaining scope
 
-The CPU workflow at commit `960eeef4b485865519b948f15290ef32a37e58c4`
-[passed its executable probes](https://github.com/rahul1-bot/syntheticmind/actions/runs/34275739096)
-on Python 3.14.7, PyTorch 2.14.0+cpu, Pydantic 2.13.5, and TorchAO 0.18.0.
-Full logs contain single-process, both-rank distributed, and boundary PASS records.
-That includes real CPU Inductor, unchanged parameter/checkpoint identity, fit
-resume equality, selective activation gradients, manifest publication, DDP/TP,
-asynchronous snapshot isolation, training-group concurrency, rank-zero retention,
-and injected publication failure preserving the previous generation.
+The [CPU workflow for implementation commit `b4037f433e3fdd3275800aa43cc55218237014fd`](https://github.com/rahul1-bot/syntheticmind/actions/runs/34428718274)
+passed on 10 September 2026 with Python 3.14.7, PyTorch 2.14.0+cpu, Pydantic
+2.13.5, and TorchAO 0.18.0. The PR checkout was synthetic merge
+`227717f393175fe3de08b6cf036d6d8c5887777b` against unchanged dev
+`118cb3c9f769641648155a1609085c5254fe1703`; evidence records both revisions.
 
-The workflow records exact dependencies and uses runtime execution rather than
-linting or static type checking. GPU FP8/FSDP2, CUDA memory recording, remote
-async storage, real multi-node restart, native CP/PP computation, and compiler
-telemetry/AOT remain outside that evidence. Review those boundaries before using
-new controls in consequential accelerator runs.
+The logs include real CPU Inductor, identity/hooks/checkpoint compatibility,
+selective activation gradients, manifests, DDP/TP, async snapshot isolation and
+publication failure preservation, context output/gradient/training equivalence,
+unequal loss weights, GPipe/1F1B, stochastic exact continuation, and compiler
+report/failure probes. The worker-crash fixture failed at step 2, restored the
+last durable step 1, then matched uninterrupted model, optimizer, step and torch
+RNG exactly on both ranks. Submission was not mistaken for durability.
+
+Cross-topology context equivalence uses momentum SGD because a softmax-invariant
+key-bias direction can amplify near-zero rounding differences under Adam. Pipeline
+comparison retains AdamW, and same-topology resume assertions stay bit-exact.
+No linter or static type checker is part of these probes.
+
+CUDA FP8/FSDP2 execution, CUDA allocator capture, remote async storage, MPS execution
+of the new controls, physical multi-node recovery, hybrid parallel compositions,
+AOT/cache export, and automatic activation-memory budgets are not established by
+this CPU evidence. They remain explicit limits, not silently simulated passes.

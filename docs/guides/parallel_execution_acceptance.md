@@ -1,75 +1,39 @@
-# Parallel execution acceptance
+# Parallel execution acceptance record
 
-This document records outstanding implementation requirements. It does not
-advertise completed context-parallel attention or pipeline scheduling.
-The existing `context_parallel_size` and `pipeline_parallel_size` options in
-ModelParallelStrategy supply topology only and require manual optimization.
+## Verified CPU implementation
 
-## Context parallelism
+Implementation commit `b4037f433e3fdd3275800aa43cc55218237014fd` is verified by
+[workflow run 34428718274](https://github.com/rahul1-bot/syntheticmind/actions/runs/34428718274)
+on 10 September 2026. It contains executable algorithms, not merely named mesh
+axes. The exact source/runtime/dependency snapshot is retained as a CI artifact.
 
-A complete path must execute attention over a sequence partitioned across ranks,
-not merely name a mesh axis. The implementation must define sequence placement,
-attention-mask and causal-position semantics, gradient communication, loss
-normalization, and interactions with the data- and tensor-parallel axes.
+| Boundary | Observed evidence |
+|---|---|
+| Context computation | Local outputs and Q/K/V gradients match full-sequence causal attention. |
+| Context optimization | Replicated parameter updates match a sequential reference; unequal objective weights match under mean and sum gradient reductions. |
+| Context continuation | Interrupted/resumed weights and rank-local torch RNG match exactly. |
+| Pipeline schedules | Native GPipe and 1F1B match sequential stage parameters under AdamW. |
+| Pipeline continuation | Dropout training resumes with bit-exact local weights and next torch RNG. |
+| Worker recovery | An actual rank-1 exit at step 2 triggers worker-group restart, automatic durable step-1 restore, and exact final model/optimizer/RNG/step equality. |
+| Sharded persistence | Snapshot isolation, concurrent training collectives, retention and failed publication preserve the previous active generation. |
+| Compiler controls | CPU Inductor and identity/resume tests pass; bounded native IDs, graph-break reasons, report serialization and backend-failure cleanup pass. |
 
-Acceptance requires a deterministic tiny model comparing the distributed output,
-loss, parameter gradients, and optimizer result to an unpartitioned reference.
-Include noncausal and causal attention, invalid shapes, multiple optimizer steps,
-accumulation where supported, and interrupted/resumed execution. Unequal token
-counts or padding must be correctly weighted or explicitly rejected. Do not
-multiply sample accounting by the number of context collaborators.
+The [algorithm guide](parallel_algorithms.md), [algorithm probes](parallel_algorithms_verification.md),
+and [failure probes](runtime_failure_verification.md) specify the tested paths.
+Correctness and ownership are separate obligations: the existing Trainer/manual
+loop still owns lifecycle and managed steps, Strategies own communication and
+schedules, the attention Module owns computation, and the rank-local checkpoint
+representation owns partition names and per-rank trajectory records.
 
-An all-gather reference algorithm and a ring-attention implementation have
-different memory and communication costs. Report which algorithm executes rather
-than claiming the performance characteristics of another implementation.
+## Boundaries that remain outside this evidence
 
-## Pipeline parallelism
+CP uses equal contiguous shards and global K/V all-gather, not a streaming ring,
+padding-aware attention, GQA, or hybrid parallel composition. PP uses one static
+single-tensor stage per rank and fit without validation; native microbatch
+backward is not a claim to execute the ordinary manual_backward hook family.
+Both require fixed topology and supported ordinary floating precision.
 
-A complete path must execute stage-local forwards and backwards under an actual
-microbatch schedule. Native GPipe or 1F1B integration must define stage boundaries,
-input/target routing, output ownership, loss scaling, and optimizer cadence.
-Do not let the normal automatic loop backward execute again after a native
-pipeline schedule already performed backward.
-
-Acceptance requires at least a real two-stage distributed run comparing its
-loss, gradients, and optimizer result with the same nonpartitioned model. Test
-several microbatches, stage-local parameter ownership, empty/malformed inputs,
-forward-only evaluation, final-stage outputs, and rank-consistent global-step
-accounting. State exactly which schedule and microbatch shapes are supported.
-
-## Checkpoint representation
-
-Pipeline stages may have distinct parameters and optimizer state. Identically
-named local fields cannot be treated as replicated state and silently overwrite
-one another. Stage identities, parameter names, optimizer parameter groups, and
-scheduler state must have an unambiguous distributed representation.
-
-A resumable checkpoint may be published only at a coherent optimizer boundary,
-with no incomplete microbatch work or unrepresented gradients. Restore must
-reconstruct the same stage/mesh plan or explicitly establish a supported
-migration. Equal world size alone does not prove equivalent DP/TP/CP/PP topology.
-
-Compare uninterrupted and resumed runs, including optimizer and scheduler state,
-not only final weights. Inject shard and publication failures and verify that
-the previous generation remains active. All-rank work must not be introduced
-inside a rank-zero-only inspection or retention path.
-
-## Lifecycle and failure
-
-The selected Strategy owns process groups and execution placement. Existing
-Module, Precision, loop, and checkpoint owners retain their established
-responsibilities. Any new runtime owner must own an actual algorithm, resource,
-state machine, or failure boundary, not merely forward one call to PyTorch.
-
-Setup, client hooks, optimizer operations, sequential stage reuse, exception
-propagation, and teardown must be tested together. Report unsupported precision,
-compilation, and sharding combinations before mutation. CPU reference execution
-does not establish CUDA/NCCL, multi-node, or large-model performance.
-
-## Submission gate
-
-Keep the PR in draft until the implemented scope and executable evidence agree.
-Documentation must separate completed functionality, verified environments,
-explicitly rejected combinations, and remaining work. Source comments and
-package guides must use the actual public imports and signatures. No change to
-`dev` or `main`, merge, or force-push is authorized by this implementation task.
+CUDA/NCCL, FP8/FSDP2 composition, MPS, remote asynchronous storage, physical-node
+loss, network partitions, AOT/cache export and automatic activation-memory budgets
+require separate work or hardware evidence. The current tests do not emulate
+those paths and label them successful.

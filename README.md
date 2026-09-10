@@ -127,9 +127,13 @@ existing durable checkpoint and the same world size.
 
 The default DP/TP mesh and existing positional constructor meanings remain
 unchanged. Extended CP/PP axes are an explicit topology surface for client-owned
-manual execution, not built-in distributed attention or pipeline scheduling.
-CPU verification does not establish CUDA FP8, FSDP2, OOM-recorder, or multi-node
-restart correctness. See the [runtime control guide](docs/guides/runtime_control.md)
+manual execution. Separate `ContextParallelStrategy` and `PipelineParallelStrategy`
+now implement packed K/V attention with replicated-gradient reduction, and native
+GPipe/1F1B schedules respectively. Their rank-local checkpoints preserve partition
+identity and stochastic continuation; arbitrary hybrid composition is not implied.
+CPU verification does not establish CUDA FP8, FSDP2, OOM-recorder, or physical
+multi-node restart correctness. A real two-process CPU worker-crash/restart
+probe and bounded compiler diagnostics are included. See the [runtime control guide](docs/guides/runtime_control.md)
 for actual imports, lifecycle guarantees, and remaining scope, and the
 [executable probes](docs/guides/runtime_verification.md) for reproducible evidence.
 

@@ -21,7 +21,12 @@ a streaming ring implementation: it materializes global K/V on each rank. Unequa
 shards, padding masks and grouped-query attention are not supported here.
 
 Use manual optimization: zero the managed optimizer, compute the local loss,
-call `manual_backward(loss)`, then `optimizer.step()`. The Strategy reduces
+call `manual_backward(loss)`, then `optimizer.step()`. For unequal valid-token or
+element weights, call `strategy.normalize_loss(local_loss_sum, local_weight)`
+first: pass a local summed objective and its count of contributing units. Global
+weight must be positive; a rank may contribute zero. The method accounts for
+mean versus sum parameter-gradient reduction without detaching the loss. It does
+not change attention masking or infer a dataset denominator. The Strategy reduces
 replicated parameter gradients inside the optimizer closure before pre-step
 hooks. Mean reduction matches equal-size local mean losses; sum reduction is an
 explicit alternate policy. Do not separately reduce the same gradients.
@@ -43,7 +48,10 @@ client-owned `loss_id`. Pass it and a scalar `loss_fn` to
 One ordinary Module is one stage on one rank. Its `forward` maps a single tensor
 to a single tensor. Stage shapes describe a microbatch and must connect exactly.
 The default float32 or selected true BF16 determines communication dtype. There
-is no tracing or dummy forward during shape setup. Model construction remains
+is no tracing or dummy forward during shape setup. Intermediate input and all output
+metadata are differentiable so native schedules allocate gradient communication.
+First-stage batches must match the configured floating dtype and must not require
+input gradients. Model construction remains
 inside the client's `configure_model` contract.
 
 Each training_step zeros its managed optimizer and calls `strategy.pipeline_step`
@@ -81,3 +89,14 @@ Rank-local state costs more storage than deduplicated replicated checkpoints.
 That is deliberate: a rank-zero-only metadata shortcut cannot preserve each
 stage's stochastic trajectory. This implementation does not support topology
 changes during exact resume.
+
+## Verification
+
+The [10 September CPU run](https://github.com/rahul1-bot/syntheticmind/actions/runs/34428718274)
+passes output/gradient comparisons, context parameter updates, unequal objective
+weights, native GPipe and 1F1B, and exact per-rank stochastic continuation. A
+separate actual worker-exit fixture restarts through TorchElastic and compares
+model, optimizer, step and torch RNG against an uninterrupted baseline. The
+[probe sources](parallel_algorithms_verification.md) explain aligned sample order
+and the numerical distinction between cross-topology equivalence and exact
+same-topology continuation. These results do not certify GPU or hybrid operation.

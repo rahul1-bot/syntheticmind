@@ -11,6 +11,7 @@
 | `hyperparameters.py` | `HyperparametersMixin`, constructor capture for reconstruction and experiment metadata. |
 | `saving.py` | Model and DataModule checkpoint reconstruction from schema-v2 artifacts. |
 | `activation_checkpointing.py` | Client-selected non-reentrant and selective activation recomputation. |
+| `context_parallel_attention.py` | Local-query attention, differentiable packed global K/V, and rank-offset causal masking. |
 
 ## Module integration
 
@@ -128,6 +129,17 @@ The wrapper becomes part of the architecture and changes child state-dict paths;
 reconstruct the same graph for loading. It does not pick layers, resize batches,
 or retry OOMs. The [control guide](../docs/guides/runtime_control.md) records the
 memory contract and CPU gradient verification.
+
+## Context-parallel attention
+
+Import `ContextParallelAttention` from its semantic module and construct it with
+the context mesh in `configure_model`. It consumes equal contiguous local
+`[batch, heads, sequence, features]` Q/K/V shards, differentiates packed K/V
+communication, and applies global causal or bidirectional attention. It is not a
+streaming ring algorithm and materializes global K/V. Replicated parameter
+gradient reduction and weighted loss normalization belong to
+`ContextParallelStrategy`, not this layer. See
+[parallel algorithms](../docs/guides/parallel_algorithms.md).
 
 ## Related components
 

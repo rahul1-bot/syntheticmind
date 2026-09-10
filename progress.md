@@ -1,3 +1,12 @@
+| Progress Verified | Runtime Controls and Parallel Recovery | Date: 10 September 2026 | Name: Ghost |
+
+    1. ✅ Implementation `b4037f433e3fdd3275800aa43cc55218237014fd` remains on `feature/runtime-control-plane` in PR #3 against unchanged `dev` (`118cb3c9f769641648155a1609085c5254fe1703`); no merge or direct base-branch update was performed.
+    2. ✅ Workflow https://github.com/rahul1-bot/syntheticmind/actions/runs/34428718274 passes all CPU stages on Python 3.14.7, PyTorch 2.14.0+cpu, Pydantic 2.13.5 and TorchAO 0.18.0. The tested PR merge checkout is `227717f393175fe3de08b6cf036d6d8c5887777b`.
+    3. ✅ Actual context attention, replicated-gradient reduction, unequal objective weighting, native GPipe/1F1B schedules, rank-local checkpoint representation, stochastic exact continuation, and bounded compiler reports now execute. This supersedes the 08 September implementation gaps below; generic mesh dimensions alone remain insufficient.
+    4. ✅ The deliberate rank-1 worker exit at step 2 triggers a real TorchElastic restart. Both ranks automatically restore durable step 1 and finish with bit-exact model, optimizer, global-step and torch RNG equality against uninterrupted training. Async submission is not confused with durable publication.
+    5. ✅ Existing CPU Inductor, all-stage lifecycle, identity/hooks, compiler checkpoint compatibility, selective activation gradients, manifests, DDP/TP, asynchronous snapshot isolation, independent collectives, retention, publication failure preservation and optional-adapter rejection probes remain green. Documentation and acceptance records name the actual owners, imports, limits and evidence. No linter or static type checker was run.
+    6. ⚠️ CPU evidence does not certify CUDA FP8/FSDP2, CUDA allocator capture, MPS execution of these new controls, remote async storage or physical multi-node failure. CP is equal-shard global-K/V attention, not ring/padding/GQA/hybrid execution; PP is static single-tensor fit without validation. AOT/cache export and automatic activation-memory budgets remain outside this implementation.
+
 | Progress In Review | Runtime Control Feature Branch | Date: 08 September 2026 | Name: Ghost |
 
     1. ✅ Work remains isolated on `feature/runtime-control-plane`; the base `dev` revision is `118cb3c9f769641648155a1609085c5254fe1703`, and neither `dev` nor `main` was updated by this continuation.
@@ -274,7 +283,7 @@
     1. ✅ Forced step, forced epoch, and scheduler-controlled automatic logging intervals now execute with real semantics.
     2. ✅ Optimizer-step hooks cover accumulation, repeated closures, and manual multiple optimizers; epoch hooks observe the scheduler-updated value for the new epoch.
     3. ✅ Every optimizer and parameter group has stable collision-checked naming with custom scheduler names, group names, repeated optimizer types, prefixes, momentum, and weight decay.
-    4. ✅ Dynamic parameter groups preserve their existing history, callback metric views update on every rank, and logger writes remain rank-zero-owned.
+    4. ✅ Dynamic parameter groups preserve their existing history, callback metric views update on every rank, and logger persistence remains rank-zero-owned.
     5. ✅ Callback emission coordinates persist across checkpoint resume, and local multi-optimizer, epoch scheduler, dynamic group, invalid-boundary, missing-logger, resume, and spawned DDP probes pass.
 
 | Progress Complete | Data-Parallel Throughput Accounting | Date: 04 September 2026 | Time: 12:52 PM | Name: Ghost |
