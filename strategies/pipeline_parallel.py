@@ -88,8 +88,10 @@ class PipelineParallelStrategy(ModelParallelStrategy):
         dtype: torch.dtype = torch.bfloat16 if self.precision_plugin.precision == "bf16-true" else torch.float32
         stage: PipelineStage = PipelineStage(
             execution_model, self.global_rank, self.world_size, device,
-            input_args=torch.empty(shape.input_shape, device=device, dtype=dtype),
-            output_args=torch.empty(shape.output_shape, device=device, dtype=dtype),
+            input_args=torch.empty(
+                shape.input_shape, device=device, dtype=dtype, requires_grad=self.global_rank > 0
+            ),
+            output_args=torch.empty(shape.output_shape, device=device, dtype=dtype, requires_grad=True),
             group=self.device_mesh["pipeline_parallel"].get_group()
         )
         schedule_type: type[ScheduleGPipe] | type[Schedule1F1B] = (
@@ -149,7 +151,11 @@ class PipelineParallelStrategy(ModelParallelStrategy):
             raise MisconfigurationError("PipelineParallelStrategy requires one managed optimizer per stage.")
         if isinstance(optimizer, torch.optim.LBFGS):
             raise MisconfigurationError("Repeated-closure LBFGS is not supported by this pipeline policy.")
-        result: OptimizerStepOutput = super().optimizer_step(optimizer, closure, model, **kwargs)
+        try:
+            result: OptimizerStepOutput = super().optimizer_step(optimizer, closure, model, **kwargs)
+        except BaseException:
+            self._failed: bool = True
+            raise
         self._pending_optimizer_step: bool = False
         return result
 
@@ -186,6 +192,10 @@ class PipelineParallelStrategy(ModelParallelStrategy):
                 error: str | None = f"First stage inputs must have shape {expected}."
             elif inputs.device != self.root_device:
                 error: str | None = "First stage inputs are on the wrong device."
+            elif inputs.dtype != (torch.bfloat16 if self.precision_plugin.precision == "bf16-true" else torch.float32):
+                error: str | None = "First stage inputs must match the configured floating precision."
+            elif inputs.requires_grad:
+                error: str | None = "This static pipeline does not differentiate first-stage input batches."
             elif target is not None:
                 error: str | None = "Only the final stage supplies a target."
         elif inputs is not None:

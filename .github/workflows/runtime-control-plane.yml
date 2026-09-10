@@ -90,6 +90,11 @@ jobs:
                   if len(parallel_blocks) != 1:
                       raise ValueError('Expected one parallel algorithm probe.')
                   Path('parallel_probe.py').write_text(parallel_blocks[0].split('```', 1)[0])
+                  failure_source: str = Path('syntheticmind/docs/guides/runtime_failure_verification.md').read_text()
+                  failure_blocks: list[str] = failure_source.split('```python\n')[1:]
+                  if len(failure_blocks) != 1:
+                      raise ValueError('Expected one runtime failure probe.')
+                  Path('runtime_failure_probe.py').write_text(failure_blocks[0].split('```', 1)[0])
 
           if __name__ == '__main__':
               extractor: ProbeExtractor = ProbeExtractor()
@@ -103,7 +108,20 @@ jobs:
       - name: Verify context and pipeline algorithms
         run: |
           python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 parallel_probe.py --artifact-root "$RUNNER_TEMP/parallel-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/parallel.log"
+      - name: Verify compiler diagnostics
+        if: ${{ !cancelled() }}
+        run: python runtime_failure_probe.py --mode local --artifact-root "$RUNNER_TEMP/runtime-probes" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/compiler.log"
+      - name: Verify unequal context loss weights
+        if: ${{ !cancelled() }}
+        run: |
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 runtime_failure_probe.py --mode parallel --artifact-root "$RUNNER_TEMP/runtime-probes" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/weighted-context.log"
+      - name: Verify actual worker restart and trajectory equality
+        if: ${{ !cancelled() }}
+        run: |
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 runtime_failure_probe.py --mode baseline --artifact-root "$RUNNER_TEMP/restart-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/restart-baseline.log"
+          python -m torch.distributed.run --standalone --nnodes=1 --nproc-per-node=2 --max-restarts=1 --monitor-interval=0.1 runtime_failure_probe.py --mode restart --artifact-root "$RUNNER_TEMP/restart-probe" 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/restart.log"
       - name: Verify optional TorchAO and scheduler boundaries
+        if: ${{ !cancelled() }}
         run: |
           uv pip install --system 'torchao==0.18.0' --no-deps
           python runtime_probe_3.py 2>&1 | tee "$RUNNER_TEMP/runtime-evidence/boundaries.log"
