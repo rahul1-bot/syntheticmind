@@ -9,6 +9,7 @@
 | `sharded_store.py` | Collective shard storage, metadata coordination, failure broadcast, and pruning. |
 | `asynchronous.py` | Bounded CPU staging, an isolated background communication group, publication futures, and deterministic drain. |
 | `generation.py` | UUIDv7 generation identities and atomic active-generation pointer publication. |
+| `rank_local.py` | Partition-namespaced tensors, per-rank trajectory metadata, and strict context/pipeline policy validation. |
 
 ## Full checkpoints
 
@@ -72,6 +73,24 @@ The two-rank CPU probe covers snapshot isolation, independent training
 collectives, retention, and injected publication failure. CUDA/NCCL and remote
 asynchronous backends require separate validation. See
 [the control guide](../../docs/guides/runtime_control.md).
+
+## Context and pipeline trajectory representation
+
+The dedicated ContextParallelStrategy and PipelineParallelStrategy use a
+rank-local representation over the same immutable-generation store. Tensor keys
+include rank identity so equally named layers on distinct stages cannot collide.
+`meta.pt` contains a version-1 rank-local envelope with the exact parallel policy
+and one ordinary schema-2 Trainer trajectory per rank. RNG, buffers, callbacks,
+data and loop records are not replaced with rank-zero state.
+
+Loading validates envelope fields, schema, parallel policy, world size and
+optimizer cardinality before applying local model state. Unfinished schedules,
+unapplied gradients and failed execution are rejected checkpoint boundaries.
+Synchronous and asynchronous storage are selectable, but exact resume never
+changes topology. The CPU worker-exit fixture demonstrates restoration from the
+last published generation rather than the last submitted save. See
+[parallel algorithms](../../docs/guides/parallel_algorithms.md) and
+[the recovery probe](../../docs/guides/runtime_failure_verification.md).
 
 ## Compatibility and collisions
 
