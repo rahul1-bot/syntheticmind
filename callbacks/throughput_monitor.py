@@ -1,108 +1,261 @@
 # This module:
-# 1. Measures training throughput at two granularities: per-batch samples per
-#    second and batch duration emitted to the experiment logger on a step
-#    cadence, and a whole-epoch samples-per-second summary written to the log
+# 1. Defines ThroughputMonitor, the callback that measures synchronized training
+#    sample throughput, batch throughput, and batch latency over rolling windows
+#    and complete epochs
+# 2. Infers batch cardinality from nested tensor batches or delegates cardinality
+#    semantics to a client-supplied function
 #
 # Design decisions:
-# - The batch size is inferred structurally from the leading dimension of the
-#   first tensor found in the batch (direct tensor, first mapping value, or
-#   first sequence element), and defaults to one when no tensor is found, so
-#   the monitor works without a batch-format contract
-# - Per-batch emission is throttled to the configured step cadence to keep
-#   logger volume proportional to run length, while the epoch summary is
-#   always produced
-# - Measurement uses the monotonic performance counter, and emission is
-#   restricted to rank zero
+# - Timing is restricted to global zero and scaled by Strategy.data_parallel_size,
+#   producing one global sample-rate series without duplicate logger writes
+# - CUDA and MPS work is synchronized at each timing boundary because host clock
+#   measurements around asynchronous kernels otherwise report fictional speed
+# - Fit-time validation pauses the training interval; validation latency is not
+#   silently charged to the next training batch
+# - Automatic batch-size inference requires every tensor leaf to agree on the
+#   leading dimension. Ragged or domain-specific batches must provide
+#   batch_size_fn instead of receiving a guessed cardinality
+# - Rolling counters reset only after emission, while epoch counters accumulate
+#   independently for a stable whole-epoch rate
 #
 # Author: Rahul Sawhney
 
 import time
-from typing import TYPE_CHECKING, override
+from collections.abc import Callable
+from typing import override
 
+import syntheticmind
 import torch
-from loguru import logger as log
 
 from syntheticmind.callbacks.callback import Callback
 from syntheticmind.core.module import Module
-from syntheticmind.utilities.distributed import is_rank_zero
-from syntheticmind.utilities.types import Batch, StepOutput
-
-if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.primitives.types import Batch, StepOutput
 
 __all__: list[str] = ["ThroughputMonitor"]
 
 
 class ThroughputMonitor(Callback):
-    # Training throughput telemetry. Batch boundaries provide the per-batch
-    # duration and inferred sample count; the accumulated counts produce the
-    # epoch-level summary at epoch end.
-    def __init__(self, log_every_n_steps: int = 10) -> None:
-        # Binds the per-batch emission cadence and zeroes the timing and
-        # sample accumulators.
-        super().__init__()
+    # Rank-zero training-rate observer. Clients with unusual batch semantics,
+    # such as packed sequences or graph batches, supply batch_size_fn to define
+    # how many samples one batch represents.
+    def __init__(
+        self,
+        batch_size_fn: Callable[[Batch], int] | None = None,
+        log_every_n_steps: int = 10
+    ) -> None:
+        # Args:
+        #     batch_size_fn: Optional cardinality function for one client batch.
+        #         It must return a non-negative integer. Default: ``None``.
+        #     log_every_n_steps: Positive optimizer-step cadence for rolling
+        #         throughput metrics. Default: ``10``.
+        if batch_size_fn is not None and not callable(batch_size_fn):
+            raise TypeError("`batch_size_fn` must be callable or None.")
+        if type(log_every_n_steps) is not int or log_every_n_steps < 1:
+            raise ValueError("`log_every_n_steps` must be a positive integer.")
+        self._batch_size_fn: Callable[[Batch], int] | None = batch_size_fn
         self.log_every_n_steps: int = log_every_n_steps
-        self._batch_start_time: float = 0.0
-        self._epoch_start_time: float = 0.0
+        self._interval_started_at: float | None = None
+        self._window_samples: int = 0
+        self._window_batches: int = 0
+        self._window_seconds: float = 0.0
         self._epoch_samples: int = 0
+        self._epoch_batches: int = 0
+        self._epoch_seconds: float = 0.0
+        self._last_logged_step: int = -1
 
     @override
-    def on_train_epoch_start(self, trainer: Trainer, module: Module) -> None:
-        # Marks the epoch start and resets the epoch sample counter.
-        self._epoch_start_time: float = time.perf_counter()
-        self._epoch_samples: int = 0
-
-    @override
-    def on_train_batch_start(
-        self, trainer: Trainer, module: Module, batch: Batch, batch_idx: int
+    def on_train_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
     ) -> None:
-        # Marks the batch start for the per-batch duration measurement.
-        self._batch_start_time: float = time.perf_counter()
-
-    @override
-    def on_train_batch_end(
-        self, trainer: Trainer, module: Module, outputs: StepOutput, batch: Batch, batch_idx: int
-    ) -> None:
-        # Computes the batch duration and inferred sample count, accumulates
-        # the epoch total, and on the configured step cadence emits samples
-        # per second and batch time to the experiment logger from rank zero.
-        if not is_rank_zero():
-            return
-        batch_time: float = time.perf_counter() - self._batch_start_time
-        batch_size: int = self._infer_batch_size(batch)
-        self._epoch_samples += batch_size
-
-        if module.global_step % self.log_every_n_steps == 0 and trainer.logger is not None:
-            samples_per_sec: float = batch_size / batch_time if batch_time > 0 else 0.0
-            trainer.logger.log_metrics(
-                {"throughput/samples_per_sec": samples_per_sec, "throughput/batch_time_ms": batch_time * 1000},
-                step=module.global_step
+        # Rejects a monitor with no destination before training begins.
+        del module
+        if not trainer.loggers:
+            raise MisconfigurationError(
+                "ThroughputMonitor requires at least one configured logger."
             )
 
     @override
-    def on_train_epoch_end(self, trainer: Trainer, module: Module) -> None:
-        # Writes the whole-epoch samples-per-second summary to the log from
-        # rank zero.
-        if not is_rank_zero():
+    def on_train_epoch_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        # Opens a fresh synchronized timing window for the epoch on global zero.
+        del module
+        if not trainer.is_global_zero:
             return
-        epoch_time: float = time.perf_counter() - self._epoch_start_time
-        if epoch_time > 0:
-            log.info(f"Epoch throughput: {self._epoch_samples / epoch_time:.1f} samples/sec")
+        self._window_samples: int = 0
+        self._window_batches: int = 0
+        self._window_seconds: float = 0.0
+        self._epoch_samples: int = 0
+        self._epoch_batches: int = 0
+        self._epoch_seconds: float = 0.0
+        self._last_logged_step: int = -1
+        self._synchronize(trainer)
+        self._interval_started_at: float | None = time.perf_counter()
 
-    @staticmethod
-    def _infer_batch_size(batch: Batch) -> int:
-        # Infers the sample count from the leading dimension of the first
-        # tensor reachable in the batch structure: the batch itself, the first
-        # mapping value, or the first sequence element. Structures without a
-        # reachable tensor count as one sample.
+    @override
+    def on_train_batch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        outputs: StepOutput,
+        batch: Batch,
+        batch_idx: int
+    ) -> None:
+        # Closes one device-synchronized batch interval, scales local sample
+        # cardinality across the data-parallel axis, and emits on step cadence.
+        del module, outputs, batch_idx
+        if not trainer.is_global_zero:
+            return
+        self._synchronize(trainer)
+        current_time: float = time.perf_counter()
+        if self._interval_started_at is None:
+            self._interval_started_at: float | None = current_time
+            return
+        elapsed_seconds: float = max(0.0, current_time - self._interval_started_at)
+        self._interval_started_at: float | None = current_time
+        local_batch_size: int = self._infer_batch_size(batch)
+        global_batch_size: int = local_batch_size * trainer.strategy.data_parallel_size
+        self._window_samples += global_batch_size
+        self._window_batches += 1
+        self._window_seconds += elapsed_seconds
+        self._epoch_samples += global_batch_size
+        self._epoch_batches += 1
+        self._epoch_seconds += elapsed_seconds
+        if trainer.global_step <= 0:
+            return
+        if trainer.global_step == self._last_logged_step:
+            return
+        if trainer.global_step % self.log_every_n_steps != 0:
+            return
+        self._emit_window(trainer)
+        self._last_logged_step: int = trainer.global_step
+
+    @override
+    def on_train_epoch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        # Publishes the complete epoch rate without discarding a partial rolling
+        # window that has not yet reached its logging cadence.
+        del module
+        if not trainer.is_global_zero or self._epoch_seconds <= 0.0:
+            return
+        metrics: dict[str, float] = {
+            "throughput/epoch_samples_per_sec": self._epoch_samples / self._epoch_seconds,
+            "throughput/epoch_batches_per_sec": self._epoch_batches / self._epoch_seconds
+        }
+        trainer._logger_connector.callback_metrics.update(
+            {
+                name: torch.tensor(value, device=trainer.strategy.root_device)
+                for name, value in metrics.items()
+            }
+        )
+        trainer._log_metrics(metrics, step=trainer.global_step)
+
+    @override
+    def on_validation_start(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        # Pauses fit-time training timing before validation begins.
+        del module
+        if not trainer.is_global_zero or trainer.state.stage != "fit":
+            return
+        self._synchronize(trainer)
+        self._interval_started_at: float | None = None
+
+    @override
+    def on_validation_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module
+    ) -> None:
+        # Reopens the training interval after fit-time validation completes.
+        del module
+        if not trainer.is_global_zero or trainer.state.stage != "fit":
+            return
+        self._synchronize(trainer)
+        self._interval_started_at: float | None = time.perf_counter()
+
+    def _emit_window(self, trainer: syntheticmind.Trainer) -> None:
+        # Emits and clears only the rolling window, preserving the independent
+        # epoch totals for the epoch-end report.
+        if self._window_seconds <= 0.0 or self._window_batches == 0:
+            return
+        metrics: dict[str, float] = {
+            "throughput/samples_per_sec": self._window_samples / self._window_seconds,
+            "throughput/batches_per_sec": self._window_batches / self._window_seconds,
+            "throughput/batch_time_ms": self._window_seconds / self._window_batches * 1000.0
+        }
+        trainer._logger_connector.callback_metrics.update(
+            {
+                name: torch.tensor(value, device=trainer.strategy.root_device)
+                for name, value in metrics.items()
+            }
+        )
+        trainer._log_metrics(metrics, step=trainer.global_step)
+        self._window_samples: int = 0
+        self._window_batches: int = 0
+        self._window_seconds: float = 0.0
+
+    def _infer_batch_size(self, batch: Batch) -> int:
+        # Resolves client-defined cardinality first, then enforces agreement
+        # across every tensor leaf in a standard nested batch.
+        if self._batch_size_fn is not None:
+            batch_size: int = self._batch_size_fn(batch)
+            if type(batch_size) is not int or batch_size < 0:
+                raise TypeError("`batch_size_fn` must return a non-negative integer.")
+            return batch_size
+        sizes: list[int] = self._collect_batch_sizes(batch)
+        if not sizes:
+            return 1
+        unique_sizes: set[int] = set(sizes)
+        if len(unique_sizes) != 1:
+            raise MisconfigurationError(
+                f"ThroughputMonitor found inconsistent tensor batch sizes {sorted(unique_sizes)}."
+            )
+        return sizes[0]
+
+    def _collect_batch_sizes(self, batch: Batch) -> list[int]:
+        # Walks the closed Batch union recursively; scalars count as one sample
+        # and empty non-tensor containers fall back to their container length.
         if isinstance(batch, torch.Tensor):
-            return batch.shape[0]
+            return [1 if batch.ndim == 0 else int(batch.shape[0])]
         if isinstance(batch, dict):
-            first: torch.Tensor | None = next(iter(batch.values()), None)
-            if isinstance(first, torch.Tensor):
-                return first.shape[0]
-        if isinstance(batch, (tuple, list)) and len(batch) > 0:
-            first_item: torch.Tensor = batch[0]
-            if isinstance(first_item, torch.Tensor):
-                return first_item.shape[0]
-        return 1
+            sizes: list[int] = []
+            value: Batch
+            for value in batch.values():
+                sizes.extend(self._collect_batch_sizes(value))
+            return sizes
+        if isinstance(batch, list | tuple):
+            sizes: list[int] = []
+            value: Batch
+            for value in batch:
+                sizes.extend(self._collect_batch_sizes(value))
+            if sizes:
+                return sizes
+            return [len(batch)]
+        return []
+
+    def _synchronize(self, trainer: syntheticmind.Trainer) -> None:
+        # Flushes asynchronous accelerator work before reading the host clock.
+        device: torch.device = trainer.strategy.root_device
+        if device.type == "cuda" and torch.cuda.is_available():
+            torch.cuda.synchronize(device)
+        elif device.type == "mps" and torch.backends.mps.is_available():
+            torch.mps.synchronize()
+
+    @override
+    def __repr__(self) -> str:
+        # Exposes both batch semantics and emission cadence in diagnostics.
+        return (
+            f"ThroughputMonitor(batch_size_fn={self._batch_size_fn!r}, "
+            f"log_every_n_steps={self.log_every_n_steps})"
+        )

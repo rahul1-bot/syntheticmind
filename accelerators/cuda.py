@@ -1,16 +1,16 @@
 # This module:
-# 1. Implements the accelerator contract for NVIDIA CUDA execution, including
-#    process-wide current-device selection and multi-device counting
+# 1. Implements Accelerator for NVIDIA CUDA discovery, explicit device
+#    selection, process-local binding, and allocator statistics
 #
 # Design decisions:
-# - setup_device also calls torch.cuda.set_device so subsequent context-free
-#   CUDA allocations land on the bound device instead of device zero
-# - get_device falls back to cuda:0 before any binding, so early queries during
-#   trainer construction return a usable default instead of failing
-# - The device slot is Optional, distinguishing "not yet bound" from an actual
-#   binding; the other backends can bind eagerly because they have one device
-# - auto_device_count reports torch.cuda.device_count, backing multi-GPU
-#   configuration resolution
+# - setup_device calls torch.cuda.set_device as well as recording the device so
+#   context-free CUDA allocations inside client code follow the resolved rank
+# - Before binding, get_device returns cuda:0 as the conventional provisional
+#   device; Trainer replaces it after topology and local-rank resolution
+# - Device parsing distinguishes counts, explicit identifiers, and all-visible
+#   selection through the shared GPU parser and rejects unavailable IDs
+# - Statistics expose allocator current and peak values, retry and out-of-memory
+#   counts, plus free and total device bytes without converting units
 #
 # Author: Rahul Sawhney
 
@@ -19,45 +19,112 @@ from typing import override
 import torch
 
 from syntheticmind.accelerators.accelerator import Accelerator
+from syntheticmind.accelerators.device_parser import DeviceInput, _AcceleratorDeviceParser
+from syntheticmind.primitives.exceptions import MisconfigurationError
 
 __all__: list[str] = ["CUDAAccelerator"]
 
 
 class CUDAAccelerator(Accelerator):
-    # Accelerator for CUDA devices. Binding sets the process-wide current
-    # device; queries before binding degrade to the first CUDA device.
+    # NVIDIA execution backend selected by Trainer when CUDA is requested or
+    # available under automatic accelerator resolution.
     def __init__(self) -> None:
-        # Starts unbound; the concrete device index arrives via setup_device
-        # once the strategy has resolved placement.
+        # Defers process-local device binding until Strategy resolves local rank.
         self._device: torch.device | None = None
 
     @override
     def setup_device(self, device: torch.device) -> None:
-        # Binds the device and makes it the process-wide current CUDA device so
-        # context-free allocations follow the binding.
+        # Validates CUDA identity and mutates this process's active CUDA device.
+        if device.type != "cuda":
+            raise MisconfigurationError(f"CUDAAccelerator cannot bind {device}.")
         self._device: torch.device | None = device
         torch.cuda.set_device(device)
 
     @override
     def get_device(self) -> torch.device:
-        # Returns the bound device, or cuda:0 when queried before binding.
+        # Bound process-local device, or cuda:0 before topology setup.
         if self._device is None:
             return torch.device("cuda", 0)
         return self._device
 
     @override
-    def auto_device_count(self) -> int:
-        # Number of visible CUDA devices on this host.
+    def get_device_stats(self, device: torch.device) -> dict[str, float]:
+        # Reads allocator and hardware memory counters for the resolved device
+        # index; callers synchronize execution before timing-sensitive sampling.
+        if device.type != "cuda":
+            raise MisconfigurationError(f"CUDAAccelerator cannot inspect {device}.")
+        device_index: int = (
+            device.index
+            if device.index is not None
+            else torch.cuda.current_device()
+        )
+        memory_statistics: dict[str, int] = torch.cuda.memory_stats(device_index)
+        selected_keys: tuple[str, ...] = (
+            "allocated_bytes.all.current",
+            "allocated_bytes.all.peak",
+            "reserved_bytes.all.current",
+            "reserved_bytes.all.peak",
+            "active_bytes.all.current",
+            "active_bytes.all.peak",
+            "num_alloc_retries",
+            "num_ooms"
+        )
+        statistics: dict[str, float] = {
+            f"cuda/{key}": float(memory_statistics.get(key, 0))
+            for key in selected_keys
+        }
+        memory_info: tuple[int, int] = torch.cuda.mem_get_info(device_index)
+        free_bytes: int = memory_info[0]
+        total_bytes: int = memory_info[1]
+        statistics["cuda/free_bytes"] = float(free_bytes)
+        statistics["cuda/total_bytes"] = float(total_bytes)
+        return statistics
+
+    @classmethod
+    @override
+    def parse_devices(cls, devices: DeviceInput) -> int | list[int]:
+        # Resolves public count, explicit ID, comma-separated, and all-device
+        # forms against torch.cuda.device_count.
+        parser: _AcceleratorDeviceParser = _AcceleratorDeviceParser(
+            cls.auto_device_count(),
+            cls.__name__
+        )
+        return parser.parse(devices)
+
+    @classmethod
+    @override
+    def get_parallel_devices(
+        cls,
+        devices: int | list[int]
+    ) -> list[torch.device]:
+        # Converts validated identifiers into ordered CUDA placements used by
+        # Strategy local-rank selection.
+        del cls
+        if not isinstance(devices, list):
+            raise TypeError("CUDAAccelerator requires parsed device IDs.")
+        parallel_devices: list[torch.device] = []
+        device_id: int
+        for device_id in devices:
+            parallel_devices.append(torch.device("cuda", device_id))
+        return parallel_devices
+
+    @classmethod
+    @override
+    def auto_device_count(cls) -> int:
+        # Reports the visible CUDA device count used by automatic parsing.
+        del cls
         return torch.cuda.device_count()
 
-    @staticmethod
+    @classmethod
     @override
-    def is_available() -> bool:
-        # Whether a usable CUDA runtime and at least one device are present.
+    def is_available(cls) -> bool:
+        # Requires the installed torch build and host runtime to expose CUDA.
+        del cls
         return torch.cuda.is_available()
 
-    @staticmethod
+    @classmethod
     @override
-    def name() -> str:
-        # Canonical backend name used in configuration and log output.
+    def name(cls) -> str:
+        # Returns the canonical Trainer configuration identity.
+        del cls
         return "cuda"

@@ -1,98 +1,132 @@
 # This module:
-# 1. Streams metric scalars into TensorBoard event files, one add_scalar call
-#    per metric key with the trainer step as the global step
-# 2. Records hyperparameters through the TensorBoard hparams plugin with values
-#    coerced to strings
-# 3. Defers the SummaryWriter import and construction until the first write
+# 1. Defines TensorBoardLogger, the local experiment backend for scalar event
+#    series and hyperparameter records
+# 2. Defines the narrow structural writer contract used to isolate the optional
+#    TensorBoard dependency from the logger lifecycle
 #
 # Design decisions:
-# - The concrete SummaryWriter is imported lazily inside _get_writer so
-#   constructing this logger never forces the tensorboard dependency onto runs
-#   that use a different backend
-# - A minimal structural protocol stands in for the writer type, keeping the
-#   module importable and type-checkable without tensorboard installed
-# - Hyperparameter values are stringified before add_hparams because the plugin
-#   accepts only primitive value types, while run configurations can carry
-#   paths, tuples, and nested structures
-# - finalize flushes before closing and drops the writer reference so a later
-#   write would transparently create a fresh writer
+# - TensorBoard storage is local-only because SummaryWriter does not implement
+#   the framework's fsspec transport contract
+# - SummaryWriter imports and construction are lazy, so importing SyntheticMind
+#   or constructing an unused logger does not require the optional dependency or
+#   create filesystem state
+# - The private Protocol describes only operations this adapter invokes; it does
+#   not duplicate the third-party writer class or become a public abstraction
+# - Nested hyperparameter values serialize deterministically to JSON strings
+#   because TensorBoard accepts only scalar fields
+# - finalize clears the cached writer before flush and close, making repeated
+#   teardown and later logger reuse deterministic
 #
 # Author: Rahul Sawhney
 
+import json
 from pathlib import Path
 from typing import Protocol, override
 
-from syntheticmind.loggers.logger import Logger
-from syntheticmind.utilities.types import HyperparameterDict
+from syntheticmind.loggers.logger import Logger, _JsonValue
+from syntheticmind.storage.filesystem import StoragePath
+from syntheticmind.primitives.types import HyperparameterDict
 
 __all__: list[str] = ["TensorBoardLogger"]
 
+type _TensorBoardHyperparameter = bool | int | float | str
+
 
 class _TensorBoardWriter(Protocol):
-    # Structural stand-in for torch.utils.tensorboard.SummaryWriter covering
-    # exactly the four members this logger touches, so the real class satisfies
-    # it implicitly and no tensorboard import is needed at annotation time.
-    def add_scalar(self, tag: str, scalar_value: float, global_step: int | None = None) -> None:
-        # Records one scalar sample under the tag at the given global step.
+    # Minimal structural dependency implemented by torch SummaryWriter and by
+    # focused test doubles without importing the optional backend eagerly.
+    def add_scalar(
+        self,
+        tag: str,
+        scalar_value: float,
+        global_step: int | None = None
+    ) -> None:
+        # Records one scalar at an optional global training coordinate.
         ...
 
     def add_hparams(
         self,
-        hparam_dict: dict[str, str],
+        hparam_dict: dict[str, _TensorBoardHyperparameter],
         metric_dict: dict[str, float]
     ) -> None:
-        # Records the hyperparameter set, optionally paired with summary metrics.
+        # Records a scalar-only hyperparameter mapping.
         ...
 
     def flush(self) -> None:
-        # Forces buffered events to disk.
+        # Forces buffered event data to its destination.
         ...
 
     def close(self) -> None:
-        # Flushes and releases the event-file resources.
+        # Releases writer resources.
         ...
 
 
 class TensorBoardLogger(Logger):
-    # Concrete logger backed by a lazily created SummaryWriter writing into
-    # log_dir. Construction is cheap; the event file appears on first write.
-    def __init__(self, save_dir: Path, name: str = "default", version: str | None = None) -> None:
-        # Binds the logger identity; the writer slot stays empty until the
-        # first metric or hyperparameter write.
+    # Optional local event logger selected explicitly by client code.
+    @override
+    def __init__(
+        self,
+        save_dir: str | Path,
+        name: str = "default",
+        version: int | str | None = None
+    ) -> None:
+        # Validates local destination semantics while deferring writer creation.
         super().__init__(save_dir=save_dir, name=name, version=version)
+        if not StoragePath(self.log_dir).is_local:
+            raise ValueError("TensorBoardLogger requires a local filesystem directory.")
         self._writer: _TensorBoardWriter | None = None
 
     @override
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
-        # Emits one scalar per metric key against the trainer step, creating
-        # the writer on first use.
+        # Validates and emits every scalar under the shared training coordinate.
+        validated_metrics: dict[str, float] = self._validated_metrics(metrics, step)
         writer: _TensorBoardWriter = self._get_writer()
-        for key, value in metrics.items():
+        key: str
+        value: float
+        for key, value in validated_metrics.items():
             writer.add_scalar(key, value, global_step=step)
 
     @override
     def log_hyperparams(self, params: HyperparameterDict) -> None:
-        # Records the hyperparameter mapping with every value stringified for
-        # the hparams plugin; no summary metrics are attached.
-        writer: _TensorBoardWriter = self._get_writer()
-        writer.add_hparams(
-            {k: str(v) for k, v in params.items()},
-            {}
+        # Normalizes portable values and encodes nested structures into stable
+        # JSON strings accepted by TensorBoard's scalar hyperparameter boundary.
+        normalized_params: dict[str, _JsonValue] = self._normalize_hyperparameters(
+            params
         )
+        tensorboard_params: dict[str, _TensorBoardHyperparameter] = {}
+        name: str
+        value: _JsonValue
+        for name, value in normalized_params.items():
+            if isinstance(value, bool | int | float | str):
+                tensorboard_params[name]: _TensorBoardHyperparameter = value
+            elif value is None:
+                tensorboard_params[name]: _TensorBoardHyperparameter = "null"
+            else:
+                tensorboard_params[name]: _TensorBoardHyperparameter = json.dumps(
+                    value,
+                    allow_nan=False,
+                    ensure_ascii=False,
+                    sort_keys=True
+                )
+        self._get_writer().add_hparams(tensorboard_params, {})
 
     @override
     def finalize(self) -> None:
-        # Flushes and closes the writer if one exists, then clears the slot so
-        # any later write would recreate it; safe to call repeatedly.
-        if self._writer is not None:
-            self._writer.flush()
-            self._writer.close()
-            self._writer: _TensorBoardWriter | None = None
+        # Flushes and closes an acquired writer exactly once.
+        writer: _TensorBoardWriter | None = self._writer
+        self._writer: _TensorBoardWriter | None = None
+        if writer is None:
+            return
+        try:
+            writer.flush()
+        finally:
+            writer.close()
 
     def _get_writer(self) -> _TensorBoardWriter:
-        # Returns the live writer, importing tensorboard and constructing the
-        # SummaryWriter over log_dir on the first call only.
+        # Imports and constructs SummaryWriter only on the first actual emission.
         if self._writer is None:
             from torch.utils.tensorboard import SummaryWriter
-            self._writer: _TensorBoardWriter | None = SummaryWriter(log_dir=str(self.log_dir))
+            self._writer: _TensorBoardWriter | None = SummaryWriter(
+                log_dir=self.log_dir
+            )
         return self._writer

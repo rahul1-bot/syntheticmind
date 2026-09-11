@@ -1,69 +1,77 @@
 # This module:
-# 1. Defines the base class shared by the fit, training-epoch, evaluation, and
-#    prediction loops: the trainer attachment point and the per-loop stop flag
+# 1. Defines Loop, the shared Trainer attachment, cooperative stop state, and
+#    evaluation autograd-context policy inherited by execution loops
 #
 # Design decisions:
-# - Loops are constructed unattached and receive their trainer through the
-#   property setter during trainer initialization. The property getter raises
-#   immediately when a loop runs unattached, converting a wiring mistake into a
-#   direct error instead of an AttributeError deep inside an epoch
-# - The trainer reference is intentionally annotated lazily so this module does
-#   not import the trainer and create an import cycle; the trainer imports the
-#   loops, not the reverse
-# - The per-loop stop flag is separate from the trainer-level stop state so an
-#   individual loop can be reset without touching global run control
+# - A loop cannot execute detached from Trainer; failed access identifies the
+#   missing lifecycle connection rather than returning partial state
+# - Loop-local should_stop remains distinct from Trainer's cross-callback stop
+#   state so an inner lifecycle can finish or reset independently
+# - Gloo evaluation uses no_grad rather than inference_mode because distributed
+#   and tensor implementations may require version-counter behavior unavailable
+#   under inference tensors
 #
 # Author: Rahul Sawhney
 
-from typing import TYPE_CHECKING
+from contextlib import AbstractContextManager
+from typing import override
 
-if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+import syntheticmind
+import torch
+import torch.distributed as dist
 
 __all__: list[str] = ["Loop"]
 
 
 class Loop:
-    # Base class for every execution loop. Concrete loops implement run() with
-    # their stage-specific behavior; this class contributes only the trainer
-    # attachment contract and the resettable stop flag, keeping the base free
-    # of stage assumptions.
+    # Shared stateful attachment for Trainer-owned iterative lifecycles.
     def __init__(self) -> None:
-        # Starts unattached with the stop flag lowered. The owning trainer
-        # attaches itself through the trainer property during its own
-        # construction.
-        self._trainer: Trainer | None = None
+        # Initializes detached reusable loop state before Trainer composition.
+        self._trainer: syntheticmind.Trainer | None = None
         self._should_stop: bool = False
 
     @property
-    def trainer(self) -> Trainer:
-        # Returns the attached trainer. Raises when the loop was never
-        # attached, because every concrete loop requires trainer collaborators
-        # (strategy, state, callbacks) to execute.
+    def trainer(self) -> syntheticmind.Trainer:
+        # Connected Trainer or a lifecycle error before composition.
         if self._trainer is None:
-            raise RuntimeError("Loop is not connected to a Trainer")
+            raise RuntimeError("Loop is not connected to a Trainer.")
         return self._trainer
 
     @trainer.setter
-    def trainer(self, trainer: Trainer) -> None:
-        # Attaches the owning trainer; called once during trainer construction.
-        self._trainer: Trainer | None = trainer
+    def trainer(self, trainer: syntheticmind.Trainer) -> None:
+        # Connects the sole orchestration authority consumed during execution.
+        self._trainer: syntheticmind.Trainer | None = trainer
 
     @property
     def should_stop(self) -> bool:
-        # Loop-local stop flag, independent of the trainer-level stop state.
+        # Loop-local cooperative stop request.
         return self._should_stop
 
     @should_stop.setter
     def should_stop(self, value: bool) -> None:
-        # Raises or lowers the loop-local stop flag.
+        # Validates cooperative control state instead of accepting truthy values
+        # whose meaning could change across process transfer.
+        if type(value) is not bool:
+            raise TypeError("Loop should_stop must be a bool.")
         self._should_stop: bool = value
 
     def reset(self) -> None:
-        # Lowers the stop flag so the loop instance can be reused for another
-        # run without carrying over a stale stop request.
+        # Clears transient stop state before loop reuse.
         self._should_stop: bool = False
 
+    def _evaluation_context(
+        self,
+        inference_mode: bool
+    ) -> AbstractContextManager[None]:
+        # Selects inference_mode only where the backend can safely consume
+        # inference tensors; otherwise preserves no-gradient version semantics.
+        if dist.is_available() and dist.is_initialized() and dist.get_backend() == "gloo":
+            return torch.no_grad()
+        if inference_mode:
+            return torch.inference_mode()
+        return torch.no_grad()
+
+    @override
     def __repr__(self) -> str:
-        # Compact identity line for logs and interactive debugging.
+        # Reports the concrete loop concept without dumping live Trainer state.
         return f"{type(self).__name__}()"

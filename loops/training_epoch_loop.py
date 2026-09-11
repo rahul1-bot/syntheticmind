@@ -1,294 +1,668 @@
 # This module:
-# 1. Executes one training epoch: batch fetching with timing instrumentation, the
-#    batch-transfer hook chain, step execution under the configured precision
-#    policy, gradient accumulation, optimizer and scheduler stepping, and metric
-#    dispatch at step and epoch granularity
-# 2. Implements deterministic mid-epoch resume by restoring the epoch-start
-#    random-number state recorded in checkpoints and replaying already-completed
-#    batches without executing them
-# 3. Schedules mid-epoch validation against batch-count, epoch-fraction, or
-#    global-step intervals
-# 4. Owns the mixed-precision GradScaler lifecycle and both gradient-clipping
-#    entry points
+# 1. Defines TrainingEpochLoop, one logical training-loader epoch composed from
+#    resume coordinates, data fetch, transfer, hooks, automatic or manual
+#    optimization, accumulation, validation, scheduler cadence, metrics,
+#    checkpoint durability, and exact continuation state
+# 2. Owns the rank-local scalar and TorchMetrics windows required to resume a
+#    partial epoch without fabricating an epoch boundary
 #
 # Design decisions:
-# - For each batch-transfer hook, the datamodule implementation takes precedence
-#   over the module implementation. Precedence is decided per hook by comparing
-#   the datamodule's bound attribute against the DataModule base attribute, so a
-#   datamodule that overrides a hook wins for that hook only, and the module
-#   remains the default for the rest
-# - During accumulation batches under DistributedDataParallel, the step and
-#   backward run inside model.no_sync(), so inter-rank gradient reduction occurs
-#   only on the optimizer-step batch rather than on every micro-batch
-# - The loss is divided by accumulate_grad_batches before backward, so the
-#   accumulated gradient matches the gradient of the equivalent large batch
-# - The final limited batch forces a non-accumulating step, and a tail flush
-#   after the loop performs one more optimizer step when the epoch ends inside
-#   an accumulation window, so no accumulated gradients are silently discarded
-# - Step metrics are withheld during accumulation batches and emitted from rank
-#   zero every log_every_n_steps. Epoch metrics accumulate through
-#   MetricAccumulator under each metric's declared reduction and batch-size
-#   weighting, update the trainer's callback metrics on every rank, and reach
-#   the logger only from rank zero
-# - Mid-epoch resume first restores the epoch-start random-number state, then
-#   consumes and discards the already-completed prefix from a fresh dataloader
-#   iterator. The dataloader therefore reproduces the exact original batch
-#   sequence, and execution continues at the first incomplete batch
-# - The GradScaler exists only for 16-mixed precision on CUDA devices, and
-#   gradients are unscaled before clipping so thresholds apply to true
-#   gradient magnitudes rather than scaled ones
+# - A logical epoch ends only when its CombinedLoader exhausts. A max-step,
+#   callback stop, or time boundary inside the loader preserves the current epoch
+#   and does not run epoch-end hooks or epoch schedulers
+# - Stateful loaders restore their physical cursor and continue directly;
+#   stateless loaders replay the completed prefix from the epoch-start RNG state,
+#   then restore checkpoint-time RNG before the first new batch
+# - Unsized lookahead captures loader state after the returned batch and before
+#   the unseen prefetch, preventing checkpoints from skipping data on resume
+# - Automatic optimization owns closure, zeroing, backward, accumulation,
+#   clipping, managed step, progress, and scheduler cadence. Manual optimization
+#   executes only the client step and lets Module methods drive mutation
+# - DDP synchronization is deferred through Strategy during non-boundary
+#   microbatches. If loader exhaustion leaves a partial accumulation tail,
+#   gradients synchronize and step exactly once before epoch completion
+# - Checkpoints are durable only outside an incomplete batch and, for automatic
+#   optimization, after a complete optimizer boundary; callbacks may record save
+#   intent earlier but persistence waits for this state
+# - Standard schedulers and plateau schedulers are separate operations because a
+#   plateau step requires a settled monitor. Epoch schedulers run only at true
+#   loader completion
+# - Epoch metric identity, accumulator values, TorchMetrics state, update count,
+#   loader cursor, and RNG coordinates persist together and validate before any
+#   resumed live state mutates
 #
 # Author: Rahul Sawhney
 
-import time
-from collections.abc import Iterator
-from contextlib import AbstractContextManager, nullcontext
-from typing import TYPE_CHECKING, Literal
+import warnings
+from collections.abc import Callable, Iterator
+from functools import partial
+from typing import Literal, cast, override
 
+import syntheticmind
 import torch
 from torch import nn
-from torch.amp import GradScaler, autocast  # type: ignore[attr-defined]
-from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader
+from torchmetrics import Metric
 
 from syntheticmind.callbacks.callback import Callback
-from syntheticmind.core.datamodule import DataModule
-from syntheticmind.core.module import LoggedMetric, Module
-from syntheticmind.core.optimizer import SchedulerConfig
-from syntheticmind.loggers.logger import Logger
+from syntheticmind.core.metric import LoggedMetric, _LoggedMetricCheckpoint
+from syntheticmind.core.module import Module
+from syntheticmind.core.optimizer import SyntheticOptimizer
+from syntheticmind.loops.fetchers import _DataFetcher
 from syntheticmind.loops.loop import Loop
-from syntheticmind.state.trainer_state import TrainerState
+from syntheticmind.loops.optimization.automatic import _AutomaticOptimization
+from syntheticmind.loops.optimization.manual import _ManualOptimization
+from syntheticmind.trainer.states import TrainerState
 from syntheticmind.strategies.strategy import Strategy
-from syntheticmind.utilities.distributed import DistributedUtils
-from syntheticmind.utilities.metric_accumulator import MetricAccumulator
-from syntheticmind.utilities.types import Batch, CheckpointDict, StepOutput
-
-if TYPE_CHECKING:
-    from syntheticmind.core.trainer import Trainer
+from syntheticmind.data.combined_loader import CombinedLoader
+from syntheticmind.primitives.exceptions import MisconfigurationError
+from syntheticmind.trainer.connectors.logger_connector.metric_accumulator import (
+    MetricAccumulator
+)
+from syntheticmind.primitives.types import (
+    Batch,
+    BackwardInputs,
+    CheckpointDict,
+    CheckpointValue,
+    ClipAlgorithm,
+    DataLoaderState,
+    OptimizerClosure,
+    OptimizerStepOptions,
+    OptimizerStepOutput,
+    RunningStage,
+    SchedulerInterval,
+    StateDict,
+    StepOutput,
+    TrainingStepOutput
+)
 
 __all__: list[str] = ["TrainingEpochLoop"]
 
+type _BatchOptimizationResult = tuple[StepOutput, bool]
+type _BatchIteration = tuple[
+    _DataFetcher[tuple[Batch, int, int]],
+    Iterator[tuple[Batch, int, int]],
+    int,
+    int
+]
+type _BatchLoopResult = tuple[int, bool, bool]
+type _EpochMetricEntry = tuple[LoggedMetric, MetricAccumulator]
+
 
 class TrainingEpochLoop(Loop):
-    # Loop that executes one training epoch each time run() is invoked. The fit
-    # loop constructs it once, configures it from the trainer arguments, and
-    # calls it once per epoch. The loop coordinates the strategy (step
-    # execution), the module and callbacks (hook delivery), the optimizer and
-    # scheduler (stepping cadence), and the logger (metric emission), while
-    # keeping enough internal state to support deterministic mid-epoch resume.
+    # Stateful training epoch reused by FitLoop. Client code interacts through
+    # Module training and optimization methods; Trainer and checkpoint callbacks
+    # inspect durability and continuation state through this owner.
+    @override
     def __init__(
         self,
+        min_steps: int | None = None,
+        max_steps: int = -1,
         accumulate_grad_batches: int = 1,
-        val_check_interval: int | float = 1.0,
-        val_check_interval_scope: Literal["epoch", "global_step"] = "epoch",
-        validate_at_epoch_end: bool = True,
-        precision: str = "32-true",
-        gradient_clip_val: float | None = None,
-        gradient_clip_algorithm: str = "norm",
-        log_every_n_steps: int = 10,
-        limit_train_batches: int | float | None = None
+        gradient_clip_val: int | float | None = None,
+        gradient_clip_algorithm: ClipAlgorithm | None = None,
+        log_every_n_steps: int = 10
     ) -> None:
-        # Stores the epoch-execution configuration supplied by the trainer and
-        # initializes the resume-tracking state: the count of completed batches
-        # inside the current epoch, the flag marking whether the batch loop is
-        # active, and the random-number-state slots used by mid-epoch resume.
+        # Stores resolved step, accumulation, clipping, and logging policy and
+        # initializes optimization helpers plus empty continuation and metric state.
         super().__init__()
+        self.min_steps: int | None = min_steps
+        self.max_steps: int = max_steps
         self.accumulate_grad_batches: int = accumulate_grad_batches
-        self.val_check_interval: int | float = val_check_interval
-        self.val_check_interval_scope: Literal["epoch", "global_step"] = val_check_interval_scope
-        self.validate_at_epoch_end: bool = validate_at_epoch_end
-        self.precision: str = precision
-        self.gradient_clip_val: float | None = gradient_clip_val
-        self.gradient_clip_algorithm: str = gradient_clip_algorithm
+        self.gradient_clip_val: int | float | None = gradient_clip_val
+        self.gradient_clip_algorithm: ClipAlgorithm | None = gradient_clip_algorithm
         self.log_every_n_steps: int = log_every_n_steps
-        self.limit_train_batches: int | float | None = limit_train_batches
+        self.automatic_optimization: _AutomaticOptimization = (
+            _AutomaticOptimization(accumulate_grad_batches)
+        )
+        self.manual_optimization: _ManualOptimization = _ManualOptimization()
         self.validation_ran_this_epoch: bool = False
-        self._grad_scaler: GradScaler | None = None
         self._completed_batches: int = 0
+        self._total_batches_processed: int = 0
         self._has_entered_batch_loop: bool = False
         self._epoch_start_rng_state: CheckpointDict | None = None
         self._resume_rng_state: CheckpointDict | None = None
+        self._resume_checkpoint_rng_state: CheckpointDict | None = None
+        self._combined_loader_state_restored: bool = False
+        self._completed_loader_states: list[DataLoaderState] = []
+        self._use_completed_loader_states: bool = False
+        self._checkpoint_is_durable: bool = True
+        self._epoch_accum: dict[str, _EpochMetricEntry] = {}
+        self.epoch_completed: bool = True
+        self.is_last_batch: bool = False
 
     def reset_on_run(self) -> None:
-        # Clears the mid-epoch resume markers at the start of a new run so a
-        # fresh run never replays batch positions recorded by a previous one.
+        # Clears prior lifecycle state before a new fit while resetting the
+        # externally visible last-batch marker.
+        self.reset_on_teardown()
+        self.is_last_batch: bool = False
+
+    def reset_on_teardown(self) -> None:
+        # Releases epoch accumulators, cursor coordinates, replay RNG, loader
+        # snapshots, and durability state after fit ownership ends.
+        self._reset_epoch_metrics()
         self._completed_batches: int = 0
+        self._total_batches_processed: int = 0
         self._has_entered_batch_loop: bool = False
+        self._resume_rng_state: CheckpointDict | None = None
+        self._resume_checkpoint_rng_state: CheckpointDict | None = None
+        self._combined_loader_state_restored: bool = False
+        self._completed_loader_states: list[DataLoaderState] = []
+        self._use_completed_loader_states: bool = False
+        self._checkpoint_is_durable: bool = True
+        self.epoch_completed: bool = True
 
     def run(self) -> None:
-        # Executes one complete training epoch. The sequence per batch is:
-        # fetch with timing instrumentation, on_train_batch_start hooks, the
-        # batch-transfer hook chain, the training step under the precision
-        # context, backward and optimizer handling according to the
-        # accumulation schedule, on_train_batch_end hooks, step-metric
-        # dispatch, and finally the mid-epoch validation check and the
-        # cooperative stop check. After the batch loop, a tail optimizer step
-        # flushes any accumulated gradients and epoch metrics are dispatched.
-        self.validation_ran_this_epoch: bool = False
+        # Initializes epoch RNG, executes remaining batches, closes any
+        # accumulation tail, stores continuation when incomplete, and publishes
+        # epoch metrics only after genuine loader exhaustion.
+        self._start_epoch()
 
-        from syntheticmind.state.checkpoint_state import CheckpointState
-
-        if self._resume_rng_state is not None:
-            CheckpointState._restore_rng_states(self._resume_rng_state)
-            self._resume_rng_state: CheckpointDict | None = None
-
-        self._epoch_start_rng_state: CheckpointDict | None = CheckpointState._collect_rng_states()
-
-        trainer: Trainer = self.trainer
+        trainer: syntheticmind.Trainer = self.trainer
         module: Module | None = trainer.module
         assert module is not None
         strategy: Strategy = trainer.strategy
         state: TrainerState = trainer.state
-        callbacks: list[Callback] = trainer.callbacks
-        optimizers: list[torch.optim.Optimizer] = trainer.optimizers
-        if not optimizers:
+        if not trainer.optimizers:
             raise RuntimeError("Trainer has no optimizers configured for training.")
         optimizer: torch.optim.Optimizer | None = trainer.optimizer
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None = trainer.scheduler
-        scheduler_config: SchedulerConfig | None = trainer.scheduler_config
-        train_dataloader: DataLoader | None = trainer.train_dataloader  # type: ignore[type-arg]
-        assert train_dataloader is not None
-        log_fn: Logger | None = trainer.logger
-        device: torch.device = strategy.root_device
-        model: nn.Module | None = strategy.model
-        assert model is not None
+        combined_loader: CombinedLoader | None = trainer._data_connector.train_combined_loader
+        assert combined_loader is not None
 
-        if self.precision == "16-mixed" and device.type == "cuda" and self._grad_scaler is None:
-            self._grad_scaler: GradScaler | None = GradScaler("cuda")
+        if self._max_steps_reached(state):
+            return
 
-        total_batches: int | None = self._safe_len(train_dataloader)
-        max_batches: int | None = self._resolve_limit_batches(total_batches)
-        epoch_accum: dict[str, MetricAccumulator] = {}
-        epoch_logger_names: set[str] = set()
-        skip_batches: int = self._completed_batches
-        tail_is_accumulating: bool = False
-
-        self._has_entered_batch_loop: bool = True
-        dataloader_iterator_start_time: float = time.perf_counter()
-        train_iterator: Iterator[Batch] = iter(train_dataloader)
-        trainer._record_dataloader_iterator_creation_time(
-            "training",
-            time.perf_counter() - dataloader_iterator_start_time
+        epoch_accum: dict[str, _EpochMetricEntry] = self._epoch_accum
+        batch_result: _BatchLoopResult = self._run_batches(
+            trainer,
+            module,
+            combined_loader,
+            epoch_accum
         )
-        batch_idx: int = -1
-        while True:
-            dataloader_fetch_start_time: float = time.perf_counter()
-            try:
-                batch: Batch = next(train_iterator)
-            except StopIteration:
-                break
-            trainer._record_dataloader_fetch_time(
-                "training",
-                time.perf_counter() - dataloader_fetch_start_time
-            )
-            batch_idx += 1
-            if max_batches is not None and batch_idx >= max_batches:
-                break
-            # Mid-epoch resume: the already-completed prefix is consumed and
-            # discarded, so the dataloader reproduces the original batch
-            # sequence and execution continues at the first incomplete batch.
-            if batch_idx < skip_batches:
-                continue
-
-            for callback in callbacks:
-                callback.on_train_batch_start(trainer, module, batch, batch_idx)
-            module.on_train_batch_start(batch, batch_idx)
-
-            dm: DataModule | None = trainer.datamodule
-            if dm is not None and type(dm).on_before_batch_transfer is not DataModule.on_before_batch_transfer:
-                batch: Batch = dm.on_before_batch_transfer(batch, dataloader_idx=0)
-            else:
-                batch: Batch = module.on_before_batch_transfer(batch, dataloader_idx=0)
-            if dm is not None and type(dm).transfer_batch_to_device is not DataModule.transfer_batch_to_device:
-                batch: Batch = dm.transfer_batch_to_device(batch, device, dataloader_idx=0)
-            else:
-                batch: Batch = module.transfer_batch_to_device(batch, device, dataloader_idx=0)
-            if dm is not None and type(dm).on_after_batch_transfer is not DataModule.on_after_batch_transfer:
-                batch: Batch = dm.on_after_batch_transfer(batch, dataloader_idx=0)
-            else:
-                batch: Batch = module.on_after_batch_transfer(batch, dataloader_idx=0)
-
-            # Automatic path: the loss is divided by the accumulation factor
-            # so the accumulated gradient matches the equivalent large batch,
-            # DDP gradient sync is suppressed on accumulation batches, and
-            # the optimizer steps only on window boundaries, with the final
-            # limited batch forcing a non-accumulating step.
-            if module.automatic_optimization:
-                assert optimizer is not None
-                is_accumulating: bool = (batch_idx + 1) % self.accumulate_grad_batches != 0
-                if max_batches is not None and (batch_idx + 1) >= max_batches:
-                    is_accumulating: bool = False
-
-                no_sync_ctx: AbstractContextManager[None] = nullcontext()
-                if isinstance(model, DistributedDataParallel) and is_accumulating:
-                    no_sync_ctx: AbstractContextManager[None] = model.no_sync()
-
-                with no_sync_ctx:
-                    outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
-                    loss_raw: torch.Tensor | float = outputs["loss"]
-                    loss: torch.Tensor = (
-                        loss_raw if isinstance(loss_raw, torch.Tensor) else torch.tensor(loss_raw, device=device)
-                    )
-                    scaled_loss: torch.Tensor = loss / self.accumulate_grad_batches
-                    self.manual_backward(trainer, module, scaled_loss)
-
-                if not is_accumulating:
-                    self._do_optimizer_step(
-                        trainer, module, optimizer, scheduler, scheduler_config, state
-                    )
-            else:
-                outputs: StepOutput = self._run_training_step(strategy, module, model, batch, batch_idx)
-                is_accumulating: bool = False
-                self._increment_global_step(state, module)
-
-            for callback in callbacks:
-                callback.on_train_batch_end(trainer, module, outputs, batch, batch_idx)
-            module.on_train_batch_end(outputs, batch, batch_idx)
-
-            self._dispatch_step_metrics(module, state, log_fn, epoch_accum, epoch_logger_names, is_accumulating)
-
-            self._completed_batches: int = batch_idx + 1
-            tail_is_accumulating: bool = is_accumulating
-
-            val_dataloader: DataLoader | None = trainer.val_dataloader  # type: ignore[type-arg]
-            if (
-                val_dataloader is not None
-                and max_batches is not None
-                and self._should_validate_mid_epoch(batch_idx, max_batches, state)
-            ):
-                if module.automatic_optimization and not is_accumulating:
-                    module.zero_grad(set_to_none=True)
-                trainer._is_mid_epoch_validation: bool = True
-                trainer.validate_loop.run()
-                trainer._is_mid_epoch_validation: bool = False
-                self.validation_ran_this_epoch: bool = True
-                module.on_validation_model_train()
-                module._running_stage: str | None = "training"
-
-            if state.should_stop:
-                break
-
-        # Tail flush: when the epoch ends inside an accumulation window, one
-        # more optimizer step runs so accumulated gradients are never
-        # silently discarded.
-        if module.automatic_optimization and tail_is_accumulating:
-            self._do_optimizer_step(
-                trainer, module, optimizer, scheduler, scheduler_config, state
-            )
-
+        batch_idx: int = batch_result[0]
+        tail_is_accumulating: bool = batch_result[1]
+        epoch_completed: bool = batch_result[2]
+        self.epoch_completed: bool = epoch_completed
+        self._restore_checkpoint_random_state()
+        self._finish_optimization(
+            trainer,
+            module,
+            strategy,
+            state,
+            optimizer,
+            batch_idx,
+            tail_is_accumulating,
+            epoch_completed
+        )
+        self._store_training_continuation(
+            trainer,
+            combined_loader,
+            epoch_completed
+        )
         self._has_entered_batch_loop: bool = False
         self._completed_batches: int = 0
-        self._dispatch_epoch_metrics(epoch_accum, state, log_fn, epoch_logger_names)
+        if epoch_completed:
+            self._dispatch_epoch_metrics(epoch_accum, state)
+            self._epoch_accum: dict[str, _EpochMetricEntry] = {}
 
-    def _make_autocast_context(self, device: torch.device) -> autocast | nullcontext[None]:
-        # Returns the autocast context matching the configured precision policy:
-        # float16 autocast for 16-mixed, bfloat16 autocast for bf16-mixed, and a
-        # null context for full precision.
-        if self.precision == "16-mixed":
-            return autocast(device.type, dtype=torch.float16)
-        if self.precision == "bf16-mixed":
-            return autocast(device.type, dtype=torch.bfloat16)
-        return nullcontext()
+    def _start_epoch(self) -> None:
+        # Restores the epoch-start RNG needed for stateless prefix replay, then
+        # captures the start state of the active logical epoch for future pause.
+        self.validation_ran_this_epoch: bool = False
+        self._checkpoint_is_durable: bool = True
+        if self._resume_rng_state is not None:
+            self.trainer._checkpoint_connector.restore_random_state(
+                self._resume_rng_state
+            )
+            self._resume_rng_state: CheckpointDict | None = None
+        self._epoch_start_rng_state: CheckpointDict | None = (
+            self.trainer._checkpoint_connector.capture_random_state()
+        )
+
+    def _prepare_batch_iteration(
+        self,
+        trainer: syntheticmind.Trainer,
+        combined_loader: CombinedLoader
+    ) -> _BatchIteration:
+        # Distinguishes physical stateful cursor restoration from stateless prefix
+        # replay, validates offsets against sized horizons, configures unsized
+        # snapshots, and returns the live fetcher plus resume coordinates.
+        total_batches: int | None = combined_loader._length()
+        loader_state_restored: bool = self._combined_loader_state_restored
+        self._combined_loader_state_restored: bool = False
+        resume_batch_offset: int = (
+            self._completed_batches if loader_state_restored else 0
+        )
+        if total_batches is not None and resume_batch_offset > total_batches:
+            raise MisconfigurationError(
+                f"Checkpoint progress contains {resume_batch_offset} completed batches, "
+                f"but the resumed training loader has only {total_batches} batches."
+            )
+        max_batches: int | None = (
+            None
+            if total_batches is None
+            else total_batches - resume_batch_offset
+            if loader_state_restored
+            else total_batches
+        )
+        skip_batches: int = 0 if loader_state_restored else self._completed_batches
+        self._has_entered_batch_loop: bool = True
+        loader_is_sized: bool = combined_loader._has_sized_iterables()
+        self._use_completed_loader_states: bool = (
+            combined_loader._has_stateful_iterables()
+            and not loader_is_sized
+        )
+        if self._use_completed_loader_states:
+            self._completed_loader_states: list[DataLoaderState] = (
+                combined_loader._state_dicts()
+            )
+        with trainer.profiler.profile("setup_train_dataloader"):
+            data_fetcher: _DataFetcher[tuple[Batch, int, int]] = _DataFetcher(
+                combined_loader,
+                max_batches,
+                sized=loader_is_sized,
+                state_snapshot=(
+                    combined_loader._state_dicts
+                    if self._use_completed_loader_states
+                    else None
+                )
+            )
+            train_iterator: Iterator[tuple[Batch, int, int]] = iter(data_fetcher)
+        return data_fetcher, train_iterator, resume_batch_offset, skip_batches
+
+    def _run_batches(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        combined_loader: CombinedLoader,
+        epoch_accum: dict[str, _EpochMetricEntry]
+    ) -> _BatchLoopResult:
+        # Fetches, optionally replays, converts, and advances batches until
+        # natural exhaustion or a terminal control boundary, returning final
+        # index, accumulation state, and true epoch completion.
+        state: TrainerState = trainer.state
+        iteration: _BatchIteration = self._prepare_batch_iteration(
+            trainer,
+            combined_loader
+        )
+        data_fetcher: _DataFetcher[tuple[Batch, int, int]] = iteration[0]
+        train_iterator: Iterator[tuple[Batch, int, int]] = iteration[1]
+        resume_batch_offset: int = iteration[2]
+        skip_batches: int = iteration[3]
+        batch_idx: int = resume_batch_offset - 1
+        tail_is_accumulating: bool = False
+        epoch_completed: bool = data_fetcher.done
+        while not data_fetcher.done:
+            trainer._raise_if_sigterm()
+            if self._should_stop_batch_loop(trainer, state):
+                break
+            try:
+                with trainer.profiler.profile(
+                    f"[{type(self).__name__}].train_dataloader_next"
+                ):
+                    fetched: tuple[Batch, int, int] = next(train_iterator)
+            except StopIteration:
+                epoch_completed: bool = True
+                break
+            batch_idx: int = batch_idx + 1
+            self.is_last_batch: bool = data_fetcher.done
+            batch: Batch = trainer.precision_plugin.convert_input(fetched[0])
+            if batch_idx < skip_batches:
+                continue
+            accumulation_state: bool | None = self._advance_batch(
+                trainer,
+                module,
+                batch,
+                batch_idx,
+                data_fetcher,
+                epoch_accum
+            )
+            if accumulation_state is None:
+                self.is_last_batch: bool = True
+                epoch_completed: bool = True
+                break
+            if self.is_last_batch:
+                epoch_completed: bool = True
+            tail_is_accumulating: bool = accumulation_state
+            if self._should_stop_batch_loop(trainer, state):
+                break
+        return batch_idx, tail_is_accumulating, epoch_completed
+
+    def _advance_batch(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        batch: Batch,
+        batch_idx: int,
+        data_fetcher: _DataFetcher[tuple[Batch, int, int]],
+        epoch_accum: dict[str, _EpochMetricEntry]
+    ) -> bool | None:
+        # Marks the checkpoint unsafe, restores checkpoint-time RNG after replay,
+        # transfers data, dispatches start control, executes optimization,
+        # records progress, dispatches end and metrics, runs cadence, and flushes
+        # deferred checkpoint intent at the next durable boundary.
+        self._checkpoint_is_durable: bool = False
+        self._restore_checkpoint_random_state()
+        batch: Batch = trainer._transfer_batch(
+            module,
+            batch,
+            trainer.strategy.root_device,
+            0
+        )
+        if self._batch_start_requests_stop(
+            trainer,
+            module,
+            trainer.callbacks,
+            batch,
+            batch_idx
+        ):
+            self._checkpoint_is_durable: bool = True
+            return None
+        model: nn.Module | None = trainer.strategy.model
+        assert model is not None
+        optimization_result: _BatchOptimizationResult = (
+            self._run_batch_optimization(
+                trainer,
+                module,
+                trainer.strategy,
+                model,
+                trainer.optimizer,
+                trainer.state,
+                batch,
+                batch_idx
+            )
+        )
+        outputs: StepOutput = optimization_result[0]
+        is_accumulating: bool = optimization_result[1]
+        self._record_batch_progress(data_fetcher, batch_idx)
+        self._run_batch_end(
+            trainer,
+            module,
+            trainer.callbacks,
+            outputs,
+            batch,
+            batch_idx
+        )
+        self._dispatch_step_metrics(
+            module,
+            trainer.state,
+            epoch_accum,
+            batch,
+            is_accumulating
+        )
+        self._run_batch_cadence(
+            trainer,
+            module,
+            trainer.state,
+            batch_idx,
+            is_accumulating
+        )
+        self._checkpoint_is_durable: bool = (
+            not module.automatic_optimization or not is_accumulating
+        )
+        epoch_will_end: bool = self.is_last_batch or self._should_stop_batch_loop(
+            trainer,
+            trainer.state
+        )
+        trainer._save_batch_checkpoints(module, epoch_will_end)
+        return is_accumulating
+
+    def _should_stop_batch_loop(
+        self,
+        trainer: syntheticmind.Trainer,
+        state: TrainerState
+    ) -> bool:
+        # Combines terminal max steps with cooperative stop requests that satisfy
+        # FitLoop minimum epoch and step constraints.
+        return self._max_steps_reached(state) or (
+            trainer.should_stop and trainer.fit_loop._can_stop_early(state)
+        )
+
+    def _restore_checkpoint_random_state(self) -> None:
+        # After stateless prefix replay, restores the exact RNG captured at the
+        # interruption so the first new batch follows the uninterrupted trajectory.
+        if self._resume_checkpoint_rng_state is None:
+            return
+        self.trainer._checkpoint_connector.restore_random_state(
+            self._resume_checkpoint_rng_state
+        )
+        self._resume_checkpoint_rng_state: CheckpointDict | None = None
+
+    def _finish_optimization(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        strategy: Strategy,
+        state: TrainerState,
+        optimizer: torch.optim.Optimizer | None,
+        batch_idx: int,
+        tail_is_accumulating: bool,
+        epoch_completed: bool
+    ) -> None:
+        # Synchronizes and steps an incomplete accumulation tail at loader
+        # exhaustion, flushes now-durable batch checkpoints, and advances standard
+        # epoch schedulers only when the epoch completed.
+        if module.automatic_optimization and tail_is_accumulating:
+            assert optimizer is not None
+            strategy.sync_gradients(optimizer)
+            self._do_optimizer_step(
+                trainer,
+                module,
+                optimizer,
+                state,
+                batch_idx
+            )
+            self.update_plateau_schedulers(
+                trainer,
+                module,
+                "step",
+                batch_idx + 1
+            )
+            self._checkpoint_is_durable: bool = True
+            trainer._save_batch_checkpoints(module, True)
+        if module.automatic_optimization and epoch_completed:
+            self.update_lr_schedulers(
+                trainer,
+                module,
+                "epoch",
+                state.current_epoch + 1
+            )
+
+    def _store_training_continuation(
+        self,
+        trainer: syntheticmind.Trainer,
+        combined_loader: CombinedLoader,
+        epoch_completed: bool
+    ) -> None:
+        # Clears continuation after completion or stores loader state, completed
+        # logical batches, global batch coordinate, and epoch-start RNG for pause.
+        combined_loader_states: list[DataLoaderState] = list(
+            self._completed_loader_states
+            if self._use_completed_loader_states
+            else combined_loader._state_dicts()
+        )
+        if epoch_completed:
+            trainer._checkpoint_connector.reset_training_continuation()
+            return
+        trainer._checkpoint_connector.train_dataloader_states: list[
+            DataLoaderState
+        ] = combined_loader_states
+        trainer._checkpoint_connector.train_dataloader_state_active: bool = True
+        trainer._checkpoint_connector.train_dataloader_batches_completed: int = (
+            self._completed_batches
+        )
+        trainer._checkpoint_connector.train_total_batch_idx: int = (
+            self._total_batches_processed - 1
+        )
+        trainer._checkpoint_connector.train_epoch_rng_state: CheckpointDict | None = (
+            self._epoch_start_rng_state
+        )
+
+    def _batch_start_requests_stop(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback],
+        batch: Batch,
+        batch_idx: int
+    ) -> bool:
+        # Dispatches callback and Module batch-start hooks and interprets only the
+        # established Module return value ``-1`` as stop-before-computation.
+        trainer._hook_dispatcher.call_callbacks(
+            module,
+            "on_train_batch_start",
+            batch,
+            batch_idx,
+            callback_group=callbacks
+        )
+        hook_response: int | None = trainer._hook_dispatcher.call_module(
+            module,
+            "on_train_batch_start",
+            module.on_train_batch_start,
+            batch,
+            batch_idx
+        )
+        return hook_response == -1
+
+    def _run_batch_optimization(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        strategy: Strategy,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer | None,
+        state: TrainerState,
+        batch: Batch,
+        batch_idx: int
+    ) -> _BatchOptimizationResult:
+        # Selects manual step normalization or automatic closure execution,
+        # suppressing distributed backward synchronization on non-boundary
+        # accumulation microbatches.
+        with trainer.profiler.profile("run_training_batch"):
+            if not module.automatic_optimization:
+                manual_step: Callable[[], TrainingStepOutput] = partial(
+                    self._run_training_step,
+                    strategy,
+                    module,
+                    model,
+                    batch,
+                    batch_idx
+                )
+                outputs: StepOutput = self.manual_optimization.run(manual_step)
+                return outputs, False
+            assert optimizer is not None
+            is_accumulating: bool = (
+                (batch_idx + 1) % self.accumulate_grad_batches != 0
+                and not self.is_last_batch
+            )
+            automatic_closure: OptimizerClosure = self._make_automatic_closure(
+                trainer,
+                module,
+                strategy,
+                model,
+                batch,
+                batch_idx
+            )
+            if is_accumulating:
+                with strategy.defer_backward_sync():
+                    automatic_closure()
+            else:
+                self._do_optimizer_step(
+                    trainer,
+                    module,
+                    optimizer,
+                    state,
+                    batch_idx,
+                    automatic_closure
+                )
+            outputs: StepOutput = self.automatic_optimization.outputs
+            return outputs, is_accumulating
+
+    def _record_batch_progress(
+        self,
+        data_fetcher: _DataFetcher[tuple[Batch, int, int]],
+        batch_idx: int
+    ) -> bool:
+        # Advances logical and cross-epoch batch coordinates and adopts the
+        # unsized fetcher's post-return loader snapshot as the durable cursor.
+        self._completed_batches: int = batch_idx + 1
+        self._total_batches_processed: int = self._total_batches_processed + 1
+        if self._use_completed_loader_states:
+            if not isinstance(data_fetcher.state, list):
+                raise RuntimeError(
+                    "Stateful training data did not produce a loader-state snapshot."
+                )
+            fetched_loader_states: list[DataLoaderState] = cast(
+                list[DataLoaderState],
+                data_fetcher.state
+            )
+            self._completed_loader_states: list[DataLoaderState] = list(
+                fetched_loader_states
+            )
+        return self.is_last_batch
+
+    def _run_batch_end(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        callbacks: list[Callback],
+        outputs: StepOutput,
+        batch: Batch,
+        batch_idx: int
+    ) -> None:
+        # Previews pending metrics for progress, then dispatches callback and
+        # Module batch-end hooks before final metric accumulation.
+        trainer._preview_logged_metrics(module, "training")
+        trainer._hook_dispatcher.call_callbacks(
+            module,
+            "on_train_batch_end",
+            outputs,
+            batch,
+            batch_idx,
+            callback_group=callbacks
+        )
+        trainer._hook_dispatcher.call_module(
+            module,
+            "on_train_batch_end",
+            module.on_train_batch_end,
+            outputs,
+            batch,
+            batch_idx
+        )
+
+    def _run_batch_cadence(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState,
+        batch_idx: int,
+        is_accumulating: bool
+    ) -> None:
+        # Evaluates validation schedule against batch and optimizer coordinates,
+        # restores training stage afterward, and advances step-interval plateau
+        # schedulers only at optimizer boundaries.
+        is_last_batch: bool = self.is_last_batch
+        if trainer._validation_schedule.should_validate(
+            state.current_epoch,
+            batch_idx,
+            self._total_batches_processed - 1,
+            is_last_batch,
+            trainer.should_stop,
+            trainer.fit_loop._can_stop_early(state)
+        ):
+            self._run_scheduled_validation(
+                trainer,
+                module,
+                state,
+                is_accumulating,
+                is_last_batch
+            )
+        if module.automatic_optimization and not is_accumulating:
+            self.update_plateau_schedulers(
+                trainer,
+                module,
+                "step",
+                batch_idx + 1
+            )
 
     def _run_training_step(
         self,
@@ -297,309 +671,589 @@ class TrainingEpochLoop(Loop):
         model: nn.Module,
         batch: Batch,
         batch_idx: int
-    ) -> StepOutput:
-        # Executes the training step through the strategy inside the precision
-        # context. The module's current-hook marker is set for the duration of
-        # the step so Module.log can resolve its logging rule, and it is cleared
-        # in a finally block so a raising step cannot leave a stale marker.
-        with self._make_autocast_context(self.trainer.strategy.root_device):
-            module._current_fx_name: str | None = "training_step"
-            try:
-                outputs: StepOutput = strategy.training_step(model, batch, batch_idx)
-            finally:
-                module._current_fx_name: str | None = None
+    ) -> TrainingStepOutput:
+        # Enters precision and hook context, then executes the client training
+        # step through the Strategy-managed model identity.
+        with self.trainer.precision_plugin.train_step_context():
+            with module._hook_context("training_step"):
+                outputs: TrainingStepOutput = self.trainer._hook_dispatcher.call_strategy(
+                    "training_step",
+                    strategy.training_step,
+                    model,
+                    batch,
+                    batch_idx
+                )
         return outputs
 
-    @staticmethod
-    def _safe_len(dataloader: DataLoader) -> int | None:  # type: ignore[type-arg]
-        # Returns the dataloader length, or None for iterable datasets that do
-        # not define one, so limit resolution can distinguish the two cases.
-        try:
-            return len(dataloader)
-        except TypeError:
-            return None
-
-    def _resolve_limit_batches(self, total: int | None) -> int | None:
-        # Resolves the effective batch ceiling for this epoch. With a known
-        # total, a float limit selects that fraction of the epoch (at least one
-        # batch) and an integer limit is capped at the total. Without a known
-        # total, an integer limit is used directly, a fractional float limit is
-        # rejected as a configuration error, and no limit means unbounded.
-        if total is None:
-            if isinstance(self.limit_train_batches, int):
-                return self.limit_train_batches
-            if isinstance(self.limit_train_batches, float) and self.limit_train_batches != 1.0:
-                from syntheticmind.utilities.exceptions import MisconfigurationError
-                raise MisconfigurationError(
-                    f"limit_train_batches={self.limit_train_batches} (float) is not supported "
-                    f"with iterable datasets that have no length. Use an integer limit or set to 1.0."
-                )
-            return None
-        if self.limit_train_batches is None:
-            return total
-        if isinstance(self.limit_train_batches, float):
-            return max(1, int(total * self.limit_train_batches))
-        return min(int(self.limit_train_batches), total)
-
-    def _clip_gradients(self, optimizer: torch.optim.Optimizer) -> None:
-        # Applies the configured clipping algorithm to every parameter in the
-        # optimizer that currently holds a gradient. Parameters without
-        # gradients are excluded so norm computation reflects only live
-        # gradients.
-        params: list[torch.nn.Parameter] = [
-            p for g in optimizer.param_groups for p in g["params"] if p.grad is not None
-        ]
-        if not params:
-            return
-        if self.gradient_clip_algorithm == "norm":
-            torch.nn.utils.clip_grad_norm_(params, self.gradient_clip_val)  # type: ignore[arg-type]
-        elif self.gradient_clip_algorithm == "value":
-            torch.nn.utils.clip_grad_value_(params, self.gradient_clip_val)  # type: ignore[arg-type]
+    def _make_automatic_closure(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        strategy: Strategy,
+        model: nn.Module,
+        batch: Batch,
+        batch_idx: int
+    ) -> OptimizerClosure:
+        # Composes client step, precision-aware backward, and accumulation-window
+        # zeroing into the closure consumed by managed optimizer stepping.
+        step_operation: Callable[[], TrainingStepOutput] = partial(
+            self._run_training_step,
+            strategy,
+            module,
+            model,
+            batch,
+            batch_idx
+        )
+        backward_operation: Callable[[torch.Tensor], None] = partial(
+            self.manual_backward,
+            trainer,
+            module
+        )
+        zero_grad_operation: Callable[[], None] | None = None
+        if batch_idx % self.accumulate_grad_batches == 0:
+            zero_grad_operation: Callable[[], None] | None = partial(
+                self._optimizer_zero_grad,
+                trainer,
+                module,
+                trainer.optimizers[0],
+                batch_idx
+            )
+        automatic_closure: OptimizerClosure = partial(
+            self.automatic_optimization.run,
+            strategy,
+            step_operation,
+            backward_operation,
+            zero_grad_operation
+        )
+        return automatic_closure
 
     def clip_gradients(
         self,
         optimizer: torch.optim.Optimizer,
-        gradient_clip_val: float | None = None,
+        gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None
     ) -> None:
-        # Public clipping entry point for manual-optimization modules. Explicit
-        # arguments override the configured values for this invocation only:
-        # the configured values are swapped in, restored in a finally block,
-        # and gradients are unscaled first when a GradScaler is active so the
-        # threshold applies to true magnitudes. A non-positive resolved value
-        # disables clipping for the invocation.
-        resolved_gradient_clip_val: float | None = (
+        # Resolves loop or explicit clipping policy, validates the algorithm, and
+        # delegates numerical handling to the active precision plugin.
+        resolved_gradient_clip_val: int | float | None = (
             self.gradient_clip_val if gradient_clip_val is None else gradient_clip_val
         )
         if resolved_gradient_clip_val is None or resolved_gradient_clip_val <= 0:
             return
         resolved_gradient_clip_algorithm: str = (
-            self.gradient_clip_algorithm
+            self.gradient_clip_algorithm or "norm"
             if gradient_clip_algorithm is None
-            else gradient_clip_algorithm
+            else gradient_clip_algorithm.lower()
         )
         if resolved_gradient_clip_algorithm not in {"norm", "value"}:
-            from syntheticmind.utilities.exceptions import MisconfigurationError
-
             raise MisconfigurationError(
                 "gradient_clip_algorithm must be 'norm' or 'value'."
             )
-        original_gradient_clip_val: float | None = self.gradient_clip_val
-        original_gradient_clip_algorithm: str = self.gradient_clip_algorithm
-        self.gradient_clip_val: float | None = resolved_gradient_clip_val
-        self.gradient_clip_algorithm: str = resolved_gradient_clip_algorithm
-        try:
-            if self._grad_scaler is not None:
-                self._grad_scaler.unscale_(optimizer)
-            self._clip_gradients(optimizer)
-        finally:
-            self.gradient_clip_val: float | None = original_gradient_clip_val
-            self.gradient_clip_algorithm: str = original_gradient_clip_algorithm
+        validated_gradient_clip_algorithm: ClipAlgorithm = (
+            "norm" if resolved_gradient_clip_algorithm == "norm" else "value"
+        )
+        self.trainer.precision_plugin.clip_gradients(
+            optimizer,
+            clip_val=resolved_gradient_clip_val,
+            gradient_clip_algorithm=validated_gradient_clip_algorithm
+        )
 
     def manual_backward(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
-        loss: torch.Tensor
+        loss: torch.Tensor,
+        gradient: torch.Tensor | None = None,
+        retain_graph: bool | None = None,
+        create_graph: bool = False,
+        inputs: BackwardInputs = None
     ) -> None:
-        # Runs the backward pass surrounded by the backward hook pair. Callback
-        # hooks fire before the corresponding module hooks. With an active
-        # GradScaler the loss is scaled before backward; otherwise backward is
-        # delegated to the strategy so distributed synchronization applies.
-        callbacks: list[Callback] = trainer.callbacks
-        for callback in callbacks:
-            callback.on_before_backward(trainer, module, loss)
-        module.on_before_backward(loss)
-
-        if self._grad_scaler is not None:
-            self._grad_scaler.scale(loss).backward()
-        else:
-            trainer.strategy.backward(loss)
-
-        for callback in callbacks:
-            callback.on_after_backward(trainer, module)
-        module.on_after_backward()
+        # Routes client or automatic backward through Strategy and precision;
+        # Module ownership is already carried by the connected Strategy.
+        del module
+        trainer._hook_dispatcher.call_strategy(
+            "backward",
+            trainer.strategy.backward,
+            loss,
+            None,
+            gradient,
+            retain_graph,
+            create_graph,
+            inputs
+        )
 
     def optimizer_step(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
-    ) -> None:
-        # Public optimizer-step entry point for manual-optimization modules;
-        # delegates to the shared stepping helper so hook order and scaler
-        # handling match the automatic path.
-        self._optimizer_step_only(trainer, module, optimizer)
+        optimizer: torch.optim.Optimizer,
+        closure: OptimizerClosure | None = None,
+        kwargs: OptimizerStepOptions | None = None
+    ) -> OptimizerStepOutput:
+        # Executes one client-requested managed optimizer step and advances global
+        # progress exactly once for manual optimization.
+        output: OptimizerStepOutput = self._optimizer_step_only(
+            trainer,
+            module,
+            optimizer,
+            closure=closure,
+            kwargs=kwargs
+        )
+        self._increment_global_step(trainer.state, module)
+        return output
+
+    def _automatic_optimizer_step(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        optimizer: torch.optim.Optimizer,
+        closure: OptimizerClosure | None = None,
+        kwargs: OptimizerStepOptions | None = None
+    ) -> OptimizerStepOutput:
+        # Executes an automatic managed step without incrementing progress here;
+        # the enclosing epoch operation owns that transition.
+        return self._optimizer_step_only(
+            trainer,
+            module,
+            optimizer,
+            closure,
+            kwargs
+        )
 
     def optimizer_zero_grad(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
+        optimizer: torch.optim.Optimizer,
+        batch_idx: int
     ) -> None:
-        # Public gradient-clearing entry point for manual-optimization modules;
-        # delegates to the shared helper so the zero-grad hooks always fire.
-        self._optimizer_zero_grad(trainer, module, optimizer)
+        # Public loop capability used by Module manual optimization to preserve
+        # zero-grad hooks and model customization.
+        self._optimizer_zero_grad(trainer, module, optimizer, batch_idx)
 
     def _do_optimizer_step(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
         optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None,
-        scheduler_config: SchedulerConfig | None,
-        state: TrainerState
+        state: TrainerState,
+        batch_idx: int,
+        closure: OptimizerClosure | None = None
     ) -> None:
-        # Executes the full step sequence for the automatic-optimization path:
-        # optimizer step, step-interval scheduler advance, gradient clearing,
-        # and the global-step increment. Plateau schedulers are excluded here
-        # because they advance on monitored metrics at epoch boundaries.
-        self._optimizer_step_only(trainer, module, optimizer)
-        if scheduler is not None and scheduler_config is not None:
-            if scheduler_config.interval == "step" and scheduler_config.name != "reduce_on_plateau":
-                scheduler.step()
-        self._optimizer_zero_grad(trainer, module, optimizer)
+        # Resolves the matching SyntheticOptimizer, selects automatic context,
+        # dispatches Module.optimizer_step, advances global progress, and steps
+        # standard step schedulers.
+        synthetic_optimizer: SyntheticOptimizer = next(
+            wrapped_optimizer
+            for wrapped_optimizer in trainer._synthetic_optimizers
+            if wrapped_optimizer.optimizer is optimizer
+        )
+        with synthetic_optimizer.automatic_step_context():
+            trainer._hook_dispatcher.call_module(
+                module,
+                "optimizer_step",
+                module.optimizer_step,
+                module.current_epoch,
+                batch_idx,
+                synthetic_optimizer,
+                closure
+            )
         self._increment_global_step(state, module)
+        self.update_lr_schedulers(
+            trainer,
+            module,
+            "step",
+            batch_idx + 1
+        )
+
+    def update_lr_schedulers(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        interval: SchedulerInterval,
+        current_index: int
+    ) -> None:
+        # Advances non-plateau schedulers matching interval and frequency.
+        self._update_lr_schedulers(
+            trainer,
+            module,
+            interval,
+            current_index,
+            "standard"
+        )
+
+    def update_plateau_schedulers(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        interval: SchedulerInterval,
+        current_index: int
+    ) -> None:
+        # Advances plateau schedulers only after their monitored metric may exist.
+        self._update_lr_schedulers(
+            trainer,
+            module,
+            interval,
+            current_index,
+            "plateau"
+        )
+
+    def _update_lr_schedulers(
+        self,
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        interval: SchedulerInterval,
+        current_index: int,
+        scheduler_kind: Literal["standard", "plateau"]
+    ) -> None:
+        # Filters by scheduler kind, interval, and frequency; resolves plateau
+        # monitor under strict or warning policy; then dispatches the Module hook.
+        for configuration in trainer.lr_scheduler_configs:
+            is_plateau: bool = scheduler_kind == "plateau"
+            if configuration.reduce_on_plateau != is_plateau:
+                continue
+            if configuration.interval != interval:
+                continue
+            if current_index % configuration.frequency != 0:
+                continue
+            monitor_value: torch.Tensor | None = None
+            if configuration.reduce_on_plateau:
+                monitor: str | None = configuration.monitor
+                assert monitor is not None
+                monitor_value: torch.Tensor | None = trainer.callback_metrics.get(
+                    monitor
+                )
+                if monitor_value is None:
+                    message: str = (
+                        f"ReduceLROnPlateau monitor {monitor!r} is unavailable. "
+                        f"Available metrics: {list(trainer.callback_metrics)}"
+                    )
+                    if configuration.strict:
+                        raise MisconfigurationError(message)
+                    warnings.warn(message, RuntimeWarning, stacklevel=3)
+                    continue
+            trainer._hook_dispatcher.call_module(
+                module,
+                "lr_scheduler_step",
+                module.lr_scheduler_step,
+                configuration.scheduler,
+                monitor_value
+            )
 
     def _optimizer_step_only(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
-    ) -> None:
-        # Applies the optimizer step preceded by its hooks and by gradient
-        # clipping. When a GradScaler is active, gradients are unscaled before
-        # clipping and the step runs through the scaler, which skips the update
-        # on overflow and adjusts the scale afterward.
-        callbacks: list[Callback] = trainer.callbacks
-        for callback in callbacks:
-            callback.on_before_optimizer_step(trainer, module, optimizer)
-        module.on_before_optimizer_step(optimizer)
+        optimizer: torch.optim.Optimizer,
+        closure: OptimizerClosure | None = None,
+        kwargs: OptimizerStepOptions | None = None
+    ) -> OptimizerStepOutput:
+        # Normalizes optional closure and keyword state and invokes Strategy
+        # optimizer stepping without changing Trainer progress.
+        step_kwargs: OptimizerStepOptions = {} if kwargs is None else kwargs
+        resolved_closure: OptimizerClosure = closure or self._empty_closure
+        return trainer._hook_dispatcher.call_strategy(
+            "optimizer_step",
+            trainer.strategy.optimizer_step,
+            optimizer,
+            resolved_closure,
+            model=module,
+            **step_kwargs
+        )
 
-        if self.gradient_clip_val is not None and self.gradient_clip_val > 0:
-            if self._grad_scaler is not None:
-                self._grad_scaler.unscale_(optimizer)
-            self._clip_gradients(optimizer)
-
-        if self._grad_scaler is not None:
-            self._grad_scaler.step(optimizer)
-            self._grad_scaler.update()
-        else:
-            optimizer.step()
+    def _empty_closure(self) -> None:
+        # Supplies the native optimizer contract when no client closure exists.
+        return None
 
     def _optimizer_zero_grad(
         self,
-        trainer: Trainer,
+        trainer: syntheticmind.Trainer,
         module: Module,
-        optimizer: torch.optim.Optimizer
+        optimizer: torch.optim.Optimizer,
+        batch_idx: int
     ) -> None:
-        # Clears gradients preceded by the zero-grad hooks, so callbacks and
-        # the module observe gradients in their final post-step state before
-        # they are released.
+        # Dispatches callback and Module pre-zero hooks before the overridable
+        # Module.optimizer_zero_grad operation.
         callbacks: list[Callback] = trainer.callbacks
-        for callback in callbacks:
-            callback.on_before_zero_grad(trainer, module, optimizer)
-        module.on_before_zero_grad(optimizer)
-        optimizer.zero_grad()
+        trainer._hook_dispatcher.call_callbacks(
+            module,
+            "on_before_zero_grad",
+            optimizer,
+            callback_group=callbacks
+        )
+        trainer._hook_dispatcher.call_module(
+            module,
+            "on_before_zero_grad",
+            module.on_before_zero_grad,
+            optimizer
+        )
+        trainer._hook_dispatcher.call_module(
+            module,
+            "optimizer_zero_grad",
+            module.optimizer_zero_grad,
+            module.current_epoch,
+            batch_idx,
+            optimizer
+        )
 
-    @staticmethod
-    def _increment_global_step(state: TrainerState, module: Module) -> None:
-        # Advances the trainer-owned global-step counter and mirrors the new
-        # value onto the module so Module.global_step stays consistent with
-        # trainer state between checkpoints.
+    def _increment_global_step(
+        self,
+        state: TrainerState,
+        module: Module
+    ) -> None:
+        # Advances TrainerState and mirrors the completed optimizer-step count onto
+        # the client Module.
         state.increment_global_step()
         module._global_step: int = state.global_step
 
-    def _should_validate_mid_epoch(
+    def _run_scheduled_validation(
         self,
-        batch_idx: int,
-        total_batches: int,
-        state: TrainerState
-    ) -> bool:
-        # Decides whether validation runs after the current batch. An integer
-        # interval counts either optimizer steps (global_step scope) or batches
-        # within the epoch (epoch scope); a float below one selects evenly
-        # spaced positions as a fraction of the epoch. The final batch position
-        # is excluded in batch-scoped modes because epoch-end validation is
-        # scheduled separately by the fit loop.
-        if isinstance(self.val_check_interval, int):
-            if self.val_check_interval_scope == "global_step":
-                return state.global_step > 0 and state.global_step % self.val_check_interval == 0
-            return (batch_idx + 1) % self.val_check_interval == 0 and (batch_idx + 1) < total_batches
-        if self.val_check_interval >= 1.0:
-            return False
-        check_every: int = max(1, int(total_batches * self.val_check_interval))
-        return (batch_idx + 1) % check_every == 0 and (batch_idx + 1) < total_batches
+        trainer: syntheticmind.Trainer,
+        module: Module,
+        state: TrainerState,
+        is_accumulating: bool,
+        is_last_batch: bool
+    ) -> None:
+        # Optionally clears gradients at a completed automatic boundary, marks
+        # mid-epoch ownership, executes validation, advances time cadence, and
+        # restores training stage identity.
+        if module.automatic_optimization and not is_accumulating:
+            trainer._call_on_validation_model_zero_grad(module)
+        trainer._is_mid_epoch_validation: bool = not is_last_batch
+        trainer.validate_loop.run()
+        trainer._is_mid_epoch_validation: bool = False
+        self.validation_ran_this_epoch: bool = True
+        trainer._validation_schedule.mark_validation_end()
+        state.set_running_stage("training")
+        module._running_stage: RunningStage | None = "training"
+
+    def _max_steps_reached(self, state: TrainerState) -> bool:
+        # Compares only completed managed optimizer mutations with the hard limit.
+        return self.max_steps != -1 and state.global_step >= self.max_steps
+
+    @property
+    def checkpoint_is_durable(self) -> bool:
+        # Whether public checkpoint persistence can represent the complete current
+        # optimization and batch transition without replay ambiguity.
+        return self._checkpoint_is_durable
+
+    def epoch_metric_state(self) -> CheckpointDict:
+        # Serializes every active epoch observation identity, scalar accumulator,
+        # TorchMetrics tensor state, and update count for rank-local gathering.
+        state: CheckpointDict = {}
+        storage_key: str
+        metric_entry: _EpochMetricEntry
+        for storage_key, metric_entry in self._epoch_accum.items():
+            metric: LoggedMetric = metric_entry[0]
+            accumulator: MetricAccumulator = metric_entry[1]
+            metric_state: tuple[StateDict, int] = metric._metric_checkpoint_state()
+            state[storage_key]: CheckpointValue = {
+                "identity": metric._checkpoint_state(),
+                "accumulator": accumulator._checkpoint_state(),
+                "metric_state": metric_state[0],
+                "metric_update_count": metric_state[1]
+            }
+        return state
+
+    def load_epoch_metric_state(
+        self,
+        state: CheckpointDict,
+        module: Module
+    ) -> None:
+        # Rebuilds metric observations around registered live Metric attributes or
+        # scalar placeholders, validates identity and state kind, restores
+        # accumulator windows, and marks the epoch incomplete.
+        self._reset_epoch_metrics()
+        storage_key: str
+        entry_value: CheckpointValue
+        for storage_key, entry_value in state.items():
+            if not isinstance(entry_value, dict):
+                raise TypeError("Checkpoint epoch metric entry must be a mapping.")
+            identity_value: CheckpointValue | None = entry_value.get("identity")
+            accumulator_value: CheckpointValue | None = entry_value.get("accumulator")
+            metric_state_value: CheckpointValue | None = entry_value.get("metric_state")
+            update_count_value: CheckpointValue | None = entry_value.get(
+                "metric_update_count"
+            )
+            if not isinstance(identity_value, dict):
+                raise TypeError("Checkpoint epoch metric identity must be a mapping.")
+            if not isinstance(accumulator_value, dict):
+                raise TypeError("Checkpoint epoch metric accumulator must be a mapping.")
+            if not isinstance(metric_state_value, dict):
+                raise TypeError("Checkpoint epoch Metric state must be a mapping.")
+            identity: _LoggedMetricCheckpoint = LoggedMetric._parse_checkpoint_state(
+                cast(StateDict, identity_value)
+            )
+            metric_value: torch.Tensor | Metric
+            restored_metric: Metric | None = None
+            if identity.is_metric:
+                metric_attribute: str | None = identity.metric_attribute
+                if not metric_attribute:
+                    raise ValueError("Checkpoint TorchMetric identity requires an attribute.")
+                candidate: nn.Module = module.get_submodule(metric_attribute)
+                if not isinstance(candidate, Metric):
+                    raise TypeError(
+                        f"Checkpoint metric attribute {metric_attribute!r} is not a Metric."
+                    )
+                restored_metric: Metric | None = candidate
+                metric_value: torch.Tensor | Metric = candidate
+            else:
+                if metric_state_value:
+                    raise ValueError("A scalar epoch metric cannot contain Metric state.")
+                metric_value: torch.Tensor | Metric = torch.tensor(
+                    0.0,
+                    device=module.device
+                )
+            metric: LoggedMetric = LoggedMetric._from_checkpoint_state(
+                identity,
+                metric_value
+            )
+            if isinstance(update_count_value, bool) or not isinstance(
+                update_count_value,
+                int
+            ):
+                raise TypeError("Checkpoint Metric update count must be an integer.")
+            metric._load_metric_checkpoint_state(
+                cast(StateDict, metric_state_value),
+                update_count_value
+            )
+            if metric.storage_key != storage_key:
+                raise ValueError("Checkpoint epoch metric storage key is inconsistent.")
+            accumulator: MetricAccumulator = MetricAccumulator(
+                reduction=metric.reduction,
+                sync_dist=metric.sync_dist,
+                rank_zero_only=metric.rank_zero_only,
+                enable_graph=False
+            )
+            accumulator._load_checkpoint_state(
+                cast(StateDict, accumulator_value),
+                module.device,
+                restored_metric
+            )
+            self._epoch_accum[storage_key]: _EpochMetricEntry = (
+                metric,
+                accumulator
+            )
+        self.epoch_completed: bool = not bool(state)
+
+    def _reset_epoch_metrics(self) -> None:
+        # Resets every live accumulator before dropping the epoch window mapping.
+        metric_entry: _EpochMetricEntry
+        for metric_entry in self._epoch_accum.values():
+            metric_entry[1].reset()
+        self._epoch_accum: dict[str, _EpochMetricEntry] = {}
 
     def _dispatch_step_metrics(
         self,
         module: Module,
         state: TrainerState,
-        log_fn: Logger | None,
-        epoch_accum: dict[str, MetricAccumulator],
-        epoch_logger_names: set[str],
+        epoch_accum: dict[str, _EpochMetricEntry],
+        batch: Batch,
         is_accumulating: bool = False
     ) -> None:
-        # Drains the module's logged-metric buffer after each batch. Metrics
-        # marked for distributed synchronization are mean-reduced across ranks
-        # before use. Step-scoped logger metrics are emitted from rank zero at
-        # the configured cadence, and never during accumulation batches so a
-        # partially accumulated step is not reported. Epoch-scoped metrics feed
-        # per-name accumulators under each metric's declared reduction, with
-        # logger visibility tracked separately from callback visibility.
-        logged: dict[str, LoggedMetric] = module.logged_metrics
+        # Computes step observations, validates resumed epoch metadata, updates
+        # scalar or Metric accumulators, routes callback/logger/progress views,
+        # emits on real optimizer cadence, and drains Module state.
+        logged: list[LoggedMetric] = module.logged_metrics
         if not logged:
+            module._reset_logged_metrics()
             return
 
-        step_metrics: dict[str, float] = {}
-        for name, metric in logged.items():
-            value: torch.Tensor | float = metric.value
-            if metric.sync_distributed and DistributedUtils.is_distributed():
-                if not isinstance(value, torch.Tensor):
-                    value: torch.Tensor | float = torch.tensor(value, device=self.trainer.strategy.root_device)
-                value: torch.Tensor | float = DistributedUtils.all_reduce_mean(value)
-            if isinstance(value, torch.Tensor):
-                value: torch.Tensor | float = value.item()
-
-            if metric.on_step and metric.logger:
-                step_metrics[name] = value
+        step_metrics: dict[str, torch.Tensor] = {}
+        callback_step_metrics: dict[str, torch.Tensor] = {}
+        progress_bar_step_metrics: dict[str, float] = {}
+        for metric in logged:
+            if metric.on_step:
+                value: torch.Tensor | None = metric.compute_step(
+                    self.trainer.strategy.root_device,
+                    self.trainer.strategy.reduce
+                )
+                if value is not None:
+                    step_name: str = metric.output_name(on_step=True)
+                    callback_step_metrics[metric.base_name()] = value
+                    callback_step_metrics[step_name] = value
+                    if metric.logger:
+                        step_metrics[step_name] = value
+                    if metric.progress_bar:
+                        progress_bar_step_metrics[step_name] = (
+                            self.trainer._metric_to_float(value)
+                        )
             if metric.on_epoch:
-                if name not in epoch_accum:
-                    epoch_accum[name] = MetricAccumulator(reduction=metric.reduction)
-                epoch_accum[name].update(value, batch_size=metric.batch_size)
-                if metric.logger:
-                    epoch_logger_names.add(name)
+                if metric.storage_key not in epoch_accum:
+                    epoch_accum[metric.storage_key] = (
+                        metric,
+                        MetricAccumulator(
+                            reduction=metric.reduction,
+                            sync_dist=metric.sync_dist,
+                            sync_dist_group=metric.sync_dist_group,
+                            rank_zero_only=metric.rank_zero_only,
+                            enable_graph=metric.enable_graph
+                        )
+                    )
+                metric_entry: _EpochMetricEntry = epoch_accum[metric.storage_key]
+                if metric_entry[0].metadata != metric.metadata:
+                    raise MisconfigurationError(
+                        "A resumed epoch metric changed its logging configuration."
+                    )
+                accumulator: MetricAccumulator = metric_entry[1]
+                if metric.is_metric:
+                    accumulator.update_metric(metric.value)
+                else:
+                    accumulator.update(
+                        metric.local_value(),
+                        batch_size=metric.batch_size,
+                        batch=batch
+                    )
 
-        if step_metrics and log_fn is not None and not is_accumulating and state.global_step % self.log_every_n_steps == 0:
-            if DistributedUtils.is_rank_zero():
-                log_fn.log_metrics(step_metrics, step=state.global_step)
+        self.trainer._logger_connector.callback_metrics.update(callback_step_metrics)
+        self.trainer._update_logged_metrics(step_metrics)
+        self.trainer._update_progress_bar_metrics("training", progress_bar_step_metrics)
+        if (
+            step_metrics
+            and self.trainer.loggers
+            and self.log_every_n_steps > 0
+            and not is_accumulating
+            and state.global_step % self.log_every_n_steps == 0
+        ):
+            if self.trainer.is_global_zero:
+                self.trainer._log_metrics(step_metrics, step=state.global_step)
 
         module._reset_logged_metrics()
 
     def _dispatch_epoch_metrics(
         self,
-        epoch_accum: dict[str, MetricAccumulator],
-        state: TrainerState,
-        log_fn: Logger | None,
-        epoch_logger_names: set[str]
+        epoch_accum: dict[str, _EpochMetricEntry],
+        state: TrainerState
     ) -> None:
-        # Reduces every epoch accumulator at the epoch boundary. The reduced
-        # values update the trainer's callback metrics on every rank, because
-        # monitoring callbacks such as early stopping must see them everywhere.
-        # Logger emission is restricted to rank zero and to the metrics whose
-        # logging configuration requested logger visibility.
+        # Computes complete epoch windows after true loader exhaustion, routes all
+        # consumer views, resets accumulators, and emits one rank-zero logger record.
         if not epoch_accum:
             return
-        all_reduced: dict[str, float] = {}
-        for name in epoch_accum:
-            all_reduced[name] = epoch_accum[name].compute()
-        self.trainer._callback_metrics.update(all_reduced)
-        if log_fn is None:
+        callback_reduced: dict[str, torch.Tensor] = {}
+        logger_reduced: dict[str, torch.Tensor] = {}
+        progress_bar_reduced: dict[str, float] = {}
+        for metric, accumulator in epoch_accum.values():
+            value: torch.Tensor = accumulator.compute(
+                self.trainer.strategy.root_device,
+                self.trainer.strategy.reduce
+            )
+            if not metric.enable_graph:
+                value: torch.Tensor = value.detach()
+            epoch_name: str = metric.output_name(on_step=False)
+            callback_reduced[metric.base_name()] = value
+            callback_reduced[epoch_name] = value
+            if metric.logger:
+                logger_reduced[epoch_name] = value
+            if metric.progress_bar:
+                progress_bar_reduced[epoch_name] = self.trainer._metric_to_float(value)
+        for _, accumulator in epoch_accum.values():
+            accumulator.reset()
+        self.trainer._logger_connector.callback_metrics.update(callback_reduced)
+        self.trainer._update_logged_metrics(logger_reduced)
+        self.trainer._update_progress_bar_metrics("training", progress_bar_reduced)
+        if not self.trainer.loggers:
             return
-        if not DistributedUtils.is_rank_zero():
+        if not self.trainer.is_global_zero:
             return
-        logger_reduced: dict[str, float] = {
-            k: v for k, v in all_reduced.items() if k in epoch_logger_names
-        }
         if logger_reduced:
-            log_fn.log_metrics(logger_reduced, step=state.global_step)
+            self.trainer._log_metrics(logger_reduced, step=state.global_step)

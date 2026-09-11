@@ -1,58 +1,60 @@
 # This module:
-# 1. Defines the abstract accelerator contract: binding a concrete device,
-#    reporting the bound device, counting available devices, and answering
-#    availability and name queries per backend
+# 1. Defines Accelerator, the structural backend contract for device discovery,
+#    configuration parsing, process-local binding, and native statistics
 #
 # Design decisions:
-# - Device binding (setup_device) is separated from device queries (get_device)
-#   so the trainer can resolve placement once and read it many times
-# - is_available and name are static because they describe the backend itself,
-#   not a bound instance; availability is queried before any instance exists
-# - auto_device_count backs the "use all devices" configuration path, letting
-#   each backend report its own notion of how many devices are usable
+# - Discovery and parsing are class-level operations because Trainer must resolve
+#   availability and devices before a backend instance owns process-local state
+# - setup_device is instance behavior because CUDA binding and current-device
+#   selection are process-local mutations performed after rank resolution
+# - Device statistics belong to the backend that defines their counters and
+#   units; callbacks schedule observations without branching on device type
+# - The Protocol contains no default behavior or implementation registry, keeping
+#   concrete selection with the Trainer accelerator connector
 #
 # Author: Rahul Sawhney
 
-from abc import ABC, abstractmethod
+from typing import Protocol, runtime_checkable
 
 import torch
+
+from syntheticmind.accelerators.device_parser import DeviceInput
 
 __all__: list[str] = ["Accelerator"]
 
 
-class Accelerator(ABC):
-    # Abstract base for device backends. A concrete accelerator owns exactly one
-    # bound torch.device and answers backend-level questions; all placement
-    # decisions above it live in the strategy and trainer layers.
-    @abstractmethod
-    def setup_device(self, device: torch.device) -> None:
-        # Binds the concrete device this accelerator will report and prepares
-        # any backend-side state for it.
-        raise NotImplementedError
+@runtime_checkable
+class Accelerator(Protocol):
+    # Interchangeable device backend consumed by Trainer and Strategy. A custom
+    # client accelerator implements this complete contract and is supplied to
+    # Trainer(accelerator=...), without registering global aliases.
+    def setup_device(self, device: torch.device) -> None: ...
 
-    @abstractmethod
-    def get_device(self) -> torch.device:
-        # Returns the bound device, or the backend's default when none is bound.
-        raise NotImplementedError
+    # Process-local device selected after topology and rank resolution.
+    def get_device(self) -> torch.device: ...
 
-    @abstractmethod
-    def auto_device_count(self) -> int:
-        # Number of devices this backend can drive on the current host.
-        raise NotImplementedError
+    # Backend-native scalar counters for the requested bound device.
+    def get_device_stats(self, device: torch.device) -> dict[str, float]: ...
 
-    @staticmethod
-    @abstractmethod
-    def is_available() -> bool:
-        # Whether the backend is usable on the current host; consulted before
-        # any accelerator instance is constructed.
-        raise NotImplementedError
+    # Validates public device input and resolves counts or explicit identifiers.
+    @classmethod
+    def parse_devices(cls, devices: DeviceInput) -> int | list[int]: ...
 
-    @staticmethod
-    @abstractmethod
-    def name() -> str:
-        # Canonical backend name used in configuration and log output.
-        raise NotImplementedError
+    # Ordered concrete devices assigned to local worker ranks.
+    @classmethod
+    def get_parallel_devices(
+        cls,
+        devices: int | list[int]
+    ) -> list[torch.device]: ...
 
-    def __repr__(self) -> str:
-        # Compact identity line for logs and interactive debugging.
-        return f"{type(self).__name__}()"
+    # Default usable device count for automatic selection.
+    @classmethod
+    def auto_device_count(cls) -> int: ...
+
+    # Whether the current torch build and host expose a usable backend.
+    @classmethod
+    def is_available(cls) -> bool: ...
+
+    # Canonical lower-case configuration name.
+    @classmethod
+    def name(cls) -> str: ...
