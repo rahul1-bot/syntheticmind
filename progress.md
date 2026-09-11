@@ -1,3 +1,10 @@
+| Progress Complete | Promotion of dev to main | Date: 11 September 2026 | Time: 10:08 PM | Name: Lyra |
+
+    1. ✅ Rahul issued the explicit stabilization decision required by the repository policy and authorized promotion of the completed private core Trainer reconstruction from `dev` to `main`.
+    2. ✅ Pre-promotion state was verified: local `dev` and `origin/dev` shared commit `118cb3c`, local `main` and `origin/main` shared commit `d5c6a70`, `main` was a strict ancestor of `dev` with 145 commits and 182 changed files pending, and no commit existed on `main` outside `dev`, so no conflict was possible.
+    3. ✅ Pre-promotion evidence: every production module compiled through `compileall`, the package root imported `Trainer` and `Module` from the parent directory, and the working tree was clean; no linter or static type checker was invoked.
+    4. ✅ Promotion used a non-fast-forward merge so the stabilization decision is an explicit commit in `main` chronology, after which `main` was pushed to `origin/main`; `dev` remains the active implementation branch.
+
 | Progress Complete | Lane One Verification Infrastructure | Date: 08 September 2026 | Time: 09:53 PM | Name: Ghost |
 
     1. ✅ `tests/` is committed with a README, import and environment conftest, shared support model, and seven test modules covering optimization, checkpointing, lifecycle, console, progress presentation, and spawned data parallelism; the suite passes on CPU under Python 3.14.2.
@@ -19,7 +26,7 @@
 
 | Progress Complete | Repository and Governing Contracts | Date: 05 September 2026 | Time: 07:25 PM | Name: Ghost |
 
-    1. ✅ The defined private core Trainer reconstruction is complete on active `dev`, every accepted phase is committed and synchronized to `origin/dev`, and stable `main` remains unchanged pending a separate promotion decision.
+    1. ✅ The defined private core Trainer reconstruction is complete on active `dev`, every accepted phase is committed and synchronized to `origin/dev`, and stable `main` received this baseline through the 11 September 2026 promotion recorded above.
     2. ✅ The controlling PyTorch Lightning comparison is the ignored `external/` checkout at revision `21ac84116633b8c629da03c41e6d6ec2cfb15241` from 01 September 2026.
     3. ✅ The governing Python rules are `/Users/rahulsawhney/Library/CloudStorage/OneDrive-Personal/Documents/StudyDocuments/Rahul/code-guidelines.md`; repository-local historical copies have no authority.
     4. ✅ Public terminology, inheritance, method, parameter, default, state, hook, and lifecycle compatibility are mandatory wherever SyntheticMind implements the same machine-learning concept.
