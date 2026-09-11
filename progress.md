@@ -1,9 +1,35 @@
+| Progress Complete | Merge of Pull Request 4 into dev | Date: 11 September 2026 | Time: 10:25 PM | Name: Lyra |
+
+    1. ✅ Rahul authorized merging `feature/ui-console-presentation` (pull request 4, two commits `1523082` and `1b9fe35`, 27 files, 1967 insertions, 199 deletions) into `dev`. The branch was cut from `dev` at `118cb3c`, and the only `dev` commit outside it was the 10:08 PM promotion ledger record.
+    2. ✅ Review confirmed the skipped-window fix is confined to automatic optimization: `_do_optimizer_step` is invoked only under `module.automatic_optimization`, so the new gradient-window gate cannot withhold `global_step` from manual optimization. Trainer output routing, the model-summary layout change, the explicit setuptools package list, and the compile-plus-pytest workflow were read directly; no linter or static type checker was invoked, consistent with the verification policy.
+    3. ✅ Executable evidence: every module compiled in a detached worktree and the committed suite passed 37 of 37 tests on this Mac under Python 3.14 in under nine seconds; both GitHub `cpu` checks had already succeeded. An initial local run showed two console failures caused solely by an added `-W ignore` flag suppressing the warnings those tests capture; the suite passes as configured.
+    4. ✅ The merge used a non-fast-forward commit and the single conflict, in this ledger's leading entries, was resolved by retaining every entry. `dev` was pushed to `origin/dev`; stable `main` now trails `dev` by this merge and awaits a separate promotion decision.
+
 | Progress Complete | Promotion of dev to main | Date: 11 September 2026 | Time: 10:08 PM | Name: Lyra |
 
     1. ✅ Rahul issued the explicit stabilization decision required by the repository policy and authorized promotion of the completed private core Trainer reconstruction from `dev` to `main`.
     2. ✅ Pre-promotion state was verified: local `dev` and `origin/dev` shared commit `118cb3c`, local `main` and `origin/main` shared commit `d5c6a70`, `main` was a strict ancestor of `dev` with 145 commits and 182 changed files pending, and no commit existed on `main` outside `dev`, so no conflict was possible.
     3. ✅ Pre-promotion evidence: every production module compiled through `compileall`, the package root imported `Trainer` and `Module` from the parent directory, and the working tree was clean; no linter or static type checker was invoked.
     4. ✅ Promotion used a non-fast-forward merge so the stabilization decision is an explicit commit in `main` chronology, after which `main` was pushed to `origin/main`; `dev` remains the active implementation branch.
+
+| Progress Complete | Lane One Verification Infrastructure | Date: 08 September 2026 | Time: 09:53 PM | Name: Ghost |
+
+    1. ✅ `tests/` is committed with a README, import and environment conftest, shared support model, and seven test modules covering optimization, checkpointing, lifecycle, console, progress presentation, and spawned data parallelism; the suite passes on CPU under Python 3.14.2.
+    2. ✅ The skipped-window phantom optimizer step is fixed in `loops/optimization/automatic.py` and `loops/training_epoch_loop.py`, with tests proving `global_step` and step schedulers hold when every microbatch of a window returns None and advance when a window retains gradients.
+    3. ✅ Step-ceiling and asynchronous-checkpoint contracts are pinned as regression tests after verification showed the assessment overstated both; no behavior changed for either.
+    4. ✅ `pyproject.toml` defines the installable package, dependencies, optional extras, and pytest configuration; editable installation and wheel construction pass from a clean environment.
+    5. ✅ `.github/workflows/tests.yml` compiles every module and runs the suite on every push and pull request without any linter or static type checker.
+    6. ✅ README, `docs/README.md`, `loops/README.md`, and the ledgers describe the suite, packaging, workflow, and the corrected skip semantics; the work entered `dev` through the 11 September 2026 merge recorded above.
+
+| Progress Complete | Console Presentation Layer | Date: 08 September 2026 | Time: 09:21 PM | Name: Ghost |
+
+    1. ✅ Loguru records and Python warnings are captured by ConsoleRenderer for the duration of a rendered stage and restored at teardown and failure, so diagnostics no longer splice into the live line; the pre-change splice was reproduced and the post-change ordering verified on a pseudo-terminal.
+    2. ✅ Redirected output receives a throttled permanent progress heartbeat, disabled with `redirected_interval=None`, in addition to epoch and stage records.
+    3. ✅ The live line shows a styled glyph bar, percentage, epoch ETA, throughput, up to `max_metrics` on-step metrics, and the representative learning rate; unknown horizons show counts and throughput only.
+    4. ✅ Each stage begins with a header of accelerator, devices, nodes, world size, Strategy, precision, seed, epoch and step ceilings, accumulation, resume checkpoint, and logger directory drawn from rank-local Trainer views.
+    5. ✅ Epoch records use epoch-reduced training names, validation metrics, duration, and a measured remaining-fit estimate; failure and interruption records carry epoch, global step, and active batch.
+    6. ✅ Trainer evaluation results, the barebones marker, and `Trainer.print` share the progress callback's renderer; verbose results render as an aligned block; the plain model summary rule and aggregate layout are corrected.
+    7. ✅ Fit, validate, test, failure, interruption, iterable, `NO_COLOR`, narrow-terminal, disabled-progress, heartbeat, invalid-configuration, pickling, and two-process spawn probes pass; the package compiles under Python 3.14.2; source comments, package READMEs, the configuration guide, and ledgers describe the current behavior. The work entered `dev` through the 11 September 2026 merge recorded above.
 
 | Progress Complete | Repository and Governing Contracts | Date: 05 September 2026 | Time: 07:25 PM | Name: Ghost |
 

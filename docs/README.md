@@ -32,3 +32,5 @@ explain one concept family, and this directory explains cross-package behavior.
 Historical decisions and verified completion state remain indexed by `GHOST.md`,
 `LYRA.md`, `memory.md`, and `progress.md`. Those ledgers are not substitutes for
 current client or architecture documentation.
+
+The committed regression suite and its conventions are described in [`../tests/README.md`](../tests/README.md).

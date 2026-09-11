@@ -117,7 +117,9 @@ class ModelSummary(Callback):
         columns: SummaryData
     ) -> str:
         # Produces an aligned table plus aggregate parameter, memory, mode, and
-        # FLOP totals from canonical report columns.
+        # FLOP totals from canonical report columns. Rules match the exact header
+        # width, and aggregate labels lead their right-aligned values so the
+        # plain block reads like the Rich grid.
         if not columns:
             raise ValueError("At least one summary column is required.")
         row_count: int = len(columns[0][1])
@@ -132,7 +134,7 @@ class ModelSummary(Callback):
             f"{name:<{width}}"
             for (name, _), width in zip(columns, column_widths, strict=True)
         )
-        total_width: int = sum(column_widths) + 3 * (len(columns) + 1)
+        total_width: int = len(header)
         lines: list[str] = [header, "─" * total_width]
         row_index: int
         for row_index in range(row_count):
@@ -157,17 +159,21 @@ class ModelSummary(Callback):
         )
         formatted_size: str = _ModelSummaryReport.formatted_model_size(model_size)
         flop_count: str = _ModelSummaryReport.human_readable_count(total_flops)
+        totals: list[tuple[str, str]] = [
+            ("Trainable params", trainable_count),
+            ("Non-trainable params", non_trainable_count),
+            ("Total params", total_count),
+            ("Estimated model params size (MB)", formatted_size),
+            ("Modules in train mode", str(total_training_modes["train"])),
+            ("Modules in eval mode", str(total_training_modes["eval"])),
+            ("Total FLOPs", flop_count)
+        ]
+        label_width: int = max(len(label) for label, _ in totals)
+        value_width: int = max(len(value) for _, value in totals)
+        lines.append("─" * total_width)
         lines.extend(
-            [
-                "─" * total_width,
-                f"{trainable_count:<10}Trainable params",
-                f"{non_trainable_count:<10}Non-trainable params",
-                f"{total_count:<10}Total params",
-                f"{formatted_size:<10}Total estimated model params size (MB)",
-                f"{total_training_modes['train']:<10}Modules in train mode",
-                f"{total_training_modes['eval']:<10}Modules in eval mode",
-                f"{flop_count:<10}Total FLOPs"
-            ]
+            f"{label:<{label_width}}  {value:>{value_width}}"
+            for label, value in totals
         )
         return "\n".join(lines)
 

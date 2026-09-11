@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syntheticmind"
+version = "0.1.0"
+description = "A private PyTorch research training framework."
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{ name = "Rahul Sawhney" }]
+dependencies = [
+    "torch>=2.9",
+    "numpy>=2.0",
+    "pydantic>=2.11",
+    "fsspec>=2025.3",
+    "PyYAML>=6.0",
+    "loguru>=0.7",
+    "torchmetrics>=1.7"
+]
+
+[project.optional-dependencies]
+rich = ["rich>=13"]
+tensorboard = ["tensorboard>=2.18"]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+package-dir = { "syntheticmind" = "." }
+packages = [
+    "syntheticmind",
+    "syntheticmind.accelerators",
+    "syntheticmind.callbacks",
+    "syntheticmind.callbacks.checkpointing",
+    "syntheticmind.callbacks.model_summary",
+    "syntheticmind.core",
+    "syntheticmind.data",
+    "syntheticmind.loggers",
+    "syntheticmind.loops",
+    "syntheticmind.loops.optimization",
+    "syntheticmind.plugins",
+    "syntheticmind.plugins.precision",
+    "syntheticmind.primitives",
+    "syntheticmind.profilers",
+    "syntheticmind.profilers.pytorch",
+    "syntheticmind.rng",
+    "syntheticmind.storage",
+    "syntheticmind.strategies",
+    "syntheticmind.strategies.launchers",
+    "syntheticmind.strategies.model_parallel_checkpointing",
+    "syntheticmind.trainer",
+    "syntheticmind.trainer.connectors",
+    "syntheticmind.trainer.connectors.logger_connector"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -p no:cacheprovider"
+markers = ["distributed: launches more than one process"]

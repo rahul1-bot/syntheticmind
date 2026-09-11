@@ -841,8 +841,11 @@ class TrainingEpochLoop(Loop):
         closure: OptimizerClosure | None = None
     ) -> None:
         # Resolves the matching SyntheticOptimizer, selects automatic context,
-        # dispatches Module.optimizer_step, advances global progress, and steps
-        # standard step schedulers.
+        # dispatches Module.optimizer_step, then advances global progress and
+        # steps standard step schedulers only when the accumulation window
+        # produced gradients. A window whose every training_step returned None
+        # leaves the native step without gradients, so it is not optimizer
+        # progress and must not move global_step or schedulers.
         synthetic_optimizer: SyntheticOptimizer = next(
             wrapped_optimizer
             for wrapped_optimizer in trainer._synthetic_optimizers
@@ -858,6 +861,8 @@ class TrainingEpochLoop(Loop):
                 synthetic_optimizer,
                 closure
             )
+        if not self.automatic_optimization.window_has_gradients:
+            return
         self._increment_global_step(state, module)
         self.update_lr_schedulers(
             trainer,

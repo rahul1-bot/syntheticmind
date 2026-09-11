@@ -39,7 +39,7 @@ Reaching `max_steps` inside the loader pauses this lifecycle. The epoch index, m
 
 Automatic optimization normalizes training-step output, divides loss by the accumulation factor, zeros at the start of each accumulation window, executes precision-aware backward, suppresses DDP synchronization on non-boundary microbatches, clips unscaled gradients, and steps the managed optimizer. `global_step` advances only after a real managed optimizer mutation.
 
-If natural loader exhaustion leaves an incomplete accumulation window, Strategy synchronizes the tail gradients and the loop performs one final step. Distributed training rejects `training_step=None` because ranks could diverge in collective order.
+If natural loader exhaustion leaves an incomplete accumulation window, Strategy synchronizes the tail gradients and the loop performs one final step. A `training_step` that returns None skips its batch; when every microbatch of an accumulation window is skipped, the boundary produces no gradients and the loop advances neither `global_step` nor step-interval schedulers. Distributed training rejects `training_step=None` because ranks could diverge in collective order.
 
 ## Manual optimization
 

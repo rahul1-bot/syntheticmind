@@ -1,3 +1,22 @@
+| Memory | Evidence Before Diagnosis | Date: 08 September 2026 | Time: 09:53 PM | Name: Ghost |
+
+    1. A survey finding with a file and line reference is a hypothesis, not a defect. Two of three high-severity findings in the harness assessment dissolved when the exact control flow was read: the stop check ordering ruled out a ceiling overshoot, and the transport's join-before-remove ordering ruled out artifact loss.
+    2. The correct response to a disproved finding is a regression test that pins the contract that disproved it, because the contract is now known to matter and nothing else guards it.
+    3. A regression test for a fix is written first and shown failing on the previous code; a test that only ever passed proves nothing about the defect.
+    4. A test that constructs models before the Trainer seeds compares different initial weights; exact-continuation evidence requires seeding the construction of every compared model explicitly.
+    5. Spawned workers inherit the process file descriptors, not the parent's replaced `sys.stderr` object, so distributed presentation assertions must capture at the descriptor level.
+    6. Mapping a repository root onto a package name with an explicit setuptools package list keeps the root-is-the-package layout installable and keeps tests and documentation out of the wheel.
+
+| Memory | Terminal Coordination and Presentation Density | Date: 08 September 2026 | Time: 09:21 PM | Name: Ghost |
+
+    1. A live carriage-return line is a shared-stream invariant, not a private detail of the renderer. Every writer on the same stream, including third-party logging handlers and the Python warning hook, must clear that line first, so the renderer must own their capture for the rendered interval rather than trusting each call site.
+    2. Replacing a library's default handler is safe only when it is still the pre-installed one; removing client-configured sinks would destroy client observability, so duplication under a client-configured stderr sink is the accepted cost.
+    3. Epoch-reduced metric names cannot be recovered from the float progress view after the Module buffer drains; the observing hook must record them while the observations exist.
+    4. Scheduled validation and epoch metric reduction complete before `on_train_epoch_end`, so an epoch record needs no deferral to the next epoch; deferral only delayed the record without changing its content.
+    5. Fixed-width metric formatting and a spinner advanced per written frame remove visible jitter and strobing that variable-width formatting and per-batch advancement produce at high batch rates.
+    6. Live lines must truncate to one terminal row while preserving style sequences and ending with a reset; permanent records must never truncate because the terminal wraps them and truncation discards information.
+    7. A redirected stream needs a time-throttled heartbeat rather than forced boundary writes, because forced writes at epoch start and end duplicate the epoch record while a two-hour epoch still shows nothing in between.
+
 | Memory | Public Machine-Learning Compatibility | Date: 05 September 2026 | Time: 07:25 PM | Name: Ghost |
 
     1. Public compatibility is semantic rather than cosmetic. Method names, parameter names and order, defaults, accepted values, return meanings, hook timing, state counters, and failure behavior jointly define the contract users inherit.

@@ -30,13 +30,14 @@
     4. ✅ Metric logging, reduction, inspection, TorchMetrics, graph state, monitoring, progress, result, logger, and multiprocessing boundaries are coherent.
     5. ✅ Model callback configuration, logger access, rank-safe printing, nested gathering, and class checkpoint reconstruction now extend the standard model inheritance surface.
 
-| Strategic Note | Console Experience Boundary | Date: 04 September 2026 | Time: 05:23 PM | Name: Ghost |
+| Strategic Note | Console Experience Boundary | Date: 08 September 2026 | Time: 09:21 PM | Name: Ghost |
 
-    1. The terminal remains a minimal subscriber rather than a telemetry warehouse; one callback owns stage presentation and ConsoleRenderer owns terminal mechanics plus metric ordering through bound behavior rather than a lambda.
-    2. One active interactive line, one completed-epoch line, and one final stage line expose stage, progress, at most two selected metrics, and honest estimated time when available.
-    3. Independent stage timing, sanity exclusion, training pauses around validation, stage-isolated metrics, and truthful unknown horizons prevent polished misinformation.
-    4. Redirected and non-interactive execution remains stable plain text, distributed rendering remains rank-zero-owned, and enable or disable transitions clear live output without corrupting stage state.
-    5. Detailed device, throughput, dataloader, optimizer, profiler, and metric telemetry belongs in structured programmatic and logger outputs.
+    1. The terminal remains a subscriber rather than a telemetry warehouse; one callback owns stage presentation and ConsoleRenderer owns terminal mechanics, styling, metric ordering, and diagnostics capture through bound behavior rather than a lambda.
+    2. One run header, one active interactive line, one completed-epoch line, and one final stage line expose execution topology, progress, a bounded metric set with a configurable ceiling, throughput, the representative learning rate, and honest estimated time when available.
+    3. Independent stage timing, sanity exclusion, training pauses around validation, stage-isolated metrics, and truthful unknown horizons prevent polished misinformation; a remaining-fit estimate is derived only from measured epoch durations under a finite epoch ceiling.
+    4. Redirected and non-interactive execution remains stable plain text with a throttled progress heartbeat, distributed rendering remains rank-zero-owned, and enable or disable transitions clear live output without corrupting stage state.
+    5. Loguru records and Python warnings emitted during a stage reach the terminal through the renderer so they never splice into the live line, and the previous handlers are restored at teardown or failure.
+    6. Detailed device, dataloader, optimizer, profiler, and complete metric telemetry belongs in structured programmatic and logger outputs.
 
 | Strategic Note | Checkpoint Reconstruction Contract | Date: 19 August 2026 | Time: 11:29 PM | Name: Ghost |
 
